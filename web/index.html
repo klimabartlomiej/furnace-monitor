@@ -440,6 +440,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  9: 'Szybsze otwieranie: aplikacja od razu pokazuje ostatnie dane, a strona nie jest pobierana za każdym razem od nowa.',
   8: 'Zaniki prądu: w dzienniku, w karcie „Co się działo”, jako pasy na wykresach i na wykresie z 30 dni. Alarm trwający podczas zaniku prądu lub aktualizacji nie wysyła ponownego powiadomienia. Węgiel: przycisk „Dosypałem” (także z godziną wstecz), zużycie i koszty, stan zasobnika, ostrzeżenie „Mało węgla”, wykres zużycia z mrozem i sezonem. Podsumowanie ostatnich 7 dni. Czujnik „Ciepła woda gotowa” w aplikacji Dom. Tryb lato, ostrzeżenie „Piec stoi po zaniku prądu”, prognoza zużycia na jutro i przypomnienie o popielniku.',
 };
 // Journal events that start a problem, the event that ends it, and the probes to chart for it.
@@ -457,6 +458,23 @@ let now = null, online = true, lastOk = 0, view = null;
 let live = [], series = null, days = [], daysAt = 0, journal = [], journalAt = 0, refills = [], refillsAt = 0;
 const outdoor = { hourly: [], ahead: [], daily: [], current: null, at: 0, dailyAt: 0, key: '' };
 const ui = Object.assign({ tab: 'home', range: '6h', shown: [FURNACE], overview: 6 }, readUi());
+
+// The last known state: the app opens straight away with it, then fetches only what is new (the ESP is slow to
+// send a whole day). Keyed by the newest release note, so data shaped by older firmware is never read.
+const CACHE_KEY = 'furnace-cache-' + Math.max(...Object.keys(CHANGES));
+function saveCache() {
+  if (!now) return;
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: lastOk || Date.now(), now, live, journal, days, outdoor })); } catch (e) {}
+}
+function loadCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CACHE_KEY));
+    if (!c || !c.now || Date.now() - c.at > 3 * 86400e3) return;
+    ({ now, live = [], journal = [], days = [] } = c);
+    Object.assign(outdoor, c.outdoor);
+    lastOk = c.at;
+  } catch (e) {}
+}
 
 function readUi() { try { return JSON.parse(localStorage.getItem('furnace-ui')) || {}; } catch (e) { return {}; } }
 function saveUi() { try { localStorage.setItem('furnace-ui', JSON.stringify(ui)); } catch (e) {} }
@@ -1807,21 +1825,25 @@ function setup() {
   gestures($('#detail'), true);
   gestures($('#overview'), false);
   document.addEventListener('gesturestart', e => e.preventDefault());
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNow().then(loadLive).then(render); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) saveCache();
+    else refreshNow().then(loadLive).then(render);
+  });
   let rt;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
 }
 
 (async function start() {
   setup();
-  showTab(ui.tab);
+  loadCache();
+  try { showTab(ui.tab); } catch (e) { now = null; live = []; journal = []; days = []; showTab(ui.tab); }   // a broken cache must not block
   await refreshNow();
-  await loadLive();
-  await loadJournal();
+  await Promise.all([loadLive(), loadJournal()]);
   render();
+  saveCache();
   loadOutdoor().then(render);
   setInterval(refreshNow, 15000);
-  setInterval(() => loadLive().then(loadJournal).then(() => { if (ui.tab === 'home') render(); }), 60000);
+  setInterval(() => loadLive().then(loadJournal).then(() => { saveCache(); if (ui.tab === 'home') render(); }), 60000);
   setInterval(() => loadOutdoor().then(() => { if (ui.tab === 'home') render(); }), 20 * 60e3);
 })();
 </script>

@@ -61,7 +61,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 8;                     // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 9;                    // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -1023,9 +1023,16 @@ String jsonNumber(float v, unsigned decimals = 2) {
   return isnan(v) ? String("null") : String(v, decimals);
 }
 
+// The page changes only with the firmware: a phone that already has it asks with its ETag and gets
+// "304 Not Modified" instead of the 34 KB again.
 void handleApp() {
-  server.sendHeader("Content-Encoding", "gzip");
+  server.sendHeader("ETag", WEBAPP_ETAG);
   server.sendHeader("Cache-Control", "no-cache");
+  if (server.header("If-None-Match") == WEBAPP_ETAG) {
+    server.send(304);
+    return;
+  }
+  server.sendHeader("Content-Encoding", "gzip");
   server.send_P(200, "text/html; charset=utf-8", (const char*)WEBAPP_HTML_GZ, WEBAPP_HTML_GZ_LEN);
 }
 
@@ -1118,7 +1125,7 @@ void handleNow() {
 
 // Chunked binary responses: collects small writes into one buffer.
 struct ChunkWriter {
-  uint8_t buf[600];
+  uint8_t buf[1436];    // one full TCP segment per write
   size_t  n = 0;
   void begin(const char* type) {
     server.sendHeader("Cache-Control", "no-store");
@@ -1440,8 +1447,13 @@ void onNetworkUp(int count) {
   Serial.printf("Network up (#%d), IP %s - web app http://%s.local:%u\n",
                 count, WiFi.localIP().toString().c_str(), DEVICE_NAME, WEB_PORT);
   configTzTime(TIME_ZONE, "pool.ntp.org", "time.google.com");   // the histories need real timestamps
+  // Mains-powered: WiFi modem sleep saves nothing here and makes every reply wait for the router's next beacon
+  // (measured: the 34 KB page took 1.5 s, connects up to 1 s).
+  WiFi.setSleep(false);
   updater.networkUp();
   if (webStarted) return;
+  static const char* headers[] = {"If-None-Match"};
+  server.collectHeaders(headers, 1);
   server.on("/", HTTP_GET, handleApp);
   server.on("/icon.png", HTTP_GET, handleIcon);
   server.on("/manifest.webmanifest", HTTP_GET, handleManifest);
