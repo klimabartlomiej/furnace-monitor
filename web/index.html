@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Furnace</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;background:#0b0d10;color:#f2f4f7;margin:24px}</style>
+</head><body><h2>Furnace</h2><p>The new web app is on its way.</p><pre id="d"></pre>
+<script>fetch('/api/now').then(r=>r.json()).then(j=>{document.getElementById('d').textContent=j.sensors.map(s=>s.name+': '+s.temp).join('\n')})</script>
+</body></html>
