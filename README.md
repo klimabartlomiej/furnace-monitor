@@ -7,7 +7,13 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   notifications for a push on the phone.
 - **Eve app graphs**: every sensor keeps an Eve-compatible history on the ESP itself (`EveHistory.h`, protocol as
   reverse-engineered by [fakegato-history](https://github.com/simont77/fakegato-history)).
-- **Web app** `http://furnace.local:8080` (home WiFi only, in Polish): live values, charts up to a year, alarm limits.
+- **Warnings** (each one a contact sensor in Apple Home, tuned in the web app): furnace dying out (falling fast or
+  heading below its min limit), freezing water, embers creeping into the coal hopper.
+- **Web app** `http://furnace.local:8080` (home WiFi only, in Polish): live cards, charts from 6 hours to years
+  with pinch-zoom, alarm limits and warnings, event journal, furnace burning hours, outdoor temperature
+  (Open-Meteo), CSV export, firmware updates.
+- **History**: every minute for 31 days (raw flash partition), daily summaries for 5 years, the journal and 14 days
+  of Eve entries (LittleFS). All rings - nothing ever fills up.
 - **Updates over the internet**: the ESP checks `release/manifest.json` every hour and installs newer firmware,
   with automatic rollback if the new version does not come online.
 
@@ -33,7 +39,8 @@ history) before moving the device to another home. After 5 minutes without WiFi 
 ## Building and releasing
 
 - Arduino IDE / arduino-cli, board **ESP32 Dev Module**, libraries HomeSpan, OneWire 2.3.8+, DallasTemperature.
-  `partitions.csv` here gives 2 x 1.69 MB app slots and 512 KB LittleFS.
+  `partitions.csv` here gives 2 x 1.69 MB app slots, a 352 KB minute ring and a 224 KB LittleFS (changing it
+  needs a USB upload).
 - Web app source: `web/index.html` -> `web/build.ps1` -> `WebApp.h`.
 - Release: bump `FW_VERSION`, run `release/publish.ps1` (builds, writes `release/firmware-vN.bin` and
   `manifest.json`, pushes). On the same network the IDE's network port "furnace" works too (OTA password set with

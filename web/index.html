@@ -23,6 +23,7 @@ html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.35 -apple-
 body{padding:calc(env(safe-area-inset-top) + 6px) 16px calc(env(safe-area-inset-bottom) + 96px);min-height:100vh;overscroll-behavior-y:none;-webkit-user-select:none;user-select:none}
 input{-webkit-user-select:text;user-select:text}
 button{font-family:inherit;color:inherit;cursor:pointer}
+a{color:var(--blue)}
 .num{font-variant-numeric:tabular-nums}
 .view{display:none}
 .view.on{display:block;animation:in .22s ease-out}
@@ -37,13 +38,19 @@ h1{font:700 34px/1.1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.0
 @keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(255,69,58,.25)}50%{box-shadow:0 0 0 7px rgba(255,69,58,.04)}}
 
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
-.card-h{display:flex;justify-content:space-between;align-items:baseline;font-weight:600;font-size:17px;margin-bottom:12px}
+.card-h{display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:17px;margin-bottom:12px;gap:10px}
 .card-h small{color:var(--muted);font-weight:500;font-size:13px}
 
-.banner{display:flex;gap:12px;align-items:center;background:rgba(255,69,58,.12);border:1px solid rgba(255,69,58,.35);color:#ffdcd9;border-radius:18px;padding:12px 14px;margin-bottom:10px;font-size:15px}
-.banner svg{width:22px;height:22px;flex:none;color:var(--red)}
-.tip-card{display:flex;gap:12px;align-items:center;background:rgba(10,132,255,.12);border:1px solid rgba(10,132,255,.3);border-radius:18px;padding:12px 14px;margin-bottom:14px;font-size:14px;color:#cfe5ff}
-.tip-card button{margin-left:auto;background:none;border:0;color:var(--muted);font-size:20px;padding:0 4px}
+.banner{display:flex;gap:12px;align-items:center;border-radius:18px;padding:12px 14px;margin-bottom:10px;font-size:15px}
+.banner svg{width:22px;height:22px;flex:none}
+.banner.red{background:rgba(255,69,58,.12);border:1px solid rgba(255,69,58,.35);color:#ffdcd9}
+.banner.red svg{color:var(--red)}
+.banner.orange{background:rgba(255,159,10,.12);border:1px solid rgba(255,159,10,.38);color:#ffe7c2}
+.banner.orange svg{color:var(--orange)}
+.banner.blue{background:rgba(10,132,255,.12);border:1px solid rgba(10,132,255,.3);color:#cfe5ff;align-items:flex-start}
+.banner.blue svg{color:var(--blue)}
+.banner .x{margin-left:auto;background:none;border:0;color:var(--muted);font-size:22px;line-height:1;padding:0 2px}
+.banner small{display:block;color:inherit;opacity:.8;font-size:13px;margin-top:3px}
 
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
 .sensor{position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 14px 0;overflow:hidden;transition:transform .15s,border-color .3s}
@@ -69,6 +76,7 @@ h1{font:700 34px/1.1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.0
 .ylab,.xlab{fill:var(--faint);font:500 11px -apple-system,system-ui}
 .xlab{text-anchor:middle}
 .ln{fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round}
+.ln.dash{stroke-dasharray:5 4;stroke-width:1.8}
 .limit{stroke:rgba(255,69,58,.6);stroke-dasharray:5 5}
 .limlab{fill:rgba(255,130,120,.95);font:600 10px -apple-system,system-ui}
 .cur{stroke:rgba(255,255,255,.4);stroke-width:1}
@@ -76,7 +84,7 @@ h1{font:700 34px/1.1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.0
 .tip .tt{color:var(--muted);font-size:12px;margin-bottom:3px}
 .tip i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 .tip .mm{color:var(--muted);font-size:12px}
-.empty{height:100%;display:grid;place-items:center;color:var(--faint);font-size:14px;text-align:center;padding:0 20px}
+.empty{height:100%;min-height:80px;display:grid;place-items:center;color:var(--faint);font-size:14px;text-align:center;padding:0 20px}
 .hint{color:var(--faint);font-size:12px;text-align:center;margin-top:10px}
 
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:-2px 0 10px;font-size:13px;color:var(--muted)}
@@ -86,10 +94,13 @@ h1{font:700 34px/1.1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.0
 .rows .row:first-child{border-top:0;padding-top:2px}
 .rows .k{font-size:15px}
 .rows .s{color:var(--faint);font-size:12px;margin-top:2px}
-.rows .v{font-weight:600;font-size:17px;text-align:right}
+.rows .v{font-weight:600;font-size:17px;text-align:right;white-space:nowrap}
+.v.good{color:var(--green)}.v.cold{color:#7cc4ff}
 
 .seg{display:flex;background:var(--card2);border-radius:12px;padding:3px;gap:2px;margin-bottom:12px}
-.seg button{flex:1;border:0;background:none;color:var(--muted);font-weight:600;font-size:14px;padding:8px 0;border-radius:9px;transition:background .2s,color .2s}
+.seg.small{margin:0;padding:2px;border-radius:10px}
+.seg button{flex:1;border:0;background:none;color:var(--muted);font-weight:600;font-size:14px;padding:8px 0;border-radius:9px;transition:background .2s,color .2s;white-space:nowrap}
+.seg.small button{font-size:12px;padding:5px 9px;border-radius:8px}
 .seg button.on{background:#3a3f4b;color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.35)}
 .chips{display:flex;gap:8px;overflow-x:auto;margin:0 -16px 12px;padding:0 16px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
@@ -105,23 +116,58 @@ h1{font:700 34px/1.1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.0
 .stats div{padding:4px 0}
 .stats b{display:block;font-size:19px;font-weight:600}
 .stats span{color:var(--faint);font-size:12px;font-weight:600;letter-spacing:.04em}
+.bars{display:flex;align-items:flex-end;gap:3px;height:120px;margin-top:4px}
+.bars button{flex:1;border:0;padding:0;background:rgba(255,107,61,.55);border-radius:4px 4px 1px 1px;min-height:2px;transition:background .2s}
+.bars button.today{background:rgba(255,107,61,.3);outline:1px dashed rgba(255,107,61,.8)}
+.bars button.sel{background:#ff6b3d}
+.bars-x{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;margin-top:6px}
+.caption{color:var(--muted);font-size:13px;margin-top:8px;min-height:18px}
+
+.journal .day{color:var(--faint);font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin:16px 4px 8px}
+.journal .day:first-child{margin-top:0}
+.ev{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:11px 13px;margin-bottom:8px}
+.ev .badge{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;flex:none}
+.ev .badge svg{width:17px;height:17px}
+.ev .t{font-size:15px}
+.ev .s{color:var(--faint);font-size:12px;margin-top:1px}
+.ev .h{margin-left:auto;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.c-red{background:rgba(255,69,58,.16);color:var(--red)}
+.c-orange{background:rgba(255,159,10,.16);color:var(--orange)}
+.c-green{background:rgba(48,209,88,.16);color:var(--green)}
+.c-blue{background:rgba(10,132,255,.16);color:var(--blue)}
+.c-gray{background:rgba(142,142,147,.16);color:#a3a8b3}
 
 .lim{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
 .lim:first-of-type{border-top:0;padding-top:2px}
 .lim label{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px}
 .lim .cd{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}
 .lim .f{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;font-weight:700;color:var(--faint);letter-spacing:.06em}
-.lim input{width:76px;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:9px 6px;font:600 17px -apple-system,system-ui;text-align:center;outline:none}
-.lim input:focus{border-color:var(--blue)}
+.lim input,.wrow input[type=text]{width:76px;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:9px 6px;font:600 17px -apple-system,system-ui;text-align:center;outline:none}
+.lim input:focus,.wrow input[type=text]:focus{border-color:var(--blue)}
 .lim input::placeholder{color:var(--faint);font-weight:500}
+.warn-block{padding:14px 0;border-top:1px solid var(--line)}
+.warn-block:first-of-type{border-top:0;padding-top:2px}
+.warn-head{display:flex;align-items:center;gap:10px;font-weight:600;font-size:16px}
+.warn-head .badge{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;flex:none}
+.warn-head .badge svg{width:17px;height:17px}
+.warn-head .sw{margin-left:auto}
+.warn-desc{color:var(--faint);font-size:13px;margin:6px 0 0 40px}
+.wrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0 0 40px;font-size:14px;color:var(--muted)}
+.wrow input[type=text]{width:66px;font-size:16px;padding:7px 4px}
+.warn-block.off .wrow{opacity:.4;pointer-events:none}
+.sw{-webkit-appearance:none;appearance:none;width:51px;height:31px;border-radius:16px;background:#39393d;position:relative;cursor:pointer;transition:background .2s;flex:none;margin:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .2s}
+.sw:checked{background:var(--green)}
+.sw:checked::after{transform:translateX(20px)}
 .note{color:var(--faint);font-size:13px;margin:10px 0 0}
 .bar{height:6px;border-radius:3px;background:var(--card2);overflow:hidden;margin-top:6px;width:120px;margin-left:auto}
 .bar i{display:block;height:100%;background:var(--blue);border-radius:3px}
 .wifi{display:inline-flex;gap:2px;align-items:flex-end;height:14px;margin-right:8px;vertical-align:-1px}
 .wifi i{width:4px;border-radius:1px;background:var(--faint)}
 .wifi i.on{background:var(--green)}
-.btn{width:100%;border:0;border-radius:14px;padding:13px;font-weight:600;font-size:16px;background:var(--card2);margin-top:10px}
+.btn{width:100%;border:0;border-radius:14px;padding:13px;font-weight:600;font-size:16px;background:var(--card2);margin-top:10px;display:block;text-align:center;text-decoration:none;color:var(--text)}
 .btn.primary{background:var(--blue);color:#fff}
+.btn.danger{background:rgba(255,69,58,.15);color:var(--red)}
 .btn:disabled{opacity:.5}
 details.card summary{list-style:none;font-weight:600;font-size:17px;display:flex;justify-content:space-between;align-items:center}
 details.card summary::-webkit-details-marker{display:none}
@@ -129,15 +175,28 @@ details.card summary::after{content:"\203A";font-size:22px;color:var(--faint);tr
 details.card[open] summary::after{transform:rotate(90deg)}
 details .inner{margin-top:12px}
 .field{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:11px 12px;font-size:16px;margin-top:10px;outline:none}
+.places button{display:block;width:100%;text-align:left;background:var(--card2);border:0;border-radius:12px;padding:10px 12px;margin-top:6px;font-size:15px}
+.places small{color:var(--faint);display:block;font-size:12px}
 pre{background:var(--card2);border-radius:12px;padding:10px;font-size:11px;color:var(--muted);overflow-x:auto;margin:10px 0 0;white-space:pre}
 .progress{height:6px;border-radius:3px;background:var(--card2);overflow:hidden;margin-top:10px;display:none}
 .progress i{display:block;height:100%;width:0;background:var(--blue);transition:width .2s}
 
-nav.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;padding:7px 10px calc(env(safe-area-inset-bottom) + 4px);background:rgba(16,18,22,.82);-webkit-backdrop-filter:saturate(180%) blur(22px);backdrop-filter:saturate(180%) blur(22px);border-top:1px solid var(--line);z-index:10}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:30;padding:24px;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+.modal.on{display:flex;animation:in .2s ease-out}
+.dialog{background:#24272f;border-radius:20px;max-width:320px;width:100%;text-align:center;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.dialog .body{padding:20px 18px 16px}
+.dialog h3{margin:0 0 8px;font-size:17px}
+.dialog p{margin:0;color:var(--muted);font-size:14px}
+.dialog .acts{display:flex;border-top:1px solid rgba(255,255,255,.1)}
+.dialog .acts button{flex:1;background:none;border:0;padding:14px;font-size:17px;color:var(--blue)}
+.dialog .acts button+button{border-left:1px solid rgba(255,255,255,.1)}
+.dialog .acts .del{color:var(--red);font-weight:600}
+
+nav.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;padding:7px 6px calc(env(safe-area-inset-bottom) + 4px);background:rgba(16,18,22,.82);-webkit-backdrop-filter:saturate(180%) blur(22px);backdrop-filter:saturate(180%) blur(22px);border-top:1px solid var(--line);z-index:10}
 nav.tabs button{flex:1;background:none;border:0;color:var(--faint);font-size:10.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px;padding:3px 0;transition:color .2s}
 nav.tabs svg{width:27px;height:27px}
 nav.tabs button.on{color:var(--text)}
-.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 86px);transform:translate(-50%,16px);opacity:0;background:rgba(52,56,66,.96);padding:11px 18px;border-radius:999px;font-weight:600;font-size:14px;transition:all .25s;z-index:20;pointer-events:none;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 86px);transform:translate(-50%,16px);opacity:0;background:rgba(52,56,66,.96);padding:11px 18px;border-radius:999px;font-weight:600;font-size:14px;transition:all .25s;z-index:40;pointer-events:none;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.4)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .sk{border-radius:var(--r);height:164px;background:linear-gradient(90deg,#15181e 25%,#1d2129 50%,#15181e 75%);background-size:200% 100%;animation:sk 1.3s infinite}
 @keyframes sk{to{background-position:-200% 0}}
@@ -150,11 +209,10 @@ nav.tabs button.on{color:var(--text)}
     <h1>Piec</h1>
     <div class="sub"><span class="dot" id="dot"></span><span id="status">Łączenie…</span><span id="updated" style="margin-left:auto"></span></div>
   </header>
-  <div id="a2hs"></div>
-  <div id="banner"></div>
+  <div id="notices"></div>
   <div class="grid" id="cards"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
   <div class="card">
-    <div class="card-h">Ostatnie 24 godziny<small>dotknij, aby odczytać</small></div>
+    <div class="card-h"><span>Wykres</span><div class="seg small" id="ovRange"><button data-h="6">6 godz.</button><button data-h="24">24 godz.</button></div></div>
     <div class="legend" id="legend"></div>
     <div class="chart" id="overview"></div>
   </div>
@@ -168,7 +226,7 @@ nav.tabs button.on{color:var(--text)}
   <header class="top"><h1>Wykresy</h1></header>
   <div class="chips" id="chips"></div>
   <div class="seg" id="ranges">
-    <button data-r="24h">24 godz.</button><button data-r="7d">7 dni</button><button data-r="30d">30 dni</button><button data-r="1y">Rok</button>
+    <button data-r="6h">6 godz.</button><button data-r="24h">24 godz.</button><button data-r="7d">7 dni</button><button data-r="30d">30 dni</button><button data-r="1y">Rok</button>
   </div>
   <div class="card">
     <div class="big-now"><span class="v num" id="dnow">–</span><span class="l" id="dname"></span><button class="zoom" id="zoomreset">Pełny widok</button></div>
@@ -176,6 +234,16 @@ nav.tabs button.on{color:var(--text)}
     <div class="hint">Przesuń palcem, aby odczytać · rozsuń dwoma palcami, aby powiększyć · stuknij dwa razy, aby wrócić</div>
   </div>
   <div class="card stats" id="rstats"></div>
+  <div class="card">
+    <div class="card-h">Praca pieca<small>godziny dziennie, 30 dni</small></div>
+    <div id="burn"></div>
+  </div>
+  <a class="btn" id="csv" download>Eksportuj widoczny zakres do CSV</a>
+</section>
+
+<section class="view journal" id="v-journal">
+  <header class="top"><h1>Dziennik</h1><div class="sub">Alarmy, ostrzeżenia i zdarzenia urządzenia</div></header>
+  <div id="events"></div>
 </section>
 
 <section class="view" id="v-settings">
@@ -184,6 +252,17 @@ nav.tabs button.on{color:var(--text)}
     <div class="card-h">Progi alarmów</div>
     <div id="limits"></div>
     <p class="note">Przekroczenie progu otwiera czujnik „Alarm …” w aplikacji Dom i wysyła powiadomienie na telefon. Puste pole wyłącza dany alarm.</p>
+  </div>
+  <div class="card">
+    <div class="card-h">Ostrzeżenia</div>
+    <div id="warnset"></div>
+    <p class="note">Każde ostrzeżenie to osobny czujnik w aplikacji Dom – włącz dla niego powiadomienia.</p>
+  </div>
+  <div class="card">
+    <div class="card-h">Temperatura na zewnątrz</div>
+    <div class="rows" id="place"></div>
+    <input class="field" type="text" id="placeq" placeholder="Wpisz miejscowość…" autocomplete="off">
+    <div class="places" id="places"></div>
   </div>
   <div class="card">
     <div class="card-h">Urządzenie</div>
@@ -205,13 +284,22 @@ nav.tabs button.on{color:var(--text)}
     <summary>Czujniki na magistrali</summary>
     <div class="inner"><button class="btn" id="scan">Skanuj</button><pre id="bus">–</pre></div>
   </details>
+  <details class="card">
+    <summary>Zaawansowane</summary>
+    <div class="inner">
+      <p class="note" style="margin-top:0">Usuwa wszystkie pomiary, podsumowania dobowe, historię dla Eve i dziennik. Progi i ustawienia zostają.</p>
+      <button class="btn danger" id="clearhist">Usuń całą historię…</button>
+    </div>
+  </details>
 </section>
 
 <nav class="tabs">
   <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.9 3.2 4.9 5.6 4.9 10.1a4.9 4.9 0 0 1-9.8 0c0-2.2 1-3.7 2-4.6.1 1.7 1 2.8 2 3C10.6 8.9 11.6 5.8 12 3z"/></svg>Przegląd</button>
   <button data-tab="charts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M4 16l5-6 4 3 7-8"/></svg>Wykresy</button>
+  <button data-tab="journal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h11a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M8 8h6M8 12h6M8 16h4"/></svg>Dziennik</button>
   <button data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Ustawienia</button>
 </nav>
+<div class="modal" id="modal"><div class="dialog"><div class="body"><h3 id="mtitle"></h3><p id="mtext"></p></div><div class="acts"><button id="mno">Anuluj</button><button class="del" id="myes">Usuń</button></div></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -222,24 +310,46 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 // Probe order is fixed by SENSORS in the firmware: furnace, return water, coal hopper, boiler.
 const FURNACE = 0, RETURN = 1, COAL = 2, BOILER = 3;
 const COLORS = ['#ff6b3d', '#4aa8ff', '#ffb340', '#34d1bf'];
+const OUT = 'out', OUT_COLOR = '#9a9fab';                     // outdoor temperature series
 const ICONS = [
   '<path d="M12 3c.9 3.2 4.9 5.6 4.9 10.1a4.9 4.9 0 0 1-9.8 0c0-2.2 1-3.7 2-4.6.1 1.7 1 2.8 2 3C10.6 8.9 11.6 5.8 12 3z"/>',
   '<path d="M9 14 4.5 9.5 9 5"/><path d="M4.5 9.5H15a4.5 4.5 0 0 1 0 9h-2.5"/>',
   '<path d="M4 9h16l-2.2 10.5H6.2z"/><path d="M8 9l1.6-4.5h4.8L16 9"/>',
   '<path d="M12 3.5c3 4 6 7 6 10.5a6 6 0 0 1-12 0c0-3.5 3-6.5 6-10.5z"/>',
 ];
-const WARN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17.5v.01"/></svg>';
-const RANGES = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
-const MIN_SPAN = 3600, MAX_SPAN = 2 * 365 * 86400;
+const SVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const I_WARN = '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17.5v.01"/>';
+const I_OK = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';
+const I_INFO = '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>';
+const I_UP = '<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>';
+const I_DOWN = '<path d="M12 5v14M5.5 12.5 12 19l6.5-6.5"/>';
+const I_PROBE = '<path d="M12 3v12"/><circle cx="12" cy="18" r="3"/><path d="M4 4l16 16"/>';
+const I_POWER = '<path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/>';
+const I_SNOW = '<path d="M12 2v20M4 7l16 10M4 17 20 7"/>';
+const I_FLAME = ICONS[0];
+const WARNINGS = [
+  { name: 'Piec wygasa', icon: I_FLAME },
+  { name: 'Ryzyko zamarznięcia', icon: I_SNOW },
+  { name: 'Cofanie żaru', icon: '<path d="M12 21V9M6.5 14.5 12 9l5.5 5.5"/><path d="M5 4h14"/>' },
+];
+// Release notes shown once after the device updated itself (the web app ships inside the firmware).
+const CHANGES = {
+  5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
+};
+const RANGES = { '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
+const STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200];
+const MIN_SPAN = 1800, MAX_SPAN = 2 * 365 * 86400, LIVE_SPAN = 26 * 3600;
 const LOCALE = 'pl-PL';
 
 let now = null, online = true, lastOk = 0, view = null;
-const data = { f: [], h: [], d: [] };            // per resolution, per probe: [t, v] or [t, min, avg, max]
-const loadedAt = { f: 0, h: 0, d: 0 };
-const ui = Object.assign({ tab: 'home', range: '24h', shown: [FURNACE] }, readUi());
+let live = [], series = null, days = [], daysAt = 0, journal = [], journalAt = 0;
+const outdoor = { hourly: [], daily: [], current: null, at: 0, dailyAt: 0, key: '' };
+const ui = Object.assign({ tab: 'home', range: '6h', shown: [FURNACE], overview: 6 }, readUi());
 
 function readUi() { try { return JSON.parse(localStorage.getItem('furnace-ui')) || {}; } catch (e) { return {}; } }
 function saveUi() { try { localStorage.setItem('furnace-ui', JSON.stringify(ui)); } catch (e) {} }
+function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function recall(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 const tNow = () => Math.floor(Date.now() / 1000);
@@ -249,16 +359,30 @@ const nAxis = v => String(+v.toFixed(2)).replace('.', ',');
 const hhmm = t => new Date(t * 1000).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
 const day = t => new Date(t * 1000).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
 const dur = s => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h} godz. ${m} min` : `${m} min`; };
-const step = res => res === 'f' ? (now && now.interval) || 600 : res === 'h' ? 3600 : 86400;
+const midnight = t => { const d = new Date(t * 1000); d.setHours(0, 0, 0, 0); return d / 1000; };
 // 1 alarm, 2 alarmy, 5 alarmów
 const plural = (n, one, few, many) => n === 1 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
+const pickStep = span => span > 31 * 86400 ? 86400 : STEPS.find(s => span / s <= 400) || 43200;
+const colorOf = k => k === OUT ? OUT_COLOR : COLORS[k];
+const nameOf = k => k === OUT ? 'Na zewnątrz' : now.sensors[k].name;
 
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(t.timer);
-  t.timer = setTimeout(() => t.classList.remove('show'), 2400);
+  t.timer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function confirmDialog(title, text) {
+  return new Promise(resolve => {
+    $('#mtitle').textContent = title;
+    $('#mtext').textContent = text;
+    $('#modal').classList.add('on');
+    const done = v => { $('#modal').classList.remove('on'); resolve(v); };
+    $('#myes').onclick = () => done(true);
+    $('#mno').onclick = () => done(false);
+  });
 }
 
 // The firmware reports the update state in English; shown here in Polish.
@@ -289,31 +413,110 @@ async function refreshNow() {
   render();
 }
 
-async function hist(s, res, since) {
-  const b = await (await api(`/api/hist?s=${s}&r=${res}&since=${since}`)).arrayBuffer();
-  const v = new DataView(b), out = [];
-  if (res === 'f') for (let o = 0; o + 6 <= b.byteLength; o += 6) out.push([v.getUint32(o, true), v.getInt16(o + 4, true) / 100]);
-  else for (let o = 0; o + 10 <= b.byteLength; o += 10)
-    out.push([v.getUint32(o, true), v.getInt16(o + 4, true) / 100, v.getInt16(o + 6, true) / 100, v.getInt16(o + 8, true) / 100]);
+// /api/series buckets: uint32 time, then per probe int16 min, avg, max (x100, -32768 = no reading).
+function parseBuckets(buf) {
+  const v = new DataView(buf), n = now.sensors.length, size = 4 + 6 * n, out = [];
+  for (let o = 0; o + size <= buf.byteLength; o += size) {
+    const vals = [];
+    for (let i = 0; i < n; i++) {
+      const p = o + 4 + 6 * i, avg = v.getInt16(p + 2, true);
+      vals.push(avg === -32768 ? null : [v.getInt16(p, true) / 100, avg / 100, v.getInt16(p + 4, true) / 100]);
+    }
+    out.push({ t: v.getUint32(o, true), v: vals });
+  }
   return out;
 }
 
-// Loads (or tops up) one resolution for every probe; cheap to call often.
-async function loadRes(res, force) {
-  if (!now) return;
-  while (data[res].length < now.sensors.length) data[res].push([]);
-  if (!force && Date.now() - loadedAt[res] < (res === 'f' ? 60e3 : 300e3)) return;
-  loadedAt[res] = Date.now();
-  try {
-    await Promise.all(data[res].map(async (arr, i) => {
-      const add = await hist(i, res, arr.length ? arr[arr.length - 1][0] + 1 : 0);
-      for (const p of add) arr.push(p);
-    }));
-  } catch (e) { loadedAt[res] = 0; }
+// /api/daily records: uint32 time, int16 min[n], avg[n], max[n], uint16 burning minutes.
+function parseDays(buf) {
+  const v = new DataView(buf), n = now.sensors.length, size = 4 + 6 * n + 2, out = [];
+  for (let o = 0; o + size <= buf.byteLength; o += size) {
+    const vals = [];
+    for (let i = 0; i < n; i++) {
+      const avg = v.getInt16(o + 4 + 2 * n + 2 * i, true);
+      vals.push(avg === -32768 ? null : [v.getInt16(o + 4 + 2 * i, true) / 100, avg / 100, v.getInt16(o + 4 + 4 * n + 2 * i, true) / 100]);
+    }
+    out.push({ t: v.getUint32(o, true), v: vals, burn: v.getUint16(o + 4 + 6 * n, true) });
+  }
+  return out;
 }
 
-// 10-minute points up to 8 days (the ESP keeps 28), hourly up to 120 days, daily beyond.
-const resFor = span => span <= 8 * 86400 ? 'f' : span <= 120 * 86400 ? 'h' : 'd';
+const seriesUrl = (from, to, step) => `/api/series?from=${Math.floor(from)}&to=${Math.ceil(to)}&step=${step}`;
+
+// The last 26 hours minute by minute, topped up every minute (cards, overview, today).
+async function loadLive() {
+  if (!now) return;
+  const t = tNow(), from = live.length ? live[live.length - 1].t + 60 : t - LIVE_SPAN;
+  try {
+    const add = parseBuckets(await (await api(seriesUrl(from, t, 60))).arrayBuffer());
+    live = live.concat(add);
+    const cut = t - LIVE_SPAN;
+    while (live.length && live[0].t < cut) live.shift();
+  } catch (e) {}
+}
+
+async function loadDays(force) {
+  if (!now || (!force && Date.now() - daysAt < 30 * 60e3)) return;
+  daysAt = Date.now();
+  try { days = parseDays(await (await api(`/api/daily?since=${tNow() - 6 * 366 * 86400}`)).arrayBuffer()); } catch (e) { daysAt = 0; }
+}
+
+async function loadJournal() {
+  if (!now || Date.now() - journalAt < 30e3) return;
+  journalAt = Date.now();
+  try { journal = await (await api(`/api/events?since=${tNow() - 90 * 86400}`)).json(); } catch (e) { journalAt = 0; }
+}
+
+// Outdoor temperature from Open-Meteo (free, no key), fetched by the phone - only when a location is set.
+async function loadOutdoor(withYear) {
+  const s = now && now.settings;
+  if (!s || s.lat === null || s.lon === null) { outdoor.hourly = []; outdoor.current = null; return; }
+  const key = `${s.lat},${s.lon}`;
+  if (outdoor.key !== key) Object.assign(outdoor, { hourly: [], daily: [], current: null, at: 0, dailyAt: 0, key });
+  const base = `latitude=${s.lat}&longitude=${s.lon}&timeformat=unixtime&timezone=auto`;
+  try {
+    if (Date.now() - outdoor.at > 20 * 60e3) {
+      const j = await (await fetch(`https://api.open-meteo.com/v1/forecast?${base}&current=temperature_2m&hourly=temperature_2m&past_days=31&forecast_days=1`)).json();
+      outdoor.hourly = j.hourly.time.map((t, k) => [t, j.hourly.temperature_2m[k]]).filter(p => p[1] !== null && p[0] <= tNow());
+      outdoor.current = j.current ? j.current.temperature_2m : null;
+      outdoor.at = Date.now();
+    }
+    if (withYear && Date.now() - outdoor.dailyAt > 6 * 3600e3) {
+      const d = x => new Date(x * 1000).toISOString().slice(0, 10);
+      const j = await (await fetch(`https://archive-api.open-meteo.com/v1/archive?${base}&start_date=${d(tNow() - 370 * 86400)}&end_date=${d(tNow() - 3 * 86400)}&daily=temperature_2m_min,temperature_2m_mean,temperature_2m_max`)).json();
+      outdoor.daily = j.daily.time.map((t, k) => [t, j.daily.temperature_2m_min[k], j.daily.temperature_2m_mean[k], j.daily.temperature_2m_max[k]]).filter(p => p[2] !== null);
+      outdoor.dailyAt = Date.now();
+    }
+  } catch (e) {}
+}
+
+// Points of probe i: [t, v] at one-minute steps, [t, min, avg, max] for coarser buckets.
+function points(buckets, i, agg) {
+  const out = [];
+  for (const b of buckets) {
+    const x = b.v[i];
+    if (x) out.push(agg ? [b.t, x[0], x[1], x[2]] : [b.t, x[1]]);
+  }
+  return out;
+}
+
+// Merges minute buckets into coarser ones on the phone (overview at 24 hours).
+function rebucket(buckets, step) {
+  const out = [];
+  let cur = null;
+  for (const b of buckets) {
+    const t = Math.floor(b.t / step) * step;
+    if (!cur || cur.t !== t) { cur = { t, v: b.v.map(() => null), n: b.v.map(() => 0) }; out.push(cur); }
+    b.v.forEach((x, i) => {
+      if (!x) return;
+      const c = cur.v[i];
+      if (!c) { cur.v[i] = [x[0], x[1], x[2]]; cur.n[i] = 1; return; }
+      c[0] = Math.min(c[0], x[0]); c[2] = Math.max(c[2], x[2]);
+      c[1] = (c[1] * cur.n[i] + x[1]) / (cur.n[i] + 1); cur.n[i]++;
+    });
+  }
+  return out;
+}
 
 function since(pts, t) {           // index of the first point at or after t
   let lo = 0, hi = pts.length;
@@ -339,16 +542,6 @@ function segments(pts, gap) {
   }
   if (cur.length) out.push(cur);
   return out;
-}
-// Least-squares slope over the last hour, degrees per hour.
-function trend(pts) {
-  if (pts.length < 3) return null;
-  const end = pts[pts.length - 1][0], w = pts.slice(since(pts, end - 3600));
-  if (w.length < 3) return null;
-  let sx = 0, sy = 0, sxx = 0, sxy = 0;
-  for (const [t, v] of w) { const x = (t - end) / 3600; sx += x; sy += v; sxx += x * x; sxy += x * v; }
-  const n = w.length, d = n * sxx - sx * sx;
-  return d ? (n * sxy - sx * sy) / d : null;
 }
 
 // ---------------------------------------------------------------- charts
@@ -382,7 +575,7 @@ function xTicks(t0, t1, width) {
   return out;
 }
 
-// o: {series: [{color, name, agg, pts}], t0, t1, res, limits: [{v, label}], fill, band, empty}
+// o: {series: [{color, name, agg, dash, pts}], t0, t1, step, limits: [{v, label}], fill, band, empty}
 function chart(el, o) {
   const W = el.clientWidth || 320, H = el.clientHeight || 210;
   const L = 4, R = 40, T = 14, B = 24, pw = W - L - R, ph = H - T - B;
@@ -419,17 +612,17 @@ function chart(el, o) {
     plot += `<line class="limit" x1="${L}" x2="${L + pw}" y1="${y}" y2="${y}"/><text class="limlab" x="${L + 6}" y="${y - 5}">${l.label}</text>`;
   }
   o.series.forEach((s, si) => {
-    const id = `${el.id}-g${si}`;
-    if (o.fill) defs += `<linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".34"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`;
-    for (const seg of segments(s.pts, step(o.res))) {
+    const id = `${el.id}-g${si}`, fill = o.fill && !s.dash;
+    if (fill) defs += `<linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".34"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`;
+    for (const seg of segments(s.pts, s.step || o.step)) {
       const line = seg.map((p, k) => (k ? 'L' : 'M') + f1(X(p[0])) + ' ' + f1(Y(s.agg ? p[2] : p[1]))).join('');
-      if (s.agg && o.band) {
+      if (s.agg && o.band && !s.dash) {
         const top = seg.map(p => f1(X(p[0])) + ',' + f1(Y(p[3]))), bottom = seg.map(p => f1(X(p[0])) + ',' + f1(Y(p[1]))).reverse();
         plot += `<polygon points="${top.concat(bottom).join(' ')}" fill="${s.color}" fill-opacity=".17"/>`;
-      } else if (o.fill && seg.length > 1) {
+      } else if (fill && seg.length > 1) {
         plot += `<path d="${line}L${f1(X(seg[seg.length - 1][0]))} ${T + ph}L${f1(X(seg[0][0]))} ${T + ph}Z" fill="url(#${id})"/>`;
       }
-      plot += seg.length > 1 ? `<path class="ln" d="${line}" stroke="${s.color}"/>`
+      plot += seg.length > 1 ? `<path class="ln${s.dash ? ' dash' : ''}" d="${line}" stroke="${s.color}"/>`
         : `<circle cx="${f1(X(seg[0][0]))}" cy="${f1(Y(s.agg ? seg[0][2] : seg[0][1]))}" r="2.5" fill="${s.color}"/>`;
     }
   });
@@ -443,19 +636,19 @@ function scrub(el, clientX) {
   if (!g) return;
   const r = el.getBoundingClientRect();
   const t = g.o.t0 + (clientX - r.left - g.L) / g.pw * (g.o.t1 - g.o.t0);
-  let html = '', dots = '', x = null, when = null;
+  let html = '', dots = '', x = null, when = null, whenStep = g.o.step;
   for (const s of g.o.series) {
-    const p = nearest(s.pts, t);
-    if (!p || Math.abs(p[0] - t) > step(g.o.res) * 2 || p[0] < g.o.t0 || p[0] > g.o.t1) continue;
+    const p = nearest(s.pts, t), st = s.step || g.o.step;
+    if (!p || Math.abs(p[0] - t) > st * 2 || p[0] < g.o.t0 || p[0] > g.o.t1) continue;
     const v = s.agg ? p[2] : p[1], px = g.X(p[0]);
-    if (x === null) { x = px; when = p[0]; }
+    if (x === null) { x = px; when = p[0]; whenStep = st; }
     dots += `<circle cx="${px.toFixed(1)}" cy="${g.Y(v).toFixed(1)}" r="4.5" fill="${s.color}" stroke="#15181e" stroke-width="2"/>`;
     html += `<div><i style="background:${s.color}"></i>${g.o.series.length > 1 ? esc(s.name) + ' ' : ''}<b class="num">${n1(v)}°</b>`
-      + `${s.agg ? ` <span class="mm num">${n1(p[1])}–${n1(p[3])}</span>` : ''}</div>`;
+      + `${s.agg && p[1] !== p[3] ? ` <span class="mm num">${n1(p[1])}–${n1(p[3])}</span>` : ''}</div>`;
   }
   if (x === null) return unscrub(el);
   el.querySelector('.cg').innerHTML = `<line class="cur" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${g.T}" y2="${g.T + g.ph}"/>` + dots;
-  const label = g.o.res === 'd' ? day(when) : g.o.res === 'h' ? `${day(when)}, ${hhmm(when)}–${hhmm(when + 3600)}` : `${day(when)}, ${hhmm(when)}`;
+  const label = whenStep >= 86400 ? day(when) : whenStep > 60 ? `${day(when)}, ${hhmm(when)}–${hhmm(when + whenStep)}` : `${day(when)}, ${hhmm(when)}`;
   const tip = el.querySelector('.tip');
   tip.innerHTML = `<div class="tt">${label}</div>${html}`;
   tip.style.display = 'block';
@@ -533,56 +726,96 @@ function describe(s) {
   return `za zimno: ${n1(s.temp)}° (próg ${n1(s.low)}°)`;
 }
 
+function warningText(w) {
+  const s = now.sensors;
+  if (w === 0) {
+    const f = s[FURNACE];
+    if (now.forecast !== null && f.low !== null) return `za ok. ${now.forecast} min spadnie poniżej ${n1(f.low)}°`;
+    return f.trend !== null ? `temperatura spada ${n1(-f.trend)}° na godzinę` : 'temperatura szybko spada';
+  }
+  if (w === 1) {
+    const cold = s.filter(x => x.water && x.temp !== null).sort((a, b) => a.temp - b.temp)[0];
+    return cold ? `${cold.name}: ${n1(cold.temp)}°` : 'woda bliska zamarznięcia';
+  }
+  const h = s[COAL];
+  return h && h.trend !== null ? `zasobnik grzeje się ${n1(h.trend)}° na godzinę` : 'zasobnik szybko się nagrzewa';
+}
+
+// Release notes after the device updated itself; dismissed with the cross, shown once per version.
+function updateNotice() {
+  const seen = +recall('furnace-fw') || 0;
+  if (!seen) { store('furnace-fw', now.fw); return ''; }
+  if (now.fw <= seen) return '';
+  const notes = Object.keys(CHANGES).filter(v => v > seen && v <= now.fw).map(v => CHANGES[v]).join(' ');
+  return `<div class="banner blue">${SVG(I_INFO)}<div><b>Zaktualizowano do wersji ${now.fw}</b>${notes ? `<small>${esc(notes)}</small>` : ''}</div><button class="x" id="fwseen" aria-label="Zamknij">×</button></div>`;
+}
+
 function renderHome() {
   const alarms = now ? now.sensors.filter(s => s.alarm || s.fault) : [];
-  $('#dot').className = 'dot' + (!online ? ' warn' : alarms.length ? ' bad' : '');
+  const warns = now ? now.warnings.map((on, w) => on ? w : -1).filter(w => w >= 0) : [];
+  const count = alarms.length + warns.length;
+  $('#dot').className = 'dot' + (!online ? ' warn' : alarms.length ? ' bad' : warns.length ? ' warn' : '');
   $('#status').textContent = !online ? 'Brak połączenia – ponawiam' : !now ? 'Łączenie…'
-    : alarms.length ? `${alarms.length} ${plural(alarms.length, 'alarm', 'alarmy', 'alarmów')}` : 'Wszystko w normie';
+    : count ? `${count} ${plural(count, 'alarm', 'alarmy', 'alarmów')}` : 'Wszystko w normie';
   $('#updated').textContent = lastOk ? hhmm(lastOk / 1000) : '';
   if (!now) return;
 
-  $('#banner').innerHTML = alarms.map(s => `<div class="banner">${WARN}<div><b>${esc(s.name)}</b> – ${describe(s)}</div></div>`).join('');
+  let notices = updateNotice();
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if (/iPhone|iPad/.test(navigator.userAgent) && !standalone && recall('furnace-a2hs') !== '1')
+    notices += `<div class="banner blue">${SVG(I_INFO)}<div><b>Wskazówka:</b> stuknij Udostępnij → „Do ekranu początkowego”, a strona otworzy się jak aplikacja.</div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`;
+  notices += warns.map(w => `<div class="banner orange">${SVG(WARNINGS[w].icon)}<div><b>${WARNINGS[w].name}</b> – ${warningText(w)}</div></div>`).join('');
+  notices += alarms.map(s => `<div class="banner red">${SVG(I_WARN)}<div><b>${esc(s.name)}</b> – ${describe(s)}</div></div>`).join('');
+  $('#notices').innerHTML = notices;
+
   const t = tNow();
   $('#cards').innerHTML = now.sensors.map((s, i) => {
-    const c = COLORS[i % COLORS.length], pts = (data.f[i] || []).slice(since(data.f[i] || [], t - 86400));
-    const k = trend(pts), state = s.fault ? 'fault' : s.alarm ? 'alarm' : '';
+    const c = COLORS[i % COLORS.length], pts = points(live, i, false).filter(p => p[0] >= t - 6 * 3600);
+    const k = s.trend, state = s.fault ? 'fault' : s.alarm ? 'alarm' : '';
     const pill = s.fault ? 'BRAK SYGNAŁU' : s.alarm > 0 ? 'ZA GORĄCO' : s.alarm < 0 ? 'ZA ZIMNO' : '';
     const tr = k === null ? '' : Math.abs(k) < .5 ? '→ stabilnie' : `${k > 0 ? '↑' : '↓'} ${n1(Math.abs(k))}°/h`;
     return `<div class="sensor ${state}" data-i="${i}" style="--c:${c};--cb:${rgba(c, .16)}">`
-      + `<div class="hd"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[i] || ICONS[0]}</svg></span><span class="n">${esc(s.name)}</span></div>`
+      + `<div class="hd"><span class="ico">${SVG(ICONS[i] || ICONS[0])}</span><span class="n">${esc(s.name)}</span></div>`
       + `<div class="val num">${s.temp === null ? '–' : n1(s.temp)}<small>°C</small></div>`
       + `<div class="trend num ${k > .5 ? 'up' : k < -.5 ? 'down' : ''}">${pill ? `<span class="pill">${pill}</span>` : ''}${tr}</div>${sparkline(pts, c)}</div>`;
   }).join('');
 
+  $$('#ovRange button').forEach(b => b.classList.toggle('on', +b.dataset.h === ui.overview));
   $('#legend').innerHTML = now.sensors.map((s, i) => `<span><i style="background:${COLORS[i]}"></i>${esc(s.name)}</span>`).join('');
-  const t0 = t - 86400;
+  const span = ui.overview * 3600, t0 = t - span, step = ui.overview > 6 ? 300 : 60;
+  const buckets = step === 60 ? live : rebucket(live, step);
   chart($('#overview'), {
-    series: now.sensors.map((s, i) => ({ color: COLORS[i], name: s.name, pts: windowed(data.f[i] || [], t0, t) })),
-    t0, t1: t, res: 'f', empty: 'Historia zapełni się w ciągu kilku godzin',
+    series: now.sensors.map((s, i) => ({ color: COLORS[i], name: s.name, pts: windowed(points(buckets, i, false), t0, t) })),
+    t0, t1: t, step, empty: 'Historia zapełni się w ciągu kilku minut',
   });
   renderToday();
 }
 
 function renderToday() {
-  const s = now.sensors, mid = new Date();
-  mid.setHours(0, 0, 0, 0);
-  const m = mid / 1000, rows = [];
+  const s = now.sensors, m = midnight(tNow()), rows = [];
+  if (outdoor.current !== null) rows.push(['Na zewnątrz', esc(now.settings.place), `${n1(outdoor.current)}°`, '']);
   if (s[FURNACE] && s[RETURN] && s[FURNACE].temp !== null && s[RETURN].temp !== null)
-    rows.push(['Piec → powrót', 'ciepło oddawane do domu', `${n1(s[FURNACE].temp - s[RETURN].temp)}°`]);
-  const fp = (data.f[FURNACE] || []).slice(since(data.f[FURNACE] || [], m));
-  const thr = s[FURNACE] && s[FURNACE].low !== null ? s[FURNACE].low : 40;
-  let burn = 0;
-  for (let k = 1; k < fp.length; k++)
-    if (fp[k][1] >= thr && fp[k - 1][1] >= thr) burn += Math.min(fp[k][0] - fp[k - 1][0], 3 * step('f'));
-  rows.push(['Piec pracuje', `dziś powyżej ${n1(thr)}°`, dur(burn)]);
+    rows.push(['Piec → powrót', 'ciepło oddawane do domu', `${n1(s[FURNACE].temp - s[RETURN].temp)}°`, '']);
+  rows.push(['Piec pracuje', `dziś powyżej ${n1(burnThreshold())}°`, dur(burnSeconds(m, tNow())), '']);
+  const b = s[BOILER];
+  if (b && b.temp !== null) {
+    const ready = b.temp >= now.settings.hotWater;
+    rows.push(['Ciepła woda', `gotowa od ${n1(now.settings.hotWater)}°`, ready ? `gotowa · ${n1(b.temp)}°` : `za zimna · ${n1(b.temp)}°`, ready ? 'good' : 'cold']);
+  }
   for (const i of [BOILER, COAL]) {
     if (!s[i]) continue;
-    const p = (data.f[i] || []).slice(since(data.f[i] || [], m));
+    const p = points(live, i, false).filter(q => q[0] >= m);
     if (!p.length) continue;
-    const top = p.reduce((a, b) => (b[1] > a[1] ? b : a));
-    rows.push([`${s[i].name} – maksimum`, `dziś o ${hhmm(top[0])}`, `${n1(top[1])}°`]);
+    const top = p.reduce((a, q) => (q[1] > a[1] ? q : a));
+    rows.push([`${s[i].name} – maksimum`, `dziś o ${hhmm(top[0])}`, `${n1(top[1])}°`, '']);
   }
-  $('#today').innerHTML = rows.map(r => `<div class="row"><div><div class="k">${esc(r[0])}</div><div class="s">${esc(r[1])}</div></div><div class="v num">${r[2]}</div></div>`).join('');
+  $('#today').innerHTML = rows.map(r => `<div class="row"><div><div class="k">${esc(r[0])}</div><div class="s">${r[1]}</div></div><div class="v num ${r[3]}">${r[2]}</div></div>`).join('');
+}
+
+const burnThreshold = () => now.sensors[FURNACE] && now.sensors[FURNACE].low !== null ? now.sensors[FURNACE].low : 40;
+function burnSeconds(from, to) {
+  const thr = burnThreshold();
+  return points(live, FURNACE, false).filter(p => p[0] >= from && p[0] < to && p[1] >= thr).length * 60;
 }
 
 // ---------------------------------------------------------------- charts view
@@ -595,7 +828,7 @@ function resetView() {
 function setView(t0, span) {
   const t = tNow() + 300;
   span = clamp(span, MIN_SPAN, MAX_SPAN);
-  t0 = clamp(t0, t - 5 * 365 * 86400, t - span);
+  t0 = clamp(t0, t - 6 * 365 * 86400, t - span);
   view = { t0, t1: t0 + span };
   requestPaint();
 }
@@ -605,59 +838,174 @@ function requestPaint() {
   paintQueued = true;
   requestAnimationFrame(() => { paintQueued = false; paintDetail(); });
 }
+
+// Loads what the view needs at its density; until it arrives, whatever is loaded is drawn.
+let fetching = 0;
 async function fetchForView() {
-  if (!view) resetView();
+  if (!view) return resetView();
   paintDetail();
-  await loadRes(resFor(view.t1 - view.t0));
-  paintDetail();
+  const span = view.t1 - view.t0, step = pickStep(span), ticket = ++fetching;
+  const wantOut = ui.shown.includes(OUT);
+  if (step === 86400) await loadDays();
+  else if (!(step === 60 && view.t0 >= tNow() - LIVE_SPAN + 60)) {
+    const fresh = series && series.step === step && series.from <= view.t0 && series.to >= Math.min(view.t1, tNow() - 90) && Date.now() - series.at < 60e3;
+    if (!fresh) {
+      const from = view.t0 - span / 2, to = Math.min(tNow(), view.t1 + span / 2);
+      try {
+        const b = parseBuckets(await (await api(seriesUrl(from, to, step))).arrayBuffer());
+        if (ticket === fetching) series = { step, from, to, b, at: Date.now() };
+      } catch (e) {}
+    }
+  }
+  if (wantOut) await loadOutdoor(span > 31 * 86400);
+  if (ticket === fetching) paintDetail();
+}
+
+function detailData(i) {
+  const span = view.t1 - view.t0, step = pickStep(span);
+  if (i === OUT) {
+    const pts = span > 31 * 86400 && outdoor.daily.length ? outdoor.daily : outdoor.hourly;
+    return { agg: pts === outdoor.daily, step: pts === outdoor.daily ? 86400 : 3600, pts };
+  }
+  if (step === 86400) return { agg: true, step, pts: days.map(d => d.v[i] ? [d.t, d.v[i][0], d.v[i][1], d.v[i][2]] : null).filter(Boolean) };
+  if (step === 60 && view.t0 >= tNow() - LIVE_SPAN + 60) return { agg: false, step, pts: points(live, i, false) };
+  if (series) return { agg: series.step > 60, step: series.step, pts: points(series.b, i, series.step > 60) };
+  return { agg: false, step: 60, pts: points(live, i, false) };
 }
 
 function paintDetail() {
   if (!now || !view) return;
-  const res = resFor(view.t1 - view.t0), shown = ui.shown.filter(i => i < now.sensors.length);
-  const single = shown.length === 1, s0 = now.sensors[shown[0]];
-  const series = shown.map(i => ({ color: COLORS[i], name: now.sensors[i].name, agg: res !== 'f', pts: windowed((data[res][i] || []), view.t0, view.t1) }));
-  const limits = single ? [s0.high !== null && { v: s0.high, label: `maks. ${n1(s0.high)}°` }, s0.low !== null && { v: s0.low, label: `min. ${n1(s0.low)}°` }].filter(Boolean) : [];
-  chart($('#detail'), { series, t0: view.t0, t1: view.t1, res, limits, fill: single, band: single });
+  const shown = ui.shown.filter(i => i === OUT ? now.settings.lat !== null : i < now.sensors.length);
+  const probes = shown.filter(i => i !== OUT);
+  const single = probes.length === 1 && shown.length === 1, s0 = now.sensors[probes[0]];
+  const lines = shown.map(i => { const d = detailData(i); return { color: colorOf(i), name: nameOf(i), agg: d.agg, step: d.step, dash: i === OUT, pts: windowed(d.pts, view.t0, view.t1) }; });
+  const step = lines.length ? lines[0].step : 60;
+  const limits = single && s0 ? [s0.high !== null && { v: s0.high, label: `maks. ${n1(s0.high)}°` }, s0.low !== null && { v: s0.low, label: `min. ${n1(s0.low)}°` }].filter(Boolean) : [];
+  chart($('#detail'), { series: lines, t0: view.t0, t1: view.t1, step, limits, fill: single, band: single });
 
-  $('#dnow').textContent = single ? (s0.temp === null ? '–' : n1(s0.temp) + '°') : '';
-  $('#dname').textContent = single ? s0.name + ' teraz' : `${shown.length} ${plural(shown.length, 'czujnik', 'czujniki', 'czujników')}`;
+  $('#dnow').textContent = single && s0 ? (s0.temp === null ? '–' : n1(s0.temp) + '°') : '';
+  $('#dname').textContent = single && s0 ? s0.name + ' teraz' : `${shown.length} ${plural(shown.length, 'seria', 'serie', 'serii')}`;
   const zoomed = Math.abs((view.t1 - view.t0) - RANGES[ui.range]) > 60 || view.t1 < tNow() - 600;
   $('#zoomreset').style.display = zoomed ? 'block' : 'none';
   $$('#ranges button').forEach(b => b.classList.toggle('on', b.dataset.r === ui.range && !zoomed));
 
-  const pts = series[0] ? series[0].pts.filter(p => p[0] >= view.t0 && p[0] <= view.t1) : [];
+  const first = lines[0], pts = first ? first.pts.filter(p => p[0] >= view.t0 && p[0] <= view.t1) : [];
   const lo = pts.length ? Math.min(...pts.map(p => p[1])) : null;
-  const hi = pts.length ? Math.max(...pts.map(p => res === 'f' ? p[1] : p[3])) : null;
-  const avg = pts.length ? pts.reduce((a, p) => a + (res === 'f' ? p[1] : p[2]), 0) / pts.length : null;
+  const hi = pts.length ? Math.max(...pts.map(p => first.agg ? p[3] : p[1])) : null;
+  const avg = pts.length ? pts.reduce((a, p) => a + (first.agg ? p[2] : p[1]), 0) / pts.length : null;
   const cell = (k, v) => `<div><span>${k}</span><b class="num">${v === null ? '–' : n1(v) + '°'}</b></div>`;
-  $('#rstats').innerHTML = cell('MIN', lo) + cell('ŚR.', avg) + cell('MAKS', hi) + cell('TERAZ', series[0] && s0 && single ? s0.temp : null);
+  const current = shown[0] === OUT ? outdoor.current : s0 ? s0.temp : null;
+  $('#rstats').innerHTML = cell('MIN', lo) + cell('ŚR.', avg) + cell('MAKS', hi) + cell('TERAZ', current);
+
+  const from = Math.max(view.t0, now.oldest || 0), to = Math.min(view.t1, tNow());
+  $('#csv').href = `/api/csv?from=${Math.floor(from)}&to=${Math.ceil(to)}&step=${Math.min(pickStep(to - from), 3600)}`;
+}
+
+function renderBurn() {
+  const t = tNow(), today = midnight(t), list = [];
+  for (let k = 29; k >= 0; k--) {
+    const d = new Date(today * 1000);
+    d.setDate(d.getDate() - k);
+    const ds = d / 1000, rec = days.find(x => Math.abs(x.t - ds) < 3 * 3600);
+    list.push({ t: ds, min: k === 0 ? burnSeconds(today, t) / 60 : rec ? rec.burn : null, today: k === 0 });
+  }
+  if (!list.some(x => x.min)) { $('#burn').innerHTML = '<div class="empty">Godziny pracy pojawią się po pierwszej pełnej dobie</div>'; return; }
+  const max = Math.max(60, ...list.map(x => x.min || 0));
+  $('#burn').innerHTML = `<div class="bars">${list.map((x, k) => `<button data-k="${k}" class="${x.today ? 'today' : ''}" style="height:${x.min ? Math.max(2, x.min / max * 100) : 0}%"></button>`).join('')}</div>`
+    + `<div class="bars-x"><span>${day(list[0].t)}</span><span>dziś</span></div><div class="caption" id="burncap">Stuknij słupek, aby zobaczyć dzień</div>`;
+  $('#burn .bars').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const x = list[+b.dataset.k];
+    $$('#burn .bars button').forEach(q => q.classList.toggle('sel', q === b));
+    $('#burncap').textContent = `${day(x.t)}: ${x.min === null ? 'brak danych' : dur(x.min * 60)}${x.today ? ' (do teraz)' : ''}`;
+  };
 }
 
 function renderCharts() {
   if (!now) return;
-  $('#chips').innerHTML = now.sensors.map((s, i) => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${COLORS[i]};--cb:${rgba(COLORS[i], .14)}"><i></i>${esc(s.name)}</button>`).join('');
-  if (!view) resetView(); else paintDetail();
+  const keys = now.sensors.map((s, i) => i).concat(now.settings.lat !== null ? [OUT] : []);
+  $('#chips').innerHTML = keys.map(i => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${colorOf(i)};--cb:${rgba(colorOf(i), .14)}"><i></i>${esc(nameOf(i))}</button>`).join('');
+  if (!view) resetView(); else fetchForView();
+  loadDays().then(renderBurn);
+}
+
+// ---------------------------------------------------------------- journal
+
+function eventView(e) {
+  const [t, type, i, raw] = e, v = raw === -32768 ? null : raw / 100;
+  const name = now.sensors[i] ? now.sensors[i].name : '';
+  const temp = v === null ? '' : ` · ${n1(v)}°`;
+  switch (type) {
+    case 1: return ['c-gray', I_POWER, 'Uruchomienie urządzenia', `wersja ${raw}`];
+    case 2: return ['c-blue', I_INFO, `Zaktualizowano do wersji ${raw}`, ''];
+    case 3: return ['c-red', I_UP, `${name}: za gorąco`, `przekroczony próg maks.${temp}`];
+    case 4: return ['c-red', I_DOWN, `${name}: za zimno`, `poniżej progu min.${temp}`];
+    case 5: return ['c-green', I_OK, `${name}: wróciło do normy`, temp.slice(3)];
+    case 6: return ['c-red', I_PROBE, `${name}: czujnik nie odpowiada`, ''];
+    case 7: return ['c-green', I_OK, `${name}: czujnik znów działa`, temp.slice(3)];
+    case 8: return ['c-orange', (WARNINGS[i] || WARNINGS[0]).icon, (WARNINGS[i] || WARNINGS[0]).name, temp.slice(3)];
+    case 9: return ['c-green', I_OK, `${(WARNINGS[i] || WARNINGS[0]).name} – koniec`, temp.slice(3)];
+    case 10: return ['c-gray', I_INFO, 'Historia usunięta', ''];
+    default: return ['c-gray', I_INFO, 'Zdarzenie', ''];
+  }
+}
+
+function renderJournal() {
+  if (!now) return;
+  loadJournal().then(() => {
+    if (!journal.length) { $('#events').innerHTML = '<div class="empty">Nic się jeszcze nie wydarzyło</div>'; return; }
+    let html = '', lastDay = '';
+    for (const e of journal.slice().reverse()) {
+      const d = day(e[0]);
+      if (d !== lastDay) { html += `<div class="day">${d}</div>`; lastDay = d; }
+      const [cls, icon, title, sub] = eventView(e);
+      html += `<div class="ev"><span class="badge ${cls}">${SVG(icon)}</span><div><div class="t">${esc(title)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ''}</div><span class="h">${hhmm(e[0])}</span></div>`;
+    }
+    $('#events').innerHTML = html;
+  });
 }
 
 // ---------------------------------------------------------------- settings
 
-const fmtLimit = v => (v === null ? '' : String(v).replace('.', ','));
+const fmtNum = v => (v === null || v === undefined ? '' : String(v).replace('.', ','));
+const row = (k, v, s) => `<div class="row"><div><div class="k">${k}</div>${s ? `<div class="s">${s}</div>` : ''}</div><div class="v num">${v}</div></div>`;
+const editing = el => el.contains(document.activeElement);
+
+function warnBlock(w, on, desc, fields) {
+  const W = WARNINGS[w], color = ['c-orange', 'c-blue', 'c-red'][w];
+  return `<div class="warn-block ${on ? '' : 'off'}"><div class="warn-head"><span class="badge ${color}">${SVG(W.icon)}</span>${W.name}`
+    + `<input class="sw" type="checkbox" data-k="${['goOutOn', 'freezeOn', 'burnbackOn'][w]}" ${on ? 'checked' : ''}></div>`
+    + `<div class="warn-desc">${desc}</div>${fields.map(f => `<div class="wrow"><span>${f[0]}</span><span><input type="text" inputmode="decimal" data-k="${f[1]}" value="${fmtNum(f[2])}"> ${f[3]}</span></div>`).join('')}</div>`;
+}
+
 function renderSettings() {
   if (!now) return;
-  if (!$('#limits').contains(document.activeElement))
+  const st = now.settings;
+  if (!editing($('#limits')))
     $('#limits').innerHTML = now.sensors.map((s, i) => `<div class="lim" style="--c:${COLORS[i]}"><label><span class="cd"></span>${esc(s.name)}</label>`
-      + `<div class="f">MIN<input type="text" inputmode="decimal" data-i="${i}" data-k="low" value="${fmtLimit(s.low)}" placeholder="wył."></div>`
-      + `<div class="f">MAKS<input type="text" inputmode="decimal" data-i="${i}" data-k="high" value="${fmtLimit(s.high)}" placeholder="wył."></div></div>`).join('');
+      + `<div class="f">MIN<input type="text" inputmode="decimal" data-i="${i}" data-k="low" value="${fmtNum(s.low)}" placeholder="wył."></div>`
+      + `<div class="f">MAKS<input type="text" inputmode="decimal" data-i="${i}" data-k="high" value="${fmtNum(s.high)}" placeholder="wył."></div></div>`).join('');
+
+  if (!editing($('#warnset')))
+    $('#warnset').innerHTML =
+      warnBlock(0, st.goOutOn, 'Gdy temperatura pieca szybko spada albo zaraz osiągnie próg min.', [['Spadek szybszy niż', 'goOutRate', st.goOutRate, '°/h'], ['Próg min. w ciągu', 'goOutHorizon', st.goOutHorizon, 'min']])
+      + warnBlock(1, st.freezeOn, 'Gdy woda w piecu, na powrocie lub w bojlerze robi się bardzo zimna.', [['Poniżej', 'freezeTemp', st.freezeTemp, '°C']])
+      + warnBlock(2, st.burnbackOn, 'Gdy temperatura zasobnika rośnie szybko – żar może cofać się do węgla.', [['Wzrost szybszy niż', 'burnbackRate', st.burnbackRate, '°/h']])
+      + `<div class="warn-block"><div class="warn-head"><span class="badge c-green">${SVG(ICONS[BOILER])}</span>Ciepła woda gotowa</div>`
+      + `<div class="warn-desc">Tylko informacja na ekranie głównym.</div><div class="wrow"><span>Od temperatury bojlera</span><span><input type="text" inputmode="decimal" data-k="hotWater" value="${fmtNum(st.hotWater)}"> °C</span></div></div>`;
+
+  $('#place').innerHTML = st.lat !== null
+    ? row(esc(st.place || 'Wybrane miejsce'), outdoor.current !== null ? `${n1(outdoor.current)}°` : '–', `<a href="#" id="unplace">Usuń lokalizację</a>`)
+    : row('Nie ustawiono', '', 'Wyszukaj miejscowość, aby widzieć temperaturę na zewnątrz');
 
   const bars = now.rssi > -55 ? 4 : now.rssi > -65 ? 3 : now.rssi > -75 ? 2 : 1;
-  const up = now.uptime, days = Math.floor(up / 86400);
-  const upText = up > 86400 ? `${days} ${plural(days, 'dzień', 'dni', 'dni')} ${Math.floor(up % 86400 / 3600)} godz.` : dur(up);
-  const fs = now.fsUsed / now.fsTotal;
-  const row = (k, v, s) => `<div class="row"><div><div class="k">${k}</div>${s ? `<div class="s">${s}</div>` : ''}</div><div class="v num">${v}</div></div>`;
+  const up = now.uptime, days_ = Math.floor(up / 86400);
+  const upText = up > 86400 ? `${days_} ${plural(days_, 'dzień', 'dni', 'dni')} ${Math.floor(up % 86400 / 3600)} godz.` : dur(up);
+  const fs = now.fsUsed / now.fsTotal, oldest = now.oldest ? Math.floor((tNow() - now.oldest) / 86400) : 0;
   $('#device').innerHTML = row('Wi-Fi', `<span class="wifi">${[1, 2, 3, 4].map(b => `<i class="${b <= bars ? 'on' : ''}" style="height:${b * 3 + 2}px"></i>`).join('')}</span>${now.rssi} dBm`, now.ip)
     + row('Działa od', upText)
-    + row('Historia', `co ${Math.round(now.interval / 60)} min`, 'jeden punkt na czujnik')
+    + row('Historia co minutę', `${oldest} z 31 dni`, 'starsze dane zastępowane najnowszymi')
     + row('Pamięć na historię', `${Math.round(fs * 100)} %<div class="bar"><i style="width:${Math.round(fs * 100)}%"></i></div>`, `${Math.round(now.fsUsed / 1024)} z ${Math.round(now.fsTotal / 1024)} KB`)
     + row('Wolna pamięć RAM', `${Math.round(now.heap / 1024)} KB`);
   $('#fwinfo').innerHTML = row('Wersja', `v${now.fw}`, esc(updateText(now.update)));
@@ -672,7 +1020,49 @@ async function saveLimits(i) {
     now = await (await api('/api/limits', { method: 'POST', body: new URLSearchParams({ s: i, low: lo, high: hi }) })).json();
     toast(`${now.sensors[i].name}: zapisano progi`);
   } catch (e) { toast('Nie udało się zapisać – brak połączenia z piecem?'); }
-  if (!$('#limits').contains(document.activeElement)) render();
+  if (!editing($('#limits'))) render();
+}
+
+async function saveSetting(fields, message) {
+  try {
+    now = await (await api('/api/settings', { method: 'POST', body: new URLSearchParams(fields) })).json();
+    toast(message || 'Zapisano');
+  } catch (e) { toast('Nie udało się zapisać – brak połączenia z piecem?'); }
+  render();
+}
+
+function onWarnChange(e) {
+  const k = e.target.dataset.k;
+  if (!k) return;
+  if (e.target.type === 'checkbox') {
+    e.target.closest('.warn-block').classList.toggle('off', !e.target.checked);
+    return saveSetting({ [k]: e.target.checked ? '1' : '0' }, e.target.checked ? 'Ostrzeżenie włączone' : 'Ostrzeżenie wyłączone');
+  }
+  const v = e.target.value.trim().replace(',', '.');
+  if (!v || !isFinite(+v)) { toast('Wpisz liczbę'); return render(); }
+  saveSetting({ [k]: v });
+}
+
+let searchTimer;
+function onPlaceInput() {
+  clearTimeout(searchTimer);
+  const q = $('#placeq').value.trim();
+  if (q.length < 3) { $('#places').innerHTML = ''; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const j = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6&language=pl&format=json`)).json();
+      $('#places').innerHTML = (j.results || []).map((p, k) => `<button data-k="${k}">${esc(p.name)}<small>${esc([p.admin1, p.country].filter(Boolean).join(', '))}</small></button>`).join('') || '<div class="note">Nic nie znaleziono</div>';
+      $('#places').onclick = ev => {
+        const b = ev.target.closest('button');
+        if (!b) return;
+        const p = j.results[+b.dataset.k];
+        $('#places').innerHTML = '';
+        $('#placeq').value = '';
+        outdoor.at = 0;
+        saveSetting({ lat: p.latitude.toFixed(4), lon: p.longitude.toFixed(4), place: p.name }, `Lokalizacja: ${p.name}`).then(() => loadOutdoor().then(render));
+      };
+    } catch (e) { $('#places').innerHTML = '<div class="note">Wyszukiwanie wymaga internetu w telefonie</div>'; }
+  }, 400);
 }
 
 function uploadFirmware() {
@@ -692,11 +1082,23 @@ function uploadFirmware() {
   xhr.send(form);
 }
 
+async function clearHistory() {
+  const ok = await confirmDialog('Usunąć całą historię?', 'Znikną wszystkie pomiary, podsumowania dobowe, historia w Eve i dziennik zdarzeń. Tego nie da się cofnąć.');
+  if (!ok) return;
+  try {
+    await api('/api/clear-history', { method: 'POST' });
+    live = []; series = null; days = []; journal = [];
+    toast('Historia usunięta – trwa restart…');
+    setTimeout(() => location.reload(), 20000);
+  } catch (e) { toast('Nie udało się usunąć historii'); }
+}
+
 // ---------------------------------------------------------------- shell
 
 function render() {
   if (ui.tab === 'home') renderHome();
   else if (ui.tab === 'charts') renderCharts();
+  else if (ui.tab === 'journal') renderJournal();
   else renderSettings();
 }
 
@@ -711,19 +1113,30 @@ function showTab(tab) {
 
 function setup() {
   $$('nav.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  $('#notices').onclick = e => {
+    if (e.target.id === 'fwseen') { store('furnace-fw', now.fw); renderHome(); }
+    if (e.target.id === 'a2hs') { store('furnace-a2hs', '1'); renderHome(); }
+  };
   $('#cards').onclick = e => {
     const c = e.target.closest('.sensor');
     if (!c) return;
     ui.shown = [+c.dataset.i];
-    ui.range = '24h';
+    ui.range = '6h';
     view = null;
     showTab('charts');
+  };
+  $('#ovRange').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    ui.overview = +b.dataset.h;
+    saveUi();
+    renderHome();
   };
   $('#chips').onclick = e => {
     const c = e.target.closest('.chip');
     if (!c) return;
-    const i = +c.dataset.i;
-    ui.shown = ui.shown.includes(i) ? (ui.shown.length > 1 ? ui.shown.filter(x => x !== i) : ui.shown) : ui.shown.concat(i).sort();
+    const i = c.dataset.i === OUT ? OUT : +c.dataset.i;
+    ui.shown = ui.shown.includes(i) ? (ui.shown.length > 1 ? ui.shown.filter(x => x !== i) : ui.shown) : ui.shown.concat(i);
     saveUi();
     renderCharts();
   };
@@ -736,11 +1149,19 @@ function setup() {
   };
   $('#zoomreset').onclick = resetView;
   $('#limits').addEventListener('change', e => { if (e.target.dataset.i) saveLimits(+e.target.dataset.i); });
+  $('#warnset').addEventListener('change', onWarnChange);
+  $('#placeq').addEventListener('input', onPlaceInput);
+  $('#place').onclick = e => {
+    if (e.target.id !== 'unplace') return;
+    e.preventDefault();
+    saveSetting({ lat: '', lon: '', place: '' }, 'Usunięto lokalizację').then(() => loadOutdoor().then(render));
+  };
   $('#checkupd').onclick = async () => {
     try { await api('/api/update', { method: 'POST' }); toast('Sprawdzam aktualizacje…'); setTimeout(refreshNow, 9000); }
     catch (e) { toast('Brak połączenia z piecem'); }
   };
   $('#fwup').onclick = uploadFirmware;
+  $('#clearhist').onclick = clearHistory;
   $('#scan').onclick = async () => {
     $('#bus').textContent = 'Skanowanie…';
     try { $('#bus').textContent = await (await api('/api/bus')).text(); } catch (e) { $('#bus').textContent = 'Skanowanie nieudane'; }
@@ -748,27 +1169,21 @@ function setup() {
   gestures($('#detail'), true);
   gestures($('#overview'), false);
   document.addEventListener('gesturestart', e => e.preventDefault());
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { refreshNow(); loadRes('f', true).then(render); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNow().then(loadLive).then(render); });
   let rt;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
-
-  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
-  let dismissed = false;
-  try { dismissed = localStorage.getItem('furnace-a2hs') === '1'; } catch (e) {}
-  if (/iPhone|iPad/.test(navigator.userAgent) && !standalone && !dismissed) {
-    $('#a2hs').innerHTML = '<div class="tip-card"><div><b>Wskazówka:</b> stuknij Udostępnij → „Do ekranu początkowego”, a strona otworzy się jak aplikacja.</div><button aria-label="Zamknij">×</button></div>';
-    $('#a2hs button').onclick = () => { $('#a2hs').innerHTML = ''; try { localStorage.setItem('furnace-a2hs', '1'); } catch (e) {} };
-  }
 }
 
 (async function start() {
   setup();
   showTab(ui.tab);
   await refreshNow();
-  await loadRes('f', true);
+  await loadLive();
   render();
-  setInterval(refreshNow, 10000);
-  setInterval(() => loadRes('f').then(() => { if (ui.tab !== 'settings') render(); }), 60000);
+  loadOutdoor().then(render);
+  setInterval(refreshNow, 15000);
+  setInterval(() => loadLive().then(() => { if (ui.tab === 'home') render(); }), 60000);
+  setInterval(() => loadOutdoor().then(() => { if (ui.tab === 'home') render(); }), 20 * 60e3);
 })();
 </script>
 </body>

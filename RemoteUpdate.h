@@ -39,11 +39,19 @@ public:
 
   const String& status() const { return lastStatus; }
 
+  // True once, right after a freshly installed version has been confirmed (for the event journal).
+  bool takeJustConfirmed() {
+    bool v = justConfirmed;
+    justConfirmed = false;
+    return v;
+  }
+
   void loop() {
     if (probation) {
       if (networkUpMs && millis() - networkUpMs >= CONFIRM_AFTER_MS) {
         esp_ota_mark_app_valid_cancel_rollback();
         probation = false;
+        justConfirmed = true;
         lastStatus = "v" + String(version) + " installed and confirmed";
         Serial.println("Update: " + lastStatus);
       } else if (millis() >= ROLLBACK_AFTER_MS) {
@@ -66,6 +74,7 @@ private:
   const char* manifestUrl;
   uint32_t    version;
   bool        probation      = false;
+  bool        justConfirmed  = false;
   bool        checkRequested = false;
   uint32_t    networkUpMs    = 0;
   uint32_t    lastCheckMs    = 0;

@@ -24,7 +24,7 @@ CUSTOM_CHAR_DATA(EveSetTime, E863F121-079E-48FF-8F27-9C2605A29F52, PW+HD);
 class EveHistory : public Service::EveHistoryService {
 public:
   static constexpr uint32_t EPOCH_OFFSET = 978307200;   // 2001-01-01 (Eve's epoch) in Unix time
-  static constexpr uint16_t MEMORY_SIZE  = 4032;        // entries per sensor: 28 days at 10 min, same as fakegato
+  static constexpr uint16_t MEMORY_SIZE  = 2016;        // entries per sensor: 14 days at 10 min - Eve keeps what it downloaded
   static constexpr uint8_t  BATCH        = 11;          // entries per read, same as fakegato
 
   // name: "<accessory> History" - HAP-NodeJS (Homebridge) gives every service a Name and Eve ignores the
@@ -112,7 +112,7 @@ public:
   }
 
 private:
-  static constexpr uint32_t MAGIC    = 0x45564833;   // "EVH3" - bump when the file layout or MEMORY_SIZE changes
+  static constexpr uint32_t MAGIC    = 0x45564834;   // "EVH4" - bump when the file layout or MEMORY_SIZE changes
   static constexpr int16_t  REF_MARK = INT16_MIN;    // stored instead of a temperature for a reference-time marker
 
   struct Header {
@@ -156,7 +156,8 @@ private:
 
   void load() {
     File f = LittleFS.open(path, "r");
-    bool ok = f && f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == MAGIC;
+    bool ok = f && f.size() == sizeof(Header) + (size_t)MEMORY_SIZE * sizeof(Record)   // a file cut short is rebuilt
+              && f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == MAGIC;
     if (f) f.close();
     if (!ok) {
       create();
