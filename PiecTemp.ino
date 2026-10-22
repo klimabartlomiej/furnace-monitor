@@ -52,7 +52,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 5;                          // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 7;                      // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -358,6 +358,14 @@ float readSensor(size_t i) {
   return NAN;
 }
 
+// Every alarm change goes to the journal - the web app pairs starts with ends from it.
+void logAlarmChange(size_t i, int8_t before, float t) {
+  int8_t now = state[i].alarm;
+  if (now == before) return;
+  Serial.printf("%s: alarm %s\n", SENSORS[i].name, now > 0 ? "TOO HOT" : now < 0 ? "TOO COLD" : "cleared");
+  logEvent(now > 0 ? EV_ALARM_HIGH : now < 0 ? EV_ALARM_LOW : EV_ALARM_CLEAR, i, toHundredths(t));
+}
+
 void updateAlarm(size_t i, float t) {
   SensorState& s = state[i];
   int8_t before = s.alarm;
@@ -366,9 +374,7 @@ void updateAlarm(size_t i, float t) {
   else if (t <= s.low)                                    s.alarm = -1;
   else if (s.alarm > 0 && t <= s.high - ALARM_HYSTERESIS) s.alarm = 0;
   else if (s.alarm < 0 && t >= s.low + ALARM_HYSTERESIS)  s.alarm = 0;
-  if (s.alarm == before) return;
-  Serial.printf("%s: alarm %s\n", SENSORS[i].name, s.alarm > 0 ? "TOO HOT" : s.alarm < 0 ? "TOO COLD" : "cleared");
-  logEvent(s.alarm > 0 ? EV_ALARM_HIGH : s.alarm < 0 ? EV_ALARM_LOW : EV_ALARM_CLEAR, i, toHundredths(t));
+  logAlarmChange(i, before, t);
 }
 
 // Returns true when the reading was accepted.
@@ -869,9 +875,11 @@ void handleLimits() {
   s.high = parseLimit(server.arg("high"));
   prefs.putFloat(prefKey("lo", i).c_str(), s.low);
   prefs.putFloat(prefKey("hi", i).c_str(), s.high);
-  // New limits - judge the current value from scratch, without the old hysteresis.
-  s.alarm = 0;
-  if (!isnan(s.lastGood)) updateAlarm(i, s.lastGood);
+  // New limits - judge the current value from scratch, without the old hysteresis; a still-active alarm
+  // is not logged again, one that ends by the change gets its end in the journal.
+  int8_t before = s.alarm;
+  s.alarm = isnan(s.lastGood) ? 0 : s.lastGood >= s.high ? 1 : s.lastGood <= s.low ? -1 : 0;
+  logAlarmChange(i, before, s.lastGood);
   reportSensor(i);
   handleNow();
 }
