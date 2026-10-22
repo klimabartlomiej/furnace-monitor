@@ -134,6 +134,46 @@ nav.tabs button{position:relative}
 .bars button{flex:1;border:0;padding:0;background:rgba(255,107,61,.55);border-radius:4px 4px 1px 1px;min-height:2px;transition:background .2s}
 .bars button.today{background:rgba(255,107,61,.3);outline:1px dashed rgba(255,107,61,.8)}
 .bars button.sel{background:#ff6b3d}
+.bars.amber button{background:rgba(255,159,10,.55)}
+.bars.amber button.today{background:rgba(255,159,10,.3);outline-color:rgba(255,159,10,.8)}
+.bars.amber button.sel{background:#ff9f0a}
+.bars.short{height:64px}
+.bars.long button{background:rgba(255,69,58,.5)}
+.bars.long button.today{background:rgba(255,69,58,.3);outline-color:rgba(255,69,58,.8)}
+.bars.long button.sel{background:#ff453a}
+.blabel{color:var(--faint);font-size:12px;font-weight:600;margin-top:10px}
+.stats.three{grid-template-columns:repeat(3,1fr);margin-bottom:4px}
+.stats.three b{font-size:17px}
+.outage{fill:rgba(255,159,10,.13)}
+.outlab{fill:#ff9f0a;font-size:10px;font-weight:600}
+.bars.coalb button{background:rgba(163,168,179,.5)}
+.bars.coalb button.today{background:rgba(163,168,179,.25);outline-color:rgba(163,168,179,.8)}
+.bars.coalb button.sel{background:#c7cbd3}
+.coal .big{display:flex;align-items:baseline;gap:8px}
+.coal .big b{font-size:30px;font-weight:700;white-space:nowrap}
+.coal .big span{color:var(--muted);font-size:14px}
+.gauge{height:12px;border-radius:6px;background:var(--card2);overflow:hidden;margin:10px 0 8px}
+.gauge i{display:block;height:100%;border-radius:6px;transition:width .4s}
+.coal .left{font-size:15px;font-weight:600;color:var(--green)}
+.coal .left.mid{color:var(--orange)}
+.coal .left.low{color:var(--red)}
+.coal .rows{margin-top:6px}
+.ashrow{display:flex;align-items:center;gap:12px;padding:12px 0 2px;border-top:1px solid var(--line);margin-top:8px}
+.ashrow>div{flex:1;min-width:0}
+.ashrow .k{font-weight:600;font-size:15px}
+.ashrow .s{color:var(--faint);font-size:12px;margin-top:1px}
+.gauge.thin{height:6px;margin:7px 0 0}
+.mini{border:0;border-radius:999px;padding:8px 12px;background:var(--card2);color:var(--text);font-weight:600;font-size:13px;flex:none}
+.banner .bbtn{display:inline-block;margin-top:8px;border:0;border-radius:999px;padding:6px 12px;background:rgba(255,255,255,.14);color:inherit;font-weight:600;font-size:13px}
+.hint{color:var(--faint);font-size:13px;margin-top:8px}
+.btn svg{width:18px;height:18px;vertical-align:-3px;margin-right:7px}
+.dchip{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:2px 7px;margin-left:7px;vertical-align:1px}
+.dchip.good{background:rgba(48,209,88,.16);color:var(--green)}
+.dchip.bad{background:rgba(255,69,58,.16);color:var(--red)}
+.dchip.flat{background:rgba(142,142,147,.16);color:#a3a8b3}
+.frost{display:grid;grid-template-columns:auto 1fr auto;gap:8px 10px;align-items:center;margin-top:14px;font-size:13px;color:var(--muted)}
+.frost i{display:block;height:8px;border-radius:4px;background:linear-gradient(90deg,#4aa8ff,#9ad0ff)}
+.frost b{color:var(--text);font-weight:600;text-align:right}
 .bars-x{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;margin-top:6px}
 .caption{color:var(--muted);font-size:13px;margin-top:8px;min-height:18px}
 
@@ -205,6 +245,20 @@ pre{background:var(--card2);border-radius:12px;padding:10px;font-size:11px;color
 .dialog .acts button{flex:1;background:none;border:0;padding:14px;font-size:17px;color:var(--blue)}
 .dialog .acts button+button{border-left:1px solid rgba(255,255,255,.1)}
 .dialog .acts .del{color:var(--red);font-weight:600}
+.dialog .acts .ok{font-weight:600}
+.stepper{display:flex;align-items:center;justify-content:center;gap:16px;margin:10px 0 2px}
+.stepper button{width:46px;height:46px;border-radius:50%;border:0;background:var(--card2);font-size:26px;line-height:1;color:var(--text);flex:none}
+.stepper label{display:flex;flex-direction:column;align-items:center}
+.stepper input{width:110px;background:none;border:0;border-bottom:2px solid var(--line);color:var(--text);font:700 32px -apple-system,system-ui;text-align:center;outline:none;padding:2px 0}
+.stepper input:focus{border-color:var(--blue)}
+.stepper small{color:var(--faint);font-size:12px;margin-top:4px}
+.rf{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;font-size:15px;color:var(--muted);text-align:left}
+.rf input[type=time]{background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:7px 10px;font:600 17px -apple-system,system-ui;outline:none}
+.when{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;justify-content:center}
+.when button{border:0;border-radius:999px;padding:7px 11px;background:var(--card2);color:var(--muted);font-size:13px;font-weight:600}
+.when button.on{background:var(--blue);color:#fff}
+.ev .undo{border:0;background:rgba(255,69,58,.15);color:var(--red);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:600;margin-left:auto}
+.ev .undo+.h{margin-left:10px}
 
 nav.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;padding:7px 6px calc(env(safe-area-inset-bottom) + 4px);background:rgba(16,18,22,.82);-webkit-backdrop-filter:saturate(180%) blur(22px);backdrop-filter:saturate(180%) blur(22px);border-top:1px solid var(--line);z-index:10}
 nav.tabs button{flex:1;background:none;border:0;color:var(--faint);font-size:10.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px;padding:3px 0;transition:color .2s}
@@ -225,6 +279,7 @@ nav.tabs button.on{color:var(--text)}
   </header>
   <div id="notices"></div>
   <div class="grid" id="cards"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+  <div class="card coal" id="coalcard" style="display:none"></div>
   <div class="card">
     <div class="card-h"><span>Wykres</span><div class="seg small" id="ovRange"><button data-h="6">6 godz.</button><button data-h="24">24 godz.</button></div></div>
     <div class="legend" id="legend"></div>
@@ -233,6 +288,10 @@ nav.tabs button.on{color:var(--text)}
   <div class="card">
     <div class="card-h">Dzisiaj</div>
     <div class="rows" id="today"></div>
+  </div>
+  <div class="card" id="weekcard" style="display:none">
+    <div class="card-h">Ostatnie 7 dni<small>do wczoraj · zmiana do tyg. wcześniej</small></div>
+    <div class="rows" id="week"></div>
   </div>
 </section>
 
@@ -252,6 +311,14 @@ nav.tabs button.on{color:var(--text)}
     <div class="card-h">Praca pieca<small>godziny dziennie, 30 dni</small></div>
     <div id="burn"></div>
   </div>
+  <div class="card" id="coalchartcard" style="display:none">
+    <div class="card-h">Zużycie węgla<small>wiadra dziennie, 30 dni</small></div>
+    <div id="coalchart"></div>
+  </div>
+  <div class="card">
+    <div class="card-h">Zaniki prądu<small>czas bez prądu dziennie, 30 dni</small></div>
+    <div id="power"></div>
+  </div>
   <a class="btn" id="csv" download>Eksportuj widoczny zakres do CSV</a>
 </section>
 
@@ -262,6 +329,7 @@ nav.tabs button.on{color:var(--text)}
 
 <section class="view" id="v-settings">
   <header class="top"><h1>Ustawienia</h1></header>
+  <div class="card"><div id="seasonset"></div></div>
   <div class="card">
     <div class="card-h">Progi alarmów</div>
     <div id="limits"></div>
@@ -270,7 +338,11 @@ nav.tabs button.on{color:var(--text)}
   <div class="card">
     <div class="card-h">Ostrzeżenia</div>
     <div id="warnset"></div>
-    <p class="note">Każde ostrzeżenie to osobny czujnik w aplikacji Dom – włącz dla niego powiadomienia.</p>
+    <p class="note">Każde ostrzeżenie to osobny czujnik w aplikacji Dom – włącz dla niego powiadomienia. Dom powiadamia, gdy czujnik się otwiera (początek) i gdy się zamyka (koniec).</p>
+  </div>
+  <div class="card">
+    <div class="card-h">Węgiel</div>
+    <div id="coalset"></div>
   </div>
   <div class="card">
     <div class="card-h">Temperatura na zewnątrz</div>
@@ -314,6 +386,15 @@ nav.tabs button.on{color:var(--text)}
   <button data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Ustawienia</button>
 </nav>
 <div class="modal" id="modal"><div class="dialog"><div class="body"><h3 id="mtitle"></h3><p id="mtext"></p></div><div class="acts"><button id="mno">Anuluj</button><button class="del" id="myes">Usuń</button></div></div></div>
+<div class="modal" id="rmodal"><div class="dialog"><div class="body">
+  <h3>Dosypałem węgiel</h3>
+  <div class="stepper"><button data-d="-1" aria-label="Wiadro mniej">−</button><label><input type="text" inputmode="decimal" id="ramt" autocomplete="off"><small id="ramtl"></small></label><button data-d="1" aria-label="Wiadro więcej">+</button></div>
+  <label class="rf"><span>Do pełna</span><input class="sw" type="checkbox" id="rfull" checked></label>
+  <div id="rlevelbox"><div class="hint">Nie liczyłeś wiader? Przed dosypaniem w zasobniku było:</div>
+  <div class="when" id="rlevel"><button data-f="0">prawie pusto</button><button data-f="0.25">¼</button><button data-f="0.5">½</button><button data-f="0.75">¾</button></div></div>
+  <div class="when" id="rwhen"><button data-m="0">Teraz</button><button data-m="30">30 min temu</button><button data-m="60">1 godz. temu</button><button data-m="120">2 godz. temu</button></div>
+  <label class="rf"><span id="rwhenl">Godzina</span><input type="time" id="rtime"></label>
+</div><div class="acts"><button id="rno">Anuluj</button><button class="ok" id="ryes">Zapisz</button></div></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -339,30 +420,42 @@ const I_UP = '<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>';
 const I_DOWN = '<path d="M12 5v14M5.5 12.5 12 19l6.5-6.5"/>';
 const I_PROBE = '<path d="M12 3v12"/><circle cx="12" cy="18" r="3"/><path d="M4 4l16 16"/>';
 const I_POWER = '<path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/>';
-const I_SNOW = '<path d="M12 2v20M4 7l16 10M4 17 20 7"/>';
+const I_NOPOWER = '<path d="M9 3v4M15 3v4"/><path d="M6.5 7h11v4a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.5V21"/><path d="M3 3l18 18"/>';
+const I_SNOW ='<path d="M12 2v20M4 7l16 10M4 17 20 7"/>';
+const I_COAL = '<path d="M3 19h18l-3-6.5-3.5 2.5L11 8l-3.5 6L5.5 12z"/>';
+const I_SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+const I_ASH = '<path d="M4 10h16l-1.5 9h-13z"/><path d="M8 10c0-2 1.5-2 1.5-4M12 10c0-2 1.5-2 1.5-4M16 10c0-2 1.5-2 1.5-4"/>';
+const I_PLUS = '<path d="M12 5v14M5 12h14"/>';
 const I_FLAME = ICONS[0];
 const WARNINGS = [
   { name: 'Piec wygasa', icon: I_FLAME },
   { name: 'Ryzyko zamarznięcia', icon: I_SNOW },
   { name: 'Cofanie żaru', icon: '<path d="M12 21V9M6.5 14.5 12 9l5.5 5.5"/><path d="M5 4h14"/>' },
+  { name: 'Mało węgla', icon: I_COAL },
+  { name: 'Piec stoi po zaniku prądu', icon: I_NOPOWER },
+  { name: 'Opróżnij popielnik', icon: I_ASH },
 ];
 // Release notes shown once after the device updated itself (the web app ships inside the firmware).
 const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  8: 'Zaniki prądu: w dzienniku, w karcie „Co się działo”, jako pasy na wykresach i na wykresie z 30 dni. Alarm trwający podczas zaniku prądu lub aktualizacji nie wysyła ponownego powiadomienia. Węgiel: przycisk „Dosypałem” (także z godziną wstecz), zużycie i koszty, stan zasobnika, ostrzeżenie „Mało węgla”, wykres zużycia z mrozem i sezonem. Podsumowanie ostatnich 7 dni. Czujnik „Ciepła woda gotowa” w aplikacji Dom. Tryb lato, ostrzeżenie „Piec stoi po zaniku prądu”, prognoza zużycia na jutro i przypomnienie o popielniku.',
 };
 // Journal events that start a problem, the event that ends it, and the probes to chart for it.
 const PROBLEM_END = { 3: 5, 4: 5, 6: 7, 8: 9 };
-const WARNING_PROBES = [[FURNACE], [FURNACE, RETURN, BOILER], [COAL]];
+const EV_POWER_CUT = 11;      // time = power back, value = minutes without power
+const BOOT_REASON = ['', 'po włączeniu zasilania', 'po restarcie', 'po spadku napięcia', 'po błędzie programu'];
+const WARNING_PROBES = [[FURNACE], [FURNACE, RETURN, BOILER], [COAL], [FURNACE, RETURN], [FURNACE], [FURNACE]];
+const EV_SEASON = 12, EV_ASH = 13;
 const RANGES = { '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
 const STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200];
 const MIN_SPAN = 1800, MAX_SPAN = 2 * 365 * 86400, LIVE_SPAN = 26 * 3600;
 const LOCALE = 'pl-PL';
 
 let now = null, online = true, lastOk = 0, view = null;
-let live = [], series = null, days = [], daysAt = 0, journal = [], journalAt = 0;
-const outdoor = { hourly: [], daily: [], current: null, at: 0, dailyAt: 0, key: '' };
+let live = [], series = null, days = [], daysAt = 0, journal = [], journalAt = 0, refills = [], refillsAt = 0;
+const outdoor = { hourly: [], ahead: [], daily: [], current: null, at: 0, dailyAt: 0, key: '' };
 const ui = Object.assign({ tab: 'home', range: '6h', shown: [FURNACE], overview: 6 }, readUi());
 
 function readUi() { try { return JSON.parse(localStorage.getItem('furnace-ui')) || {}; } catch (e) { return {}; } }
@@ -378,6 +471,11 @@ const nAxis = v => String(+v.toFixed(2)).replace('.', ',');
 const hhmm = t => new Date(t * 1000).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
 const day = t => new Date(t * 1000).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
 const dur = s => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h} godz. ${m} min` : `${m} min`; };
+const durShort = s => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return s < 60 ? `${s} s` : h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`; };
+const durCut = s => (s < 60 ? `${s} s` : dur(s));
+// EV_POWER_CUT: time = power back, seconds without power in 23 bits (sensor & 0x7F : value), sensor bit 7 = brownout.
+const cutSeconds = e => (e[2] & 0x7F) * 65536 + (e[3] & 0xFFFF);
+const outages = () => journal.filter(e => e[1] === EV_POWER_CUT).map(e => ({ t0: e[0] - cutSeconds(e), t1: e[0], sec: cutSeconds(e) }));
 const midnight = t => { const d = new Date(t * 1000); d.setHours(0, 0, 0, 0); return d / 1000; };
 // 1 alarm, 2 alarmy, 5 alarmów
 const plural = (n, one, few, many) => n === 1 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
@@ -446,16 +544,16 @@ function parseBuckets(buf) {
   return out;
 }
 
-// /api/daily records: uint32 time, int16 min[n], avg[n], max[n], uint16 burning minutes.
+// /api/daily records: uint32 time, int16 min[n], avg[n], max[n], uint16 burning minutes, uint32 heat (degree-minutes).
 function parseDays(buf) {
-  const v = new DataView(buf), n = now.sensors.length, size = 4 + 6 * n + 2, out = [];
+  const v = new DataView(buf), n = now.sensors.length, size = 4 + 6 * n + 6, out = [];
   for (let o = 0; o + size <= buf.byteLength; o += size) {
     const vals = [];
     for (let i = 0; i < n; i++) {
       const avg = v.getInt16(o + 4 + 2 * n + 2 * i, true);
       vals.push(avg === -32768 ? null : [v.getInt16(o + 4 + 2 * i, true) / 100, avg / 100, v.getInt16(o + 4 + 4 * n + 2 * i, true) / 100]);
     }
-    out.push({ t: v.getUint32(o, true), v: vals, burn: v.getUint16(o + 4 + 6 * n, true) });
+    out.push({ t: v.getUint32(o, true), v: vals, burn: v.getUint16(o + 4 + 6 * n, true), heat: v.getUint32(o + 6 + 6 * n, true) });
   }
   return out;
 }
@@ -486,6 +584,13 @@ async function loadJournal() {
   try { journal = await (await api(`/api/events?since=${tNow() - 90 * 86400}`)).json(); } catch (e) { journalAt = 0; }
 }
 
+// Coal refills [time, kg x 10, full] in the order they were entered.
+async function loadRefills() {
+  if (!now || Date.now() - refillsAt < 30e3) return;
+  refillsAt = Date.now();
+  try { refills = await (await api('/api/refills')).json(); } catch (e) { refillsAt = 0; }
+}
+
 // Outdoor temperature from Open-Meteo (free, no key), fetched by the phone - only when a location is set.
 async function loadOutdoor(withYear) {
   const s = now && now.settings;
@@ -495,8 +600,10 @@ async function loadOutdoor(withYear) {
   const base = `latitude=${s.lat}&longitude=${s.lon}&timeformat=unixtime&timezone=auto`;
   try {
     if (Date.now() - outdoor.at > 20 * 60e3) {
-      const j = await (await fetch(`https://api.open-meteo.com/v1/forecast?${base}&current=temperature_2m&hourly=temperature_2m&past_days=31&forecast_days=1`)).json();
-      outdoor.hourly = j.hourly.time.map((t, k) => [t, j.hourly.temperature_2m[k]]).filter(p => p[1] !== null && p[0] <= tNow());
+      const j = await (await fetch(`https://api.open-meteo.com/v1/forecast?${base}&current=temperature_2m&hourly=temperature_2m&past_days=31&forecast_days=2`)).json();
+      const all = j.hourly.time.map((t, k) => [t, j.hourly.temperature_2m[k]]).filter(p => p[1] !== null);
+      outdoor.hourly = all.filter(p => p[0] <= tNow());
+      outdoor.ahead = all.filter(p => p[0] > tNow());       // the forecast - tomorrow's coal
       outdoor.current = j.current ? j.current.temperature_2m : null;
       outdoor.at = Date.now();
     }
@@ -561,6 +668,43 @@ function segments(pts, gap) {
   }
   if (cur.length) out.push(cur);
   return out;
+}
+
+// Centered moving average over ±w neighbours of value idx in one gap-free segment - takes the probes' 0.06°
+// steps out of the line.
+function smoothSeg(seg, w, idx) {
+  if (!w || seg.length < 3) return seg;
+  return seg.map((p, k) => {
+    const a = Math.max(0, k - w), b = Math.min(seg.length - 1, k + w);
+    let sum = 0;
+    for (let j = a; j <= b; j++) sum += seg[j][idx];
+    const q = p.slice();
+    q[idx] = sum / (b - a + 1);
+    return q;
+  });
+}
+
+// SVG path through pixel points as a monotone cubic (Fritsch-Carlson): smooth, yet never above or below the
+// points it passes through.
+function curvePath(xy) {
+  const f = v => v.toFixed(1), n = xy.length;
+  if (n < 3) return xy.map((p, k) => (k ? 'L' : 'M') + f(p[0]) + ' ' + f(p[1])).join('');
+  const dx = [], m = [], t = [];
+  for (let k = 0; k < n - 1; k++) { dx[k] = xy[k + 1][0] - xy[k][0]; m[k] = dx[k] ? (xy[k + 1][1] - xy[k][1]) / dx[k] : 0; }
+  t[0] = m[0];
+  t[n - 1] = m[n - 2];
+  for (let k = 1; k < n - 1; k++) t[k] = m[k - 1] * m[k] <= 0 ? 0 : (m[k - 1] + m[k]) / 2;
+  for (let k = 0; k < n - 1; k++) {
+    if (!m[k]) { t[k] = t[k + 1] = 0; continue; }
+    const a = t[k] / m[k], b = t[k + 1] / m[k], h = a * a + b * b;
+    if (h > 9) { const s = 3 / Math.sqrt(h); t[k] = s * a * m[k]; t[k + 1] = s * b * m[k]; }
+  }
+  let d = `M${f(xy[0][0])} ${f(xy[0][1])}`;
+  for (let k = 0; k < n - 1; k++) {
+    const h = dx[k] / 3;
+    d += `C${f(xy[k][0] + h)} ${f(xy[k][1] + t[k] * h)} ${f(xy[k + 1][0] - h)} ${f(xy[k + 1][1] - t[k + 1] * h)} ${f(xy[k + 1][0])} ${f(xy[k + 1][1])}`;
+  }
+  return d;
 }
 
 // ---------------------------------------------------------------- charts
@@ -630,6 +774,11 @@ function chart(el, o) {
     const y = f1(Y(l.v));
     plot += `<line class="limit" x1="${L}" x2="${L + pw}" y1="${y}" y2="${y}"/><text class="limlab" x="${L + 6}" y="${y - 5}">${l.label}</text>`;
   }
+  for (const b of o.bands || []) if (b.t1 >= o.t0 && b.t0 <= o.t1) {   // power cuts: amber band over the gap
+    const x0 = Math.max(L, X(b.t0)), w = Math.max(2, Math.min(L + pw, X(b.t1)) - x0);
+    plot += `<rect class="outage" x="${f1(x0)}" y="${T}" width="${f1(w)}" height="${ph}"/>`;
+    if (w > 50) plot += `<text class="outlab" x="${f1(x0 + w / 2)}" y="${T + 12}" text-anchor="middle">brak prądu</text>`;
+  }
   for (const m of o.marks || []) if (m.t >= o.t0 && m.t <= o.t1) {     // journal events: start red/orange, end green
     const x = f1(X(m.t));
     plot += `<line class="markl" x1="${x}" x2="${x}" y1="${T}" y2="${T + ph}" stroke="${m.color}"/><circle cx="${x}" cy="${T + 3}" r="3.5" fill="${m.color}"/>`;
@@ -637,8 +786,12 @@ function chart(el, o) {
   o.series.forEach((s, si) => {
     const id = `${el.id}-g${si}`, fill = o.fill && !s.dash;
     if (fill) defs += `<linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".34"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`;
-    for (const seg of segments(s.pts, s.step || o.step)) {
-      const line = seg.map((p, k) => (k ? 'L' : 'M') + f1(X(p[0])) + ' ' + f1(Y(s.agg ? p[2] : p[1]))).join('');
+    // Minute readings are smoothed (o.smooth = neighbours each side); the finger reads the drawn line (s.view).
+    s.view = [];
+    for (const raw of segments(s.pts, s.step || o.step)) {
+      const seg = s.agg ? raw : smoothSeg(raw, o.smooth || 0, 1);
+      s.view.push(...seg);
+      const line = curvePath(seg.map(p => [X(p[0]), Y(s.agg ? p[2] : p[1])]));
       if (s.agg && o.band && !s.dash) {
         const top = seg.map(p => f1(X(p[0])) + ',' + f1(Y(p[3]))), bottom = seg.map(p => f1(X(p[0])) + ',' + f1(Y(p[1]))).reverse();
         plot += `<polygon points="${top.concat(bottom).join(' ')}" fill="${s.color}" fill-opacity=".17"/>`;
@@ -661,7 +814,7 @@ function scrub(el, clientX) {
   const t = g.o.t0 + (clientX - r.left - g.L) / g.pw * (g.o.t1 - g.o.t0);
   let html = '', dots = '', x = null, when = null, whenStep = g.o.step;
   for (const s of g.o.series) {
-    const p = nearest(s.pts, t), st = s.step || g.o.step;
+    const p = nearest(s.view || s.pts, t), st = s.step || g.o.step;
     if (!p || Math.abs(p[0] - t) > st * 2 || p[0] < g.o.t0 || p[0] > g.o.t1) continue;
     const v = s.agg ? p[2] : p[1], px = g.X(p[0]);
     if (x === null) { x = px; when = p[0]; whenStep = st; }
@@ -736,7 +889,7 @@ function sparkline(pts, color) {
   for (const p of pts) { lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]); }
   if (hi - lo < 1) { const m = (hi + lo) / 2; lo = m - .5; hi = m + .5; }
   const X = t => (t - t0) / (t1 - t0 || 1) * W, Y = v => 6 + (hi - v) / (hi - lo) * (H - 10);
-  const d = pts.map((p, k) => (k ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join('');
+  const d = curvePath(smoothSeg(pts, 4, 1).map(p => [X(p[0]), Y(p[1])]));
   const id = 'sp' + color.slice(1);
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1">`
     + `<stop offset="0" stop-color="${color}" stop-opacity=".38"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>`
@@ -760,8 +913,32 @@ function warningText(w) {
     const cold = s.filter(x => x.water && x.temp !== null).sort((a, b) => a.temp - b.temp)[0];
     return cold ? `${cold.name}: ${n1(cold.temp)}°` : 'woda bliska zamarznięcia';
   }
+  if (w === 4) return `po zaniku prądu piec dalej stygnie${s[FURNACE].trend !== null ? ` (${n1(s[FURNACE].trend)}° na godzinę)` : ''} – sprawdź sterownik`;
+  if (w === 5) {
+    const a = now.ash, d = Math.floor((tNow() - a.at) / 86400);
+    return `od opróżnienia ${d} ${plural(d, 'dzień', 'dni', 'dni')}${a.buckets !== null ? `, spalono ~${bkText(a.buckets)}` : ''}`;
+  }
+  if (w === 3) {
+    const c = now.coal;
+    if (c.level === null) return 'w zasobniku zostało mało węgla';
+    return `w zasobniku ~${bkText(c.level)}${c.hoursLeft !== null && c.hoursLeft < 1e8 ? `, starczy ${leftText(c.hoursLeft)}` : ''}`;
+  }
   const h = s[COAL];
   return h && h.trend !== null ? `zasobnik grzeje się ${n1(h.trend)}° na godzinę` : 'zasobnik szybko się nagrzewa';
+}
+
+// Suggests summer mode after three full days without burning (once a week at most), and in summer mode says what
+// happens when the furnace burns.
+function seasonNotice() {
+  if (now.settings.heating) {
+    if (tNow() - (+recall('furnace-season-no') || 0) < 7 * 86400) return '';
+    if (!lastDays(4).every(x => x.burn === 0)) return '';
+    return `<div class="banner blue">${SVG(I_SUN)}<div><b>Piec nie pali od 3 dni.</b> Przełączyć na tryb lato? Alarmy „za zimno” pieca ucichną, bojler i mróz zostają.`
+      + `<br><button class="bbtn" id="tosummer">Włącz tryb lato</button></div><button class="x" id="seasonno" aria-label="Zamknij">×</button></div>`;
+  }
+  if (burnSeconds(midnight(tNow()), tNow()) < 30 * 60) return '';
+  return `<div class="banner orange">${SVG(I_FLAME)}<div><b>Piec pali w trybie lato.</b> Sezon grzewczy włączy się sam po 2 godzinach palenia.`
+    + `<br><button class="bbtn" id="toheating">Włącz sezon teraz</button></div></div>`;
 }
 
 // Release notes after the device updated itself; dismissed with the cross, shown once per version.
@@ -781,11 +958,13 @@ function missedEvents() {
   const out = [];
   journal.forEach((e, k) => {
     const [t, type, i] = e;
-    if (t <= seen || !PROBLEM_END[type]) return;
+    if (t <= seen) return;
+    if (type === EV_POWER_CUT) { out.push({ e, start: t - cutSeconds(e), end: t }); return; }
+    if (!PROBLEM_END[type]) return;
     // An alarm ends with the probe's next alarm change (cleared, or straight from too cold to too hot).
     const ends = type === 3 || type === 4 ? [3, 4, 5] : [PROBLEM_END[type]];
     const end = journal.slice(k + 1).find(x => ends.includes(x[1]) && x[2] === i);
-    out.push({ e, end: end ? end[0] : null });
+    out.push({ e, start: t, end: end ? end[0] : null });
   });
   return out;
 }
@@ -807,8 +986,9 @@ function missedNotice() {
   if (!list.length) return '';
   return `<div class="banner missed">${SVG(I_INFO)}<div class="mh">Co się działo<small> · od ${when(+recall('furnace-seen'))}</small></div>`
     + `<button class="x" id="missedseen" aria-label="Zamknij">×</button><div class="mlist">${list.map((m, k) => {
-      const [cls, icon, title] = eventView(m.e), [t, type, i] = m.e;
-      const range = m.end ? `${when(t)}–${hhmm(m.end)}` : `${when(t)}, trwa nadal`;
+      const [cls, icon, title] = eventView(m.e), [t, type, i] = m.e, sec = m.end - m.start;
+      const range = type === EV_POWER_CUT ? (sec < 60 ? `${when(t)} · ${durCut(sec)}` : `${when(m.start)}–${hhmm(m.end)} · ${dur(sec)}`)
+        : m.end ? `${when(t)}–${hhmm(m.end)}` : `${when(t)}, trwa nadal`;
       const ext = type === 3 || type === 4 ? extreme(i, t, m.end || tNow(), type === 4) : '';
       return `<button class="mitem" data-k="${k}"><span class="badge ${cls}">${SVG(icon)}</span>`
         + `<span><span class="t">${esc(title)}</span><span class="s">${range}${ext}</span></span><span class="go">›</span></button>`;
@@ -817,9 +997,9 @@ function missedNotice() {
 
 // Opens the chart of the probes concerned, around the event.
 function openEvent(m) {
-  const [t, type, i] = m.e;
+  const [, type, i] = m.e, t = m.start;
   const end = m.end || tNow(), pad = Math.max(3600, (end - t) / 2);
-  ui.shown = (type === 8 ? WARNING_PROBES[i] || [FURNACE] : [i]).slice();
+  ui.shown = (type === EV_POWER_CUT ? now.sensors.map((s, k) => k) : type === 8 ? WARNING_PROBES[i] || [FURNACE] : [i]).slice();
   saveUi();
   view = { t0: t - pad, t1: Math.min(tNow(), end + pad) };
   showTab('charts');
@@ -839,7 +1019,7 @@ function renderHome() {
   const count = alarms.length + warns.length;
   $('#dot').className = 'dot' + (!online ? ' warn' : alarms.length ? ' bad' : warns.length ? ' warn' : '');
   $('#status').textContent = !online ? 'Brak połączenia – ponawiam' : !now ? 'Łączenie…'
-    : count ? `${count} ${plural(count, 'alarm', 'alarmy', 'alarmów')}` : 'Wszystko w normie';
+    : (count ? `${count} ${plural(count, 'alarm', 'alarmy', 'alarmów')}` : 'Wszystko w normie') + (now.settings.heating ? '' : ' · tryb lato');
   $('#updated').textContent = lastOk ? hhmm(lastOk / 1000) : '';
   if (!now) return;
 
@@ -847,7 +1027,7 @@ function renderHome() {
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   if (/iPhone|iPad/.test(navigator.userAgent) && !standalone && recall('furnace-a2hs') !== '1')
     notices += `<div class="banner blue">${SVG(I_INFO)}<div><b>Wskazówka:</b> stuknij Udostępnij → „Do ekranu początkowego”, a strona otworzy się jak aplikacja.</div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`;
-  notices += missedNotice();
+  notices += missedNotice() + seasonNotice();
   notices += warns.map(w => `<div class="banner orange">${SVG(WARNINGS[w].icon)}<div><b>${WARNINGS[w].name}</b> – ${warningText(w)}</div></div>`).join('');
   notices += alarms.map(s => `<div class="banner red">${SVG(I_WARN)}<div><b>${esc(s.name)}</b> – ${describe(s)}</div></div>`).join('');
   $('#notices').innerHTML = notices;
@@ -870,9 +1050,12 @@ function renderHome() {
   const buckets = step === 60 ? live : rebucket(live, step);
   chart($('#overview'), {
     series: now.sensors.map((s, i) => ({ color: COLORS[i], name: s.name, pts: windowed(points(buckets, i, false), t0, t) })),
-    t0, t1: t, step, empty: 'Historia zapełni się w ciągu kilku minut',
+    t0, t1: t, step, bands: outages(), smooth: step === 60 ? 3 : 1, empty: 'Historia zapełni się w ciągu kilku minut',
   });
+  renderCoal();
   renderToday();
+  renderWeek();
+  loadDays().then(() => { if (ui.tab === 'home') renderWeek(); });
 }
 
 function renderToday() {
@@ -881,6 +1064,8 @@ function renderToday() {
   if (s[FURNACE] && s[RETURN] && s[FURNACE].temp !== null && s[RETURN].temp !== null)
     rows.push(['Piec → powrót', 'ciepło oddawane do domu', `${n1(s[FURNACE].temp - s[RETURN].temp)}°`, '']);
   rows.push(['Piec pracuje', `dziś powyżej ${n1(burnThreshold())}°`, dur(burnSeconds(m, tNow())), '']);
+  const cuts = outages().filter(c => c.t1 >= tNow() - 7 * 86400);
+  rows.push(['Zaniki prądu', 'ostatnie 7 dni', cuts.length ? `${cuts.length} · ${durShort(cuts.reduce((a, c) => a + c.sec, 0))}` : 'brak', cuts.length ? '' : 'good']);
   const b = s[BOILER];
   if (b && b.temp !== null) {
     const ready = b.temp >= now.settings.hotWater;
@@ -900,6 +1085,260 @@ const burnThreshold = () => now.sensors[FURNACE] && now.sensors[FURNACE].low !==
 function burnSeconds(from, to) {
   const thr = burnThreshold();
   return points(live, FURNACE, false).filter(p => p[0] >= from && p[0] < to && p[1] >= thr).length * 60;
+}
+
+// ---------------------------------------------------------------- coal and day summaries
+// Coal is counted in buckets - it is carried up loose. The firmware learns coal.k - buckets per degree-minute of
+// furnace minus return water - from refills to the top; coal used = k x heat, for every day with the same k, so
+// the history stays consistent as k improves. Kilograms and costs come from one bucket's weight.
+
+const coalOn = () => now.settings.coalOn;
+const coalBk = heat => (now.coal.k !== null && heat !== null ? heat * now.coal.k : null);
+const bkKg = b => b * now.settings.bucketKg;
+const coalCost = b => (b !== null && now.settings.coalPrice > 0 ? bkKg(b) * now.settings.coalPrice / 1000 : null);
+const kgText = kg => { const r = Math.round(kg * 10) / 10; return kg >= 100 || r % 1 === 0 ? `${Math.round(kg).toLocaleString(LOCALE)} kg` : `${n1(r)} kg`; };
+const massText = kg => (kg >= 1000 ? `${n1(kg / 1000)} t` : kgText(kg));
+const zlText = z => (z > 0 && z < 1 ? 'poniżej 1 zł' : `${Math.round(z).toLocaleString(LOCALE)} zł`);
+// 1 wiadro, 3 wiadra, 5 wiader, 2,5 wiadra - halves below 20.
+function bkText(b) {
+  const r = b >= 20 ? Math.round(b) : Math.round(b * 2) / 2;
+  if (b > 0 && r === 0) return 'poniżej pół wiadra';
+  return r % 1 ? `${n1(r)} wiadra` : `${r.toLocaleString(LOCALE)} ${plural(r, 'wiadro', 'wiadra', 'wiader')}`;
+}
+const coalText = b => { const t = bkText(b); return `${t.startsWith('poniżej') ? '' : '~'}${t}${coalCost(b) !== null ? ` · ${zlText(coalCost(b))}` : ''}`; };
+
+// Degree-minutes from the phone's minute data in [t0, t1).
+function heatSince(t0, t1) {
+  let h = 0;
+  for (const b of live) if (b.t >= t0 && b.t < t1 && b.v[FURNACE] && b.v[RETURN]) h += Math.max(0, b.v[FURNACE][1] - b.v[RETURN][1]);
+  return h;
+}
+
+// The last n days, oldest first: {t, today, burn (minutes), heat} - past days from the daily records (null
+// without one), today from the minute data.
+function lastDays(n) {
+  const t = tNow(), today = midnight(t), list = [];
+  for (let k = n - 1; k >= 0; k--) {
+    const d = new Date(today * 1000);
+    d.setDate(d.getDate() - k);
+    const ds = d / 1000, rec = days.find(x => Math.abs(x.t - ds) < 3 * 3600);
+    list.push(k === 0 ? { t: ds, today: true, burn: burnSeconds(today, t) / 60, heat: heatSince(today, t) }
+      : { t: ds, today: false, burn: rec ? rec.burn : null, heat: rec ? rec.heat : null });
+  }
+  return list;
+}
+
+// Mean outdoor temperature of the day starting at ds (Open-Meteo hourly data: last 31 days, or the forecast).
+function outdoorMean(ds, src = outdoor.hourly) {
+  const p = src.filter(q => q[0] >= ds && q[0] < ds + 86400);
+  return p.length >= 12 ? p.reduce((a, q) => a + q[1], 0) / p.length : null;
+}
+
+// Buckets a day as a straight line of the day's mean outdoor temperature, fitted to the last 30 full days.
+// Colder has to mean more coal: with the wrong slope or too little spread in temperature, the average day.
+function coalModel() {
+  const pts = lastDays(31).filter(x => !x.today && x.heat !== null).map(x => [outdoorMean(x.t), coalBk(x.heat)])
+    .filter(p => p[0] !== null && p[1] !== null);
+  if (pts.length < 7) return null;
+  const n = pts.length, xs = pts.map(p => p[0]), mx = xs.reduce((a, v) => a + v, 0) / n, my = pts.reduce((a, p) => a + p[1], 0) / n;
+  const sxx = pts.reduce((a, p) => a + (p[0] - mx) ** 2, 0), sxy = pts.reduce((a, p) => a + (p[0] - mx) * (p[1] - my), 0);
+  const b = Math.max(...xs) - Math.min(...xs) >= 3 && sxy < 0 ? sxy / sxx : 0;
+  return t => Math.max(0, my + b * (t - mx));
+}
+
+// Tomorrow's coal from the weather forecast: {temp, buckets}, or null without a forecast or a model.
+function coalTomorrow() {
+  const d = new Date(midnight(tNow()) * 1000);
+  d.setDate(d.getDate() + 1);
+  const temp = outdoorMean(d / 1000, outdoor.ahead), model = temp !== null && now.coal.k !== null ? coalModel() : null;
+  return model ? { temp, buckets: model(temp) } : null;
+}
+
+function whenAhead(t) {
+  const d = Math.round((midnight(t) - midnight(tNow())) / 86400);
+  return (d === 0 ? 'dziś ' : d === 1 ? 'jutro ' : day(t) + ', ') + hhmm(t);
+}
+
+// "na ok. 1 dzień 6 godz. · do jutro 14:20" from hours left at the current pace.
+function leftText(h) {
+  if (h > 14 * 24) return 'na ponad 2 tygodnie';
+  const d = Math.floor(h / 24), r = Math.round(h % 24);
+  const span = h < 1 ? 'mniej niż godzinę' : d ? `${d} ${plural(d, 'dzień', 'dni', 'dni')}${r ? ` ${r} godz.` : ''}` : `${Math.round(h)} godz.`;
+  return `na ok. ${span} · do ${whenAhead(tNow() + h * 3600)}`;
+}
+
+function renderCoal() {
+  const el = $('#coalcard');
+  if (!coalOn() || !now.settings.heating) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  const c = now.coal, st = now.settings;
+  let html = `<div class="card-h">Węgiel${c.lastRefill ? `<small>dosypano ${when(c.lastRefill[0])} · ${bkText(c.lastRefill[1] / 10)}</small>` : ''}</div>`;
+  if (c.level !== null) {
+    const p = clamp(c.level / st.hopperBuckets, 0, 1), h = c.hoursLeft;
+    const low = p < .15 || (h !== null && h < st.lowCoalHours), mid = !low && (p < .4 || (h !== null && h < 2 * st.lowCoalHours));
+    html += `<div class="big"><b class="num">~${bkText(c.level)}</b><span>${Math.round(p * 100)}% zasobnika · ≈${kgText(bkKg(c.level))}</span></div>`
+      + `<div class="gauge"><i style="width:${(p * 100).toFixed(1)}%;background:var(--${low ? 'red' : mid ? 'orange' : 'green'})"></i></div>`
+      + (h !== null ? `<div class="left ${low ? 'low' : mid ? 'mid' : ''}">Starczy ${leftText(h)}</div>` : '');
+  }
+  if (c.k !== null) {
+    const b = coalBk(heatSince(midnight(tNow()), tNow()));
+    const next = coalTomorrow();
+    html += `<div class="rows">${row('Dziś', coalText(b), `≈${kgText(bkKg(b))}`)}`
+      + `${c.rate !== null ? row('Tempo', `~${bkText(c.rate * 24)} na dobę`, 'z ostatnich 24 godzin') : ''}`
+      + `${next ? row('Jutro', coalText(next.buckets), `prognoza: średnio ${n1(next.temp)}° na zewnątrz`) : ''}</div>`;
+  }
+  const hints = [];
+  if (c.k === null) hints.push(c.lastFull ? 'Po następnym dosypaniu do pełna będę wiedzieć, ile węgla schodzi – pokażę zużycie i stan zasobnika.'
+    : 'Przy każdym dosypaniu stuknij „Dosypałem”. Po dwóch dosypaniach do pełna pokażę zużycie i stan zasobnika.');
+  else if (c.level === null) hints.push(st.hopperBuckets > 0 ? 'Stan zasobnika pojawi się po najbliższym dosypaniu do pełna.'
+    : 'Wpisz w Ustawieniach, ile wiader mieści zasobnik, a pokażę, ile zostało i na ile starczy.');
+  if (c.k !== null && !(st.coalPrice > 0)) hints.push('Wpisz cenę węgla w Ustawieniach, a pokażę koszty.');
+  el.innerHTML = html + hints.map(t => `<div class="hint">${t}</div>`).join('')
+    + `<button class="btn primary" id="refill">${SVG(I_PLUS)}Dosypałem węgiel</button>` + ashRow();
+}
+
+// Ash pan: how far it is towards its reminder - days or buckets burned, whichever is further.
+function ashRow() {
+  const st = now.settings, a = now.ash;
+  if (!st.ashOn || !a.at) return '';
+  const days = (tNow() - a.at) / 86400, frac = Math.max(days / st.ashDays, a.buckets !== null ? a.buckets / st.ashLimit : 0);
+  const col = now.warnings[5] || frac >= 1 ? 'red' : frac >= .75 ? 'orange' : 'green';
+  return `<div class="ashrow"><div><div class="k">Popielnik</div><div class="s">opróżniony ${when(a.at)}${a.buckets !== null ? ` · spalono ~${bkText(a.buckets)}` : ''}</div>`
+    + `<div class="gauge thin"><i style="width:${Math.min(100, frac * 100).toFixed(1)}%;background:var(--${col})"></i></div></div>`
+    + `<button class="mini" id="ashdone">Wyczyściłem</button></div>`;
+}
+
+// The last 7 full days against the 7 before them.
+function renderWeek() {
+  const el = $('#weekcard'), list = lastDays(15).slice(0, 14), cur = list.slice(7), prev = list.slice(0, 7);
+  const have = a => a.filter(x => x.burn !== null).length;
+  if (!have(cur)) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  const sum = (a, f) => a.reduce((s, x) => s + (f(x) || 0), 0), compare = have(prev) >= 5;
+  const delta = (a, b, judge) => {
+    if (!compare || !b) return '';
+    const p = Math.round((a - b) / b * 100);
+    if (Math.abs(p) < 3) return '<span class="dchip flat">bez zmian</span>';
+    return `<span class="dchip ${judge ? (p > 0 ? 'bad' : 'good') : 'flat'}">${p > 0 ? '↑' : '↓'} ${Math.abs(p)}%</span>`;
+  };
+  const rows = [];
+  const bh = sum(cur, x => x.burn) / 60, pbh = sum(prev, x => x.burn) / 60;
+  rows.push(row('Piec pracował', `${Math.round(bh)} godz.${delta(bh, pbh, false)}`));
+  if (coalOn() && now.coal.k !== null) {
+    const b = coalBk(sum(cur, x => x.heat)), pb = coalBk(sum(prev, x => x.heat));
+    rows.push(row('Węgiel', `${coalText(b)}${delta(b, pb, true)}`, `≈${kgText(bkKg(b))} · średnio ${bkText(b / have(cur))} dziennie`));
+  }
+  const outs = cur.map(x => outdoorMean(x.t)).filter(v => v !== null), pouts = prev.map(x => outdoorMean(x.t)).filter(v => v !== null);
+  if (outs.length) {
+    const m = outs.reduce((a, v) => a + v, 0) / outs.length, pm = pouts.length ? pouts.reduce((a, v) => a + v, 0) / pouts.length : null;
+    const diff = pm === null ? '' : Math.abs(m - pm) < .5 ? 'podobnie jak tydzień wcześniej' : `o ${n1(Math.abs(m - pm))}° ${m > pm ? 'cieplej' : 'zimniej'} niż tydzień wcześniej`;
+    rows.push(row('Na zewnątrz', `${n1(m)}°`, diff));
+  }
+  const cuts = outages().filter(c => c.t0 >= cur[0].t && c.t0 < cur[6].t + 86400);
+  rows.push(row('Zaniki prądu', cuts.length ? `${cuts.length} · ${durShort(cuts.reduce((a, c) => a + c.sec, 0))}` : 'brak'));
+  $('#week').innerHTML = rows.join('');
+}
+
+// Coal per day for 30 days, with what frost does to it and the season so far.
+function renderCoalChart() {
+  const card = $('#coalchartcard');
+  if (!coalOn()) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  if (now.coal.k === null) { $('#coalchart').innerHTML = '<div class="empty">Wykres pojawi się po dwóch dosypaniach do pełna</div>'; return; }
+  const list = lastDays(30).map(x => Object.assign(x, { bk: coalBk(x.heat), out: outdoorMean(x.t) }));
+  const full = list.filter(x => !x.today && x.bk !== null);
+  if (!list.some(x => x.bk)) { $('#coalchart').innerHTML = '<div class="empty">Zużycie pojawi się po pierwszej dobie</div>'; return; }
+  const total = list.reduce((a, x) => a + (x.bk || 0), 0), max = Math.max(.5, ...list.map(x => x.bk || 0));
+  const cost = coalCost(total);
+  let html = `<div class="stats three"><div><span>30 DNI</span><b class="num">${bkText(total)}</b></div>`
+    + `<div><span>KOSZT</span><b class="num">${cost !== null ? zlText(cost) : '–'}</b></div>`
+    + `<div><span>NA DZIEŃ</span><b class="num">${full.length ? bkText(full.reduce((a, x) => a + x.bk, 0) / full.length) : '–'}</b></div></div>`
+    + `<div class="bars coalb">${list.map((x, k) => `<button data-k="${k}" class="${x.today ? 'today' : ''}" style="height:${x.bk ? Math.max(2, x.bk / max * 100) : 0}%"></button>`).join('')}</div>`
+    + `<div class="bars-x"><span>${day(list[0].t)}</span><span>dziś</span></div><div class="caption" id="coalcap">Stuknij słupek, aby zobaczyć dzień</div>`;
+
+  // Frost: average buckets per day in three bands of the day's mean outdoor temperature.
+  const bands = [['poniżej 0°', v => v < 0], ['0 do 5°', v => v >= 0 && v < 5], ['powyżej 5°', v => v >= 5]]
+    .map(([label, f]) => { const d = full.filter(x => x.out !== null && f(x.out)); return { label, n: d.length, bk: d.length ? d.reduce((a, x) => a + x.bk, 0) / d.length : 0 }; })
+    .filter(b => b.n >= 2);
+  if (bands.length >= 2) {
+    const top = Math.max(...bands.map(b => b.bk));
+    html += `<div class="blabel">Dzień przy temperaturze na zewnątrz</div><div class="frost">${bands.map(b => `<span>${b.label}</span><i style="width:${Math.max(4, b.bk / top * 100)}%"></i><b>${bkText(b.bk)}</b>`).join('')}</div>`;
+  }
+
+  // Heating season from 1 September, against the same stretch of the last season when the history has it.
+  const d = new Date(), start = new Date(d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1, 8, 1) / 1000;
+  const season = coalBk(days.filter(x => x.t >= start && x.t < midnight(tNow())).reduce((a, x) => a + x.heat, 0) + heatSince(midnight(tNow()), tNow()));
+  const lastYear = days.filter(x => x.t >= start - 365 * 86400 && x.t < tNow() - 365 * 86400);
+  const before = lastYear.length >= 7 ? coalBk(lastYear.reduce((a, x) => a + x.heat, 0)) : null;
+  html += `<div class="rows" style="margin-top:12px">${row('Sezon od 1 września', coalText(season), `≈${massText(bkKg(season))}${before !== null ? ` · rok wcześniej w tym czasie ~${bkText(before)}` : ''}`)}</div>`;
+  $('#coalchart').innerHTML = html;
+  $('#coalchart .bars').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const x = list[+b.dataset.k];
+    $$('#coalchart .bars button').forEach(q => q.classList.toggle('sel', q === b));
+    $('#coalcap').textContent = `${day(x.t)}: ${x.bk === null ? 'brak danych' : `${coalText(x.bk)} · ≈${kgText(bkKg(x.bk))}`}${x.out !== null ? ` · na zewnątrz ${n1(x.out)}°` : ''}${x.today ? ' (do teraz)' : ''}`;
+  };
+}
+
+// ---------------------------------------------------------------- refill dialog
+
+const pad2 = v => String(v).padStart(2, '0');
+
+function setRefillAgo(min) {
+  const d = new Date(Date.now() - min * 60e3);
+  $('#rtime').value = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  $$('#rwhen button').forEach(b => b.classList.toggle('on', +b.dataset.m === min));
+  refillWhenLabel();
+}
+
+// The time field means today, or yesterday when that hour has not come yet.
+function refillTime() {
+  const [h, m] = $('#rtime').value.split(':').map(Number);
+  if (!isFinite(h) || !isFinite(m)) return tNow();
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  if (d / 1000 > tNow() + 60) d.setDate(d.getDate() - 1);
+  return Math.floor(d / 1000);
+}
+
+function refillWhenLabel() {
+  const t = refillTime(), ago = tNow() - t;
+  $('#rwhenl').textContent = ago < 120 ? 'Godzina – teraz' : `Godzina – ${midnight(t) < midnight(tNow()) ? 'wczoraj' : 'dziś'}`;
+}
+
+const refillAmount = () => +$('#ramt').value.trim().replace(',', '.');
+const halves = b => Math.max(.5, Math.round(b * 2) / 2);
+
+function refillAmountLabel() {
+  const b = refillAmount();
+  $('#ramtl').textContent = b > 0 ? `${b % 1 ? 'wiadra' : plural(b, 'wiadro', 'wiadra', 'wiader')} · ≈${kgText(bkKg(b))}` : 'wiadra';
+  // The fill-level shortcut needs the hopper size and only makes sense when filling up.
+  $('#rlevelbox').style.display = $('#rfull').checked && now.settings.hopperBuckets > 0 ? '' : 'none';
+}
+
+// Starts with what should fit to the top by the estimate, else with the last refill.
+function openRefill() {
+  const c = now.coal, cap = now.settings.hopperBuckets;
+  const guess = c.level !== null && cap > 0 ? cap - c.level : c.lastRefill ? c.lastRefill[1] / 10 : 1;
+  $('#ramt').value = fmtNum(halves(guess));
+  $('#rfull').checked = true;
+  $$('#rlevel button').forEach(b => b.classList.remove('on'));
+  setRefillAgo(0);
+  refillAmountLabel();
+  $('#rmodal').classList.add('on');
+}
+
+async function saveRefill() {
+  const b = refillAmount(), t = refillTime();
+  if (!(b > 0)) return toast('Wpisz, ile wiader dosypałeś');
+  try {
+    now = await (await api('/api/refill', { method: 'POST', body: new URLSearchParams({ buckets: b, full: $('#rfull').checked ? 1 : 0, time: t }) })).json();
+    $('#rmodal').classList.remove('on');
+    refillsAt = 0;
+    toast(`Zapisano: ${bkText(b)}, ${when(t)}`);
+  } catch (e) { toast('Nie udało się zapisać – brak połączenia z piecem?'); }
+  render();
 }
 
 // ---------------------------------------------------------------- charts view
@@ -968,7 +1407,8 @@ function paintDetail() {
   const MARK = { 3: '#ff453a', 4: '#ff453a', 6: '#ff453a', 8: '#ff9f0a', 5: '#30d158', 7: '#30d158', 9: '#30d158' };
   const concerns = e => e[1] >= 8 ? (WARNING_PROBES[e[2]] || []).some(p => shown.includes(p)) : shown.includes(e[2]);
   const marks = journal.filter(e => MARK[e[1]] && concerns(e)).map(e => ({ t: e[0], color: MARK[e[1]] }));
-  chart($('#detail'), { series: lines, t0: view.t0, t1: view.t1, step, limits, marks, fill: single, band: single });
+  chart($('#detail'), { series: lines, t0: view.t0, t1: view.t1, step, limits, marks, bands: outages(), fill: single, band: single,
+    smooth: step === 60 ? 2 : step <= 300 ? 1 : 0 });
 
   $('#dnow').textContent = single && s0 ? (s0.temp === null ? '–' : n1(s0.temp) + '°') : '';
   $('#dname').textContent = single && s0 ? s0.name + ' teraz' : `${shown.length} ${plural(shown.length, 'seria', 'serie', 'serii')}`;
@@ -989,13 +1429,7 @@ function paintDetail() {
 }
 
 function renderBurn() {
-  const t = tNow(), today = midnight(t), list = [];
-  for (let k = 29; k >= 0; k--) {
-    const d = new Date(today * 1000);
-    d.setDate(d.getDate() - k);
-    const ds = d / 1000, rec = days.find(x => Math.abs(x.t - ds) < 3 * 3600);
-    list.push({ t: ds, min: k === 0 ? burnSeconds(today, t) / 60 : rec ? rec.burn : null, today: k === 0 });
-  }
+  const list = lastDays(30).map(x => ({ t: x.t, min: x.burn, today: x.today }));
   if (!list.some(x => x.min)) { $('#burn').innerHTML = '<div class="empty">Godziny pracy pojawią się po pierwszej pełnej dobie</div>'; return; }
   const max = Math.max(60, ...list.map(x => x.min || 0));
   $('#burn').innerHTML = `<div class="bars">${list.map((x, k) => `<button data-k="${k}" class="${x.today ? 'today' : ''}" style="height:${x.min ? Math.max(2, x.min / max * 100) : 0}%"></button>`).join('')}</div>`
@@ -1014,8 +1448,39 @@ function renderCharts() {
   const keys = now.sensors.map((s, i) => i).concat(now.settings.lat !== null ? [OUT] : []);
   $('#chips').innerHTML = keys.map(i => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${colorOf(i)};--cb:${rgba(colorOf(i), .14)}"><i></i>${esc(nameOf(i))}</button>`).join('');
   if (!view) resetView(); else fetchForView();
-  loadDays().then(renderBurn);
-  loadJournal().then(paintDetail);
+  loadDays().then(() => { renderBurn(); renderCoalChart(); });
+  loadJournal().then(() => { paintDetail(); renderPower(); });
+}
+
+// Power cuts per day for 30 days, a cut counted on the day it started: one row of bars for how many, one for
+// how long (square-root scale, so a few seconds still shows next to hours).
+function renderPower() {
+  const t = tNow(), today = midnight(t), cuts = outages(), list = [];
+  for (let k = 29; k >= 0; k--) {
+    const d = new Date(today * 1000);
+    d.setDate(d.getDate() - k);
+    const ds = d / 1000;
+    d.setDate(d.getDate() + 1);
+    const mine = cuts.filter(c => c.t0 >= ds && c.t0 < d / 1000);
+    list.push({ t: ds, n: mine.length, sec: mine.reduce((a, c) => a + c.sec, 0), today: k === 0 });
+  }
+  const recent = cuts.filter(c => c.t0 >= list[0].t);
+  if (!recent.length) { $('#power').innerHTML = '<div class="empty">Bez zaników prądu w ostatnich 30 dniach</div>'; return; }
+  const total = recent.reduce((a, c) => a + c.sec, 0), longest = recent.reduce((a, c) => (c.sec > a.sec ? c : a));
+  const maxN = Math.max(3, ...list.map(x => x.n)), maxS = Math.max(600, ...list.map(x => x.sec));
+  const row = (cls, h) => `<div class="bars short amber ${cls}">${list.map((x, k) => `<button data-k="${k}" class="${x.today ? 'today' : ''}" style="height:${x.n ? Math.max(4, h(x)) : 0}%"></button>`).join('')}</div>`;
+  $('#power').innerHTML = `<div class="stats three"><div><span>ZANIKI</span><b class="num">${recent.length}</b></div>`
+    + `<div><span>BEZ PRĄDU</span><b class="num">${durShort(total)}</b></div><div><span>NAJDŁUŻSZY</span><b class="num">${durShort(longest.sec)}</b></div></div>`
+    + `<div class="blabel">Ile razy</div>${row('', x => x.n / maxN * 100)}`
+    + `<div class="blabel">Jak długo</div>${row('long', x => Math.sqrt(x.sec / maxS) * 100)}`
+    + `<div class="bars-x"><span>${day(list[0].t)}</span><span>dziś</span></div><div class="caption" id="powercap">Stuknij słupek, aby zobaczyć dzień</div>`;
+  $('#power').onclick = e => {
+    const b = e.target.closest('.bars button');
+    if (!b) return;
+    const k = +b.dataset.k, x = list[k];
+    $$('#power .bars button').forEach(q => q.classList.toggle('sel', +q.dataset.k === k));
+    $('#powercap').textContent = `${day(x.t)}: ${x.n ? `${x.n} ${plural(x.n, 'zanik', 'zaniki', 'zaników')}, bez prądu ${durCut(x.sec)}` : 'bez zaników'}`;
+  };
 }
 
 // ---------------------------------------------------------------- journal
@@ -1025,15 +1490,23 @@ function eventView(e) {
   const name = now.sensors[i] ? now.sensors[i].name : '';
   const temp = v === null ? '' : ` · ${n1(v)}°`;
   switch (type) {
-    case 1: return ['c-gray', I_POWER, 'Uruchomienie urządzenia', `wersja ${raw}`];
+    case 1: return ['c-gray', I_POWER, 'Uruchomienie urządzenia', [BOOT_REASON[i], `wersja ${raw}`].filter(Boolean).join(' · ')];
+    case EV_POWER_CUT: {
+      const sec = cutSeconds(e);
+      return ['c-orange', I_NOPOWER, i & 0x80 ? 'Spadek napięcia' : sec < 60 ? 'Chwilowy zanik prądu' : 'Brak prądu',
+        sec < 60 ? `${durCut(sec)} bez prądu` : `${hhmm(t - sec)}–${hhmm(t)} · ${dur(sec)}`];
+    }
     case 2: return ['c-blue', I_INFO, `Zaktualizowano do wersji ${raw}`, ''];
     case 3: return ['c-red', I_UP, `${name}: za gorąco`, `przekroczony próg maks.${temp}`];
     case 4: return ['c-red', I_DOWN, `${name}: za zimno`, `poniżej progu min.${temp}`];
     case 5: return ['c-green', I_OK, `${name}: wróciło do normy`, temp.slice(3)];
     case 6: return ['c-red', I_PROBE, `${name}: czujnik nie odpowiada`, ''];
     case 7: return ['c-green', I_OK, `${name}: czujnik znów działa`, temp.slice(3)];
-    case 8: return ['c-orange', (WARNINGS[i] || WARNINGS[0]).icon, (WARNINGS[i] || WARNINGS[0]).name, temp.slice(3)];
-    case 9: return ['c-green', I_OK, `${(WARNINGS[i] || WARNINGS[0]).name} – koniec`, temp.slice(3)];
+    case 8: return ['c-orange', (WARNINGS[i] || WARNINGS[0]).icon, (WARNINGS[i] || WARNINGS[0]).name, i === 3 ? (v !== null ? `zostało ~${bkText(v)}` : '') : i === 5 ? (v !== null ? `spalono ~${bkText(v)}` : '') : temp.slice(3)];
+    case 9: return ['c-green', I_OK, `${(WARNINGS[i] || WARNINGS[0]).name} – koniec`, i === 3 || i === 5 ? '' : temp.slice(3)];
+    case EV_SEASON: return raw ? ['c-orange', I_FLAME, 'Sezon grzewczy włączony', i ? 'sam – piec pali od 2 godzin' : '']
+      : ['c-blue', I_SUN, 'Tryb lato', 'alarmy „za zimno” pieca i powrotu wyciszone'];
+    case EV_ASH: return ['c-gray', I_ASH, 'Opróżniono popielnik', ''];
     case 10: return ['c-gray', I_INFO, 'Historia usunięta', ''];
     default: return ['c-gray', I_INFO, 'Zdarzenie', ''];
   }
@@ -1041,14 +1514,18 @@ function eventView(e) {
 
 function renderJournal() {
   if (!now) return;
-  loadJournal().then(() => {
-    if (!journal.length) { $('#events').innerHTML = '<div class="empty">Nic się jeszcze nie wydarzyło</div>'; return; }
+  Promise.all([loadJournal(), loadRefills()]).then(() => {
+    // Refills go in by their time; the one entered last can be taken back.
+    const items = journal.map(e => ({ t: e[0], view: eventView(e) }))
+      .concat(refills.map((r, k) => ({ t: r[0], undo: k === refills.length - 1 && coalOn(), view: ['c-gray', I_COAL, 'Dosypano węgiel', `${bkText(r[1] / 10)}${r[2] ? ' · do pełna' : ''}`] })))
+      .sort((a, b) => b.t - a.t);
+    if (!items.length) { $('#events').innerHTML = '<div class="empty">Nic się jeszcze nie wydarzyło</div>'; return; }
     let html = '', lastDay = '';
-    for (const e of journal.slice().reverse()) {
-      const d = day(e[0]);
+    for (const it of items) {
+      const d = day(it.t), [cls, icon, title, sub] = it.view;
       if (d !== lastDay) { html += `<div class="day">${d}</div>`; lastDay = d; }
-      const [cls, icon, title, sub] = eventView(e);
-      html += `<div class="ev"><span class="badge ${cls}">${SVG(icon)}</span><div><div class="t">${esc(title)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ''}</div><span class="h">${hhmm(e[0])}</span></div>`;
+      html += `<div class="ev"><span class="badge ${cls}">${SVG(icon)}</span><div><div class="t">${esc(title)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ''}</div>`
+        + `${it.undo ? '<button class="undo" id="undorefill">Cofnij</button>' : ''}<span class="h">${hhmm(it.t)}</span></div>`;
     }
     $('#events').innerHTML = html;
   });
@@ -1060,16 +1537,23 @@ const fmtNum = v => (v === null || v === undefined ? '' : String(v).replace('.',
 const row = (k, v, s) => `<div class="row"><div><div class="k">${k}</div>${s ? `<div class="s">${s}</div>` : ''}</div><div class="v num">${v}</div></div>`;
 const editing = el => el.contains(document.activeElement);
 
+// Fields: [label, setting, value, unit, empty allowed (saved as 0)].
+const fieldRows = fields => fields.map(f => `<div class="wrow"><span>${f[0]}</span><span><input type="text" inputmode="decimal" data-k="${f[1]}" value="${fmtNum(f[2])}"${f[4] ? ' data-empty="1" placeholder="–"' : ''}> ${f[3]}</span></div>`).join('');
+
 function warnBlock(w, on, desc, fields) {
-  const W = WARNINGS[w], color = ['c-orange', 'c-blue', 'c-red'][w];
+  const W = WARNINGS[w], color = ['c-orange', 'c-blue', 'c-red', 'c-gray', 'c-orange', 'c-gray'][w];
   return `<div class="warn-block ${on ? '' : 'off'}"><div class="warn-head"><span class="badge ${color}">${SVG(W.icon)}</span>${W.name}`
-    + `<input class="sw" type="checkbox" data-k="${['goOutOn', 'freezeOn', 'burnbackOn'][w]}" ${on ? 'checked' : ''}></div>`
-    + `<div class="warn-desc">${desc}</div>${fields.map(f => `<div class="wrow"><span>${f[0]}</span><span><input type="text" inputmode="decimal" data-k="${f[1]}" value="${fmtNum(f[2])}"> ${f[3]}</span></div>`).join('')}</div>`;
+    + `<input class="sw" type="checkbox" data-k="${['goOutOn', 'freezeOn', 'burnbackOn', 'lowCoalOn', 'stalledOn', 'ashOn'][w]}" ${on ? 'checked' : ''}></div>`
+    + `<div class="warn-desc">${desc}</div>${fieldRows(fields)}</div>`;
 }
 
 function renderSettings() {
   if (!now) return;
   const st = now.settings;
+  $('#seasonset').innerHTML = `<div class="warn-block"><div class="warn-head"><span class="badge ${st.heating ? 'c-orange' : 'c-blue'}">${SVG(st.heating ? I_FLAME : I_SUN)}</span>`
+    + `${st.heating ? 'Sezon grzewczy' : 'Tryb lato'}<input class="sw" type="checkbox" data-k="heating" data-msg="Sezon grzewczy" ${st.heating ? 'checked' : ''}></div>`
+    + `<div class="warn-desc">${st.heating ? 'Latem wyłącz – alarmy „za zimno” pieca i powrotu oraz ostrzeżenia o paleniu ucichną. Bojler i mróz działają dalej.'
+      : 'Alarmy „za zimno” pieca i powrotu oraz ostrzeżenia o paleniu są wyciszone. Gdy piec będzie palić 2 godziny, sezon grzewczy włączy się sam.'}</div></div>`;
   if (!editing($('#limits')))
     $('#limits').innerHTML = now.sensors.map((s, i) => `<div class="lim" style="--c:${COLORS[i]}"><label><span class="cd"></span>${esc(s.name)}</label>`
       + `<div class="f">MIN<input type="text" inputmode="decimal" data-i="${i}" data-k="low" value="${fmtNum(s.low)}" placeholder="wył."></div>`
@@ -1080,8 +1564,23 @@ function renderSettings() {
       warnBlock(0, st.goOutOn, 'Gdy temperatura pieca szybko spada albo zaraz osiągnie próg min.', [['Spadek szybszy niż', 'goOutRate', st.goOutRate, '°/h'], ['Próg min. w ciągu', 'goOutHorizon', st.goOutHorizon, 'min']])
       + warnBlock(1, st.freezeOn, 'Gdy woda w piecu, na powrocie lub w bojlerze robi się bardzo zimna.', [['Poniżej', 'freezeTemp', st.freezeTemp, '°C']])
       + warnBlock(2, st.burnbackOn, 'Gdy temperatura zasobnika rośnie szybko – żar może cofać się do węgla.', [['Wzrost szybszy niż', 'burnbackRate', st.burnbackRate, '°/h']])
+      + warnBlock(4, st.stalledOn, 'Gdy po powrocie prądu piec dalej stygnie – sterownik mógł się sam nie uruchomić.', [])
+      + (st.coalOn ? warnBlock(3, st.lowCoalOn, 'Gdy według szacunku węgla w zasobniku starczy już tylko na kilka godzin.', [['Starczy na mniej niż', 'lowCoalHours', st.lowCoalHours, 'godz.']])
+        + warnBlock(5, st.ashOn, 'Przypomina o opróżnieniu popielnika – co nastąpi wcześniej. Przycisk „Wyczyściłem” jest w karcie węgla.', [['Po spaleniu', 'ashLimit', st.ashLimit, 'wiader'], ['Albo po', 'ashDays', st.ashDays, 'dniach']]) : '')
       + `<div class="warn-block"><div class="warn-head"><span class="badge c-green">${SVG(ICONS[BOILER])}</span>Ciepła woda gotowa</div>`
-      + `<div class="warn-desc">Tylko informacja na ekranie głównym.</div><div class="wrow"><span>Od temperatury bojlera</span><span><input type="text" inputmode="decimal" data-k="hotWater" value="${fmtNum(st.hotWater)}"> °C</span></div></div>`;
+      + `<div class="warn-desc">Czujnik „Ciepła woda gotowa” w aplikacji Dom otwiera się, gdy bojler osiągnie tę temperaturę – z powiadomieniem wiadomo, że można się kąpać.</div>`
+      + fieldRows([['Od temperatury bojlera', 'hotWater', st.hotWater, '°C']]) + '</div>';
+
+  if (!editing($('#coalset'))) {
+    const c = now.coal;
+    $('#coalset').innerHTML = `<div class="warn-block ${st.coalOn ? '' : 'off'}"><div class="warn-head"><span class="badge c-gray">${SVG(I_COAL)}</span>Licz zużycie węgla`
+      + `<input class="sw" type="checkbox" data-k="coalOn" data-msg="Liczenie węgla" ${st.coalOn ? 'checked' : ''}></div>`
+      + `<div class="warn-desc">Przycisk „Dosypałem” na ekranie głównym, zużycie i koszty, stan zasobnika i ostrzeżenie „Mało węgla”. Wyłączone – wszystko to znika.</div>`
+      + fieldRows([['Zasobnik mieści', 'hopperBuckets', st.hopperBuckets || null, 'wiader', true], ['Wiadro waży', 'bucketKg', st.bucketKg, 'kg'], ['Cena węgla', 'coalPrice', st.coalPrice || null, 'zł/t', true]])
+      + `<div class="warn-desc">Wagę wiadra najprościej sprawdzić raz na wadze łazienkowej (z wiadrem i bez) – od niej zależą tylko kilogramy i koszty.</div>`
+      + `<div class="warn-desc">${c.k !== null ? `Zużycie wyliczone z ${c.samples} ${plural(c.samples, 'dosypania', 'dosypań', 'dosypań')} do pełna – z każdym kolejnym dokładniej.`
+        : 'Zużycie liczę z dosypań do pełna – potrzebne są dwa, potem z każdym kolejnym dokładniej.'}</div></div>`;
+  }
 
   $('#place').innerHTML = st.lat !== null
     ? row(esc(st.place || 'Wybrane miejsce'), outdoor.current !== null ? `${n1(outdoor.current)}°` : '–', `<a href="#" id="unplace">Usuń lokalizację</a>`)
@@ -1123,10 +1622,11 @@ function onWarnChange(e) {
   const k = e.target.dataset.k;
   if (!k) return;
   if (e.target.type === 'checkbox') {
-    e.target.closest('.warn-block').classList.toggle('off', !e.target.checked);
-    return saveSetting({ [k]: e.target.checked ? '1' : '0' }, e.target.checked ? 'Ostrzeżenie włączone' : 'Ostrzeżenie wyłączone');
+    const on = e.target.checked, what = e.target.dataset.msg;
+    e.target.closest('.warn-block').classList.toggle('off', !on);
+    return saveSetting({ [k]: on ? '1' : '0' }, what ? `${what}: ${on ? 'włączone' : 'wyłączone'}` : on ? 'Ostrzeżenie włączone' : 'Ostrzeżenie wyłączone');
   }
-  const v = e.target.value.trim().replace(',', '.');
+  const v = e.target.value.trim().replace(',', '.') || (e.target.dataset.empty ? '0' : '');
   if (!v || !isFinite(+v)) { toast('Wpisz liczbę'); return render(); }
   saveSetting({ [k]: v });
 }
@@ -1206,6 +1706,9 @@ function setup() {
     if (e.target.id === 'fwseen') { store('furnace-fw', now.fw); renderHome(); }
     if (e.target.id === 'a2hs') { store('furnace-a2hs', '1'); renderHome(); }
     if (e.target.id === 'missedseen') { store('furnace-seen', tNow()); render(); }
+    if (e.target.id === 'seasonno') { store('furnace-season-no', tNow()); renderHome(); }
+    if (e.target.id === 'tosummer') saveSetting({ heating: '0' }, 'Tryb lato włączony');
+    if (e.target.id === 'toheating') saveSetting({ heating: '1' }, 'Sezon grzewczy włączony');
     const item = e.target.closest('.mitem');
     if (item) openEvent(missedEvents()[+item.dataset.k]);
   };
@@ -1242,6 +1745,49 @@ function setup() {
   $('#zoomreset').onclick = resetView;
   $('#limits').addEventListener('change', e => { if (e.target.dataset.i) saveLimits(+e.target.dataset.i); });
   $('#warnset').addEventListener('change', onWarnChange);
+  $('#coalset').addEventListener('change', onWarnChange);
+  $('#coalcard').onclick = async e => {
+    if (e.target.closest('#refill')) openRefill();
+    if (e.target.id !== 'ashdone') return;
+    try {
+      now = await (await api('/api/ash', { method: 'POST' })).json();
+      journalAt = 0;
+      toast('Zapisano: popielnik opróżniony');
+    } catch (err) { toast('Nie udało się zapisać – brak połączenia z piecem?'); }
+    render();
+  };
+  $('#seasonset').addEventListener('change', onWarnChange);
+  $('#rno').onclick = () => $('#rmodal').classList.remove('on');
+  $('#ryes').onclick = saveRefill;
+  $('#rwhen').onclick = e => { const b = e.target.closest('button'); if (b) setRefillAgo(+b.dataset.m); };
+  $('#rtime').addEventListener('input', () => { $$('#rwhen button').forEach(b => b.classList.remove('on')); refillWhenLabel(); });
+  $('#ramt').addEventListener('input', () => { $$('#rlevel button').forEach(b => b.classList.remove('on')); refillAmountLabel(); });
+  $('#rfull').addEventListener('change', refillAmountLabel);
+  $('#rmodal .stepper').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    $('#ramt').value = fmtNum(halves((refillAmount() || 0) + +b.dataset.d));
+    $$('#rlevel button').forEach(x => x.classList.remove('on'));
+    refillAmountLabel();
+  };
+  $('#rlevel').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    $('#ramt').value = fmtNum(halves(now.settings.hopperBuckets * (1 - +b.dataset.f)));
+    $$('#rlevel button').forEach(x => x.classList.toggle('on', x === b));
+    refillAmountLabel();
+  };
+  $('#events').onclick = async e => {
+    if (e.target.id !== 'undorefill') return;
+    const r = refills[refills.length - 1];
+    if (!r || !await confirmDialog('Cofnąć dosypanie?', `${bkText(r[1] / 10)}, ${when(r[0])} – wpis zniknie z dziennika i z wyliczeń.`)) return;
+    try {
+      now = await (await api('/api/refill-undo', { method: 'POST' })).json();
+      refillsAt = 0;
+      toast('Cofnięto dosypanie');
+    } catch (err) { toast('Nie udało się – brak połączenia z piecem?'); }
+    render();
+  };
   $('#placeq').addEventListener('input', onPlaceInput);
   $('#place').onclick = e => {
     if (e.target.id !== 'unplace') return;

@@ -1,5 +1,6 @@
 # Furnace monitor: two OTA app slots of 1.69 MB, a raw 352 KB partition for the per-minute ring (MinuteLog in
-# HistoryLog.h, 31 days) and a 224 KB LittleFS for the small history files (Eve, daily summaries, journal).
+# HistoryLog.h, 31 days), 16 KB of "still alive" marks that time power cuts (AliveLog) and a 208 KB LittleFS for
+# the small history files (Eve, daily summaries, journal).
 # No core dump partition - the core reports it missing at boot and carries on. nvs stays at 0x9000, so WiFi and
 # the HomeKit pairing survive a partition change.
 # Name,   Type, SubType,  Offset,   Size,     Flags
@@ -8,4 +9,5 @@ otadata,  data, ota,      0xe000,   0x2000,
 app0,     app,  ota_0,    0x10000,  0x1B0000,
 app1,     app,  ota_1,    0x1C0000, 0x1B0000,
 minutes,  data, 0x40,     0x370000, 0x58000,
-spiffs,   data, spiffs,   0x3C8000, 0x38000,
+alive,    data, 0x41,     0x3C8000, 0x4000,
+spiffs,   data, spiffs,   0x3CC000, 0x34000,

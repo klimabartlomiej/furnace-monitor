@@ -1,5 +1,6 @@
 // History for the web app:
 //   MinuteLog - one record per minute for all probes, a month of it, in its own flash partition
+//   AliveLog  - a "still alive" mark every few seconds, in its own flash partition, to time power cuts
 //   RingFile  - fixed-size records in a ring file on LittleFS (daily summaries for 5 years, the event journal)
 // Everything is a ring: when full, the newest record overwrites the oldest, so the space never runs out.
 
@@ -145,6 +146,55 @@ private:
   uint32_t               topBase  = 0;
 };
 
+// "Still alive" marks: the Unix time every few seconds, one uint32 per slot of its own flash partition ("alive"),
+// written into erased flash and a sector erased only when the ring comes back to it. After a power cut the
+// newest mark says when the power went - to the second, which the minute log cannot.
+// 16 KB at a mark every 2 s: each sector is erased every ~2.3 hours, ~4k times a year (flash lasts 100k).
+class AliveLog {
+public:
+  explicit AliveLog(const char* label) : label(label) {}
+
+  // Finds the newest mark - call before the first mark() of this boot. False when the partition is missing.
+  bool begin() {
+    part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, label);
+    if (!part) return false;
+    slots = part->size / sizeof(uint32_t);
+    uint32_t buf[64];
+    for (uint32_t k = 0; k < slots; k += 64) {
+      esp_partition_read(part, k * sizeof(uint32_t), buf, sizeof(buf));
+      for (uint32_t i = 0; i < 64; i++)
+        if (buf[i] != EMPTY && buf[i] > last) { last = buf[i]; next = (k + i + 1) % slots; }
+    }
+    return true;
+  }
+
+  // Time of the newest mark from before this boot's marks, 0 = none.
+  uint32_t newest() const { return last; }
+
+  void mark(uint32_t t) {
+    if (!part) return;
+    if (next % SLOTS_PER_SECTOR == 0) esp_partition_erase_range(part, next * sizeof(uint32_t), SECTOR);
+    esp_partition_write(part, next * sizeof(uint32_t), &t, sizeof(t));
+    next = (next + 1) % slots;
+  }
+
+  void clear() {
+    if (part) esp_partition_erase_range(part, 0, part->size);
+    last = next = 0;
+  }
+
+private:
+  static constexpr uint32_t EMPTY            = 0xFFFFFFFF;
+  static constexpr uint32_t SECTOR           = 4096;
+  static constexpr uint32_t SLOTS_PER_SECTOR = SECTOR / sizeof(uint32_t);
+
+  const char*            label;
+  const esp_partition_t* part  = nullptr;
+  uint32_t               slots = 0;
+  uint32_t               last  = 0;
+  uint32_t               next  = 0;
+};
+
 // Fixed-size records whose first field is a uint32 `time`, in a ring file [Header][capacity x T].
 template <typename T> class RingFile {
 public:
@@ -178,6 +228,17 @@ public:
     f.seek(0);
     f.write((const uint8_t*)&h, sizeof(h));
     f.close();
+  }
+
+  // Drops the record added last (one entered by mistake). False when empty.
+  bool removeLast() {
+    if (!h.count) return false;
+    File f = LittleFS.open(path, "r+");
+    if (!f) return false;
+    h.count--;
+    f.write((const uint8_t*)&h, sizeof(h));
+    f.close();
+    return true;
   }
 
   // Time of the newest record, 0 when empty.

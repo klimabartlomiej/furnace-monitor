@@ -4,8 +4,14 @@
 // Apple Home (all names in Polish - the household's language):
 //   name       - temperature sensor per probe; gets a fault flag when the probe stops answering
 //   alarmName  - contact sensor per probe that OPENS when the temperature leaves its limits or the probe dies
-//   warnings   - three contact sensors (furnace dying out, freezing, embers creeping into the coal hopper)
-//   Turn on notifications for the contact sensors in the Home app to get a push on the phone.
+//   warnings   - six contact sensors (furnace dying out, freezing, embers creeping into the coal hopper, low coal,
+//                furnace stalled after a power cut, ash pan due); summer mode quiets the ones about burning
+//   hot water  - a contact sensor that opens when the boiler is warm enough (not a problem - "you can shower")
+//   Turn on notifications for the contact sensors in the Home app to get a push on the phone; Home sends one
+//   when a contact opens and one when it closes.
+// Coal: the web app records refills in buckets; the coal burned is taken as proportional to the furnace's heat
+// output and the factor is learnt from refills "to the top" (see recomputeCoal) - daily use, costs, hopper level,
+// time left.
 // Pairing: Home app -> Add Accessory -> More options -> "Czujniki pieca", setup code 466-37-726.
 // Eve app: every temperature sensor carries an Eve history (EveHistory.h).
 //
@@ -32,7 +38,8 @@
 //     Port -> "furnace at ..." (both use the OTA password set with the serial command "O").
 //
 // Arduino IDE: board "ESP32 Dev Module"; the partition table comes from partitions.csv in this folder
-// (2 x 1.69 MB app slots for OTA, 352 KB minute ring, 224 KB LittleFS). A partition change needs a USB upload.
+// (2 x 1.69 MB app slots for OTA, 352 KB minute ring, 16 KB alive marks, 208 KB LittleFS). A partition change
+// needs a USB upload.
 // Libraries:   HomeSpan, OneWire 2.3.8+, DallasTemperature.
 // Serial Monitor (115200 baud): "@a" lists the probes on the bus, "@u" checks for updates, "?" HomeSpan help.
 
@@ -45,6 +52,8 @@
 #include <time.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <algorithm>
+#include <vector>
 #include "EveHistory.h"
 #include "HistoryLog.h"
 #include "RemoteUpdate.h"
@@ -52,7 +61,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 7;                      // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 8;                     // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -68,7 +77,16 @@ constexpr uint32_t FULL_RESET_HOLD_MS = 15000;           // ... this long to als
 constexpr uint32_t HISTORY_INTERVAL_S = 600;             // one Eve entry per 10 min, like Eve's own sensors
 constexpr uint32_t DAILY_CAPACITY     = 5 * 366;         // daily summaries (5 years)
 constexpr uint32_t EVENT_CAPACITY     = 1024;            // event journal entries
-constexpr uint8_t  FS_LAYOUT          = 3;               // bump when the history files change shape (wipes them once)
+constexpr uint32_t REFILL_CAPACITY    = 512;             // coal refills kept
+constexpr uint8_t  COAL_INTERVALS     = 10;              // latest refill-to-refill intervals the kg factor averages
+constexpr float    COAL_MIN_HEAT      = 600;             // degree-minutes an interval needs to count (10 degrees, 1 h)
+constexpr float    HOT_WATER_HYSTERESIS = 3;             // degrees below "ready" before the hot-water contact closes
+constexpr uint16_t SEASON_AUTO_MIN    = 120;             // minutes of burning that end summer mode by themselves
+constexpr uint32_t STALL_WATCH_MS     = 3 * 3600 * 1000; // after a power cut, how long a cooling furnace is watched
+constexpr float    STALL_DROP         = 5;               // ... it counts as stalled once this much cooler
+constexpr float    STALL_SLOPE        = -3;              // ... and still falling this fast (degrees/hour)
+constexpr uint8_t  FS_LAYOUT          = 5;               // bump when the history files change shape (wipes them once)
+constexpr uint32_t ALIVE_INTERVAL_S   = 2;               // "still alive" mark - how exactly a power cut is timed
 constexpr uint8_t  TREND_MINUTES      = 30;              // window of the trend the warnings look at
 constexpr uint8_t  BOOT_BUTTON_PIN    = 0;               // the BOOT button on the board
 constexpr uint8_t  STATUS_LED_PIN     = 2;               // blue on-board LED on most ESP32 dev boards
@@ -100,12 +118,16 @@ SensorConfig SENSORS[] = {
   { "Bojler",         "Alarm bojlera",   {0x28, 0xAA, 0xDB, 0x95, 0x4D, 0x14, 0x01, 0x6B}, true,  35.0, NAN  },   // hot water tank
 };
 constexpr size_t SENSOR_COUNT = sizeof(SENSORS) / sizeof(SENSORS[0]);
-constexpr size_t FURNACE      = 0;   // probes the warnings look at
+constexpr size_t FURNACE      = 0;   // probes the warnings and the coal estimate look at
+constexpr size_t RETURN_WATER = 1;
 constexpr size_t COAL_HOPPER  = 2;
+constexpr size_t BOILER       = 3;
 
 // Warnings - each one is a contact sensor in Apple Home and a banner in the web app; tuned in the web app.
-enum WarningId : uint8_t { WARN_GOING_OUT, WARN_FREEZE, WARN_BURNBACK, WARN_COUNT };
-const char* WARNING_NAMES[WARN_COUNT] = { "Piec wygasa", "Ryzyko zamarznięcia", "Cofanie żaru" };
+enum WarningId : uint8_t { WARN_GOING_OUT, WARN_FREEZE, WARN_BURNBACK, WARN_LOW_COAL, WARN_STALLED, WARN_ASH, WARN_COUNT };
+const char* WARNING_NAMES[WARN_COUNT] = { "Piec wygasa", "Ryzyko zamarznięcia", "Cofanie żaru", "Mało węgla",
+                                          "Piec stoi po zaniku prądu", "Opróżnij popielnik" };
+const char* HOT_WATER_NAME = "Ciepła woda gotowa";
 
 struct Settings {
   bool     goOutOn      = true;   // furnace dying out: falling faster than goOutRate (degrees/hour), or the
@@ -115,7 +137,19 @@ struct Settings {
   float    freezeTemp   = 5;
   bool     burnbackOn   = true;   // coal hopper warming faster than burnbackRate (degrees/hour)
   float    burnbackRate = 10;
-  float    hotWater     = 45;     // boiler temperature the web app calls "hot water ready"
+  float    hotWater     = 45;     // boiler temperature that counts as "hot water ready" (web app + Home contact)
+  bool     coalOn       = true;   // coal tracking; off = no coal card, refills or low-coal warning
+  float    hopperBuckets = 0;     // buckets the hopper holds, 0 = not set (no level estimate)
+  float    bucketKg     = 10;     // one bucket of coal - only for kg and costs; the coal model counts buckets
+  float    coalPrice    = 0;      // PLN per tonne, 0 = no costs
+  bool     lowCoalOn    = true;   // the hopper estimate runs out within lowCoalHours
+  float    lowCoalHours = 12;
+  bool     heating      = true;   // heating season; off = summer: no "too cold" on the furnace and the return, no
+                                  // burning warnings (comes back by itself after SEASON_AUTO_MIN of burning)
+  bool     stalledOn    = true;   // after a power cut the furnace keeps cooling - its controller did not restart
+  bool     ashOn        = true;   // ash pan reminder: after ashLimit buckets burned or ashDays since emptied
+  float    ashLimit     = 15;
+  float    ashDays      = 7;
   float    lat          = NAN;    // location of the house; the web app fetches the outdoor temperature for it
   float    lon          = NAN;
   char     place[48]    = "";
@@ -151,14 +185,21 @@ struct WarningState {
 
 enum EventType : uint8_t {
   EV_BOOT = 1, EV_UPDATED, EV_ALARM_HIGH, EV_ALARM_LOW, EV_ALARM_CLEAR, EV_FAULT, EV_FAULT_CLEAR,
-  EV_WARN_ON, EV_WARN_OFF, EV_HISTORY_CLEARED,
+  EV_WARN_ON, EV_WARN_OFF, EV_HISTORY_CLEARED, EV_POWER_CUT,
+  EV_SEASON,            // value 1 = heating season on, 0 = summer mode; sensor 1 = switched on by itself
+  EV_ASH,               // ash pan emptied
 };
+
+// Why the ESP started - the `sensor` byte of EV_BOOT and EV_POWER_CUT.
+enum BootReason : uint8_t { BOOT_OTHER, BOOT_POWER_ON, BOOT_RESTART, BOOT_BROWNOUT, BOOT_CRASH };
 
 struct __attribute__((packed)) EventRecord {
   uint32_t time;
   uint8_t  type;        // EventType
-  uint8_t  sensor;      // probe index, or WarningId for EV_WARN_*
-  int16_t  value;       // degrees x 100, or the firmware version
+  uint8_t  sensor;      // probe index, WarningId for EV_WARN_*, BootReason for EV_BOOT
+  int16_t  value;       // degrees x 100, or the firmware version (EV_BOOT, EV_UPDATED)
+  // EV_POWER_CUT: time = power back, seconds without power = (sensor & 0x7F) << 16 | (uint16_t)value,
+  // sensor bit 7 = the start was a brownout (voltage dip) rather than a full power-on.
 };
 
 struct __attribute__((packed)) DayRecord {
@@ -167,6 +208,14 @@ struct __attribute__((packed)) DayRecord {
   int16_t  avg[SENSOR_COUNT];
   int16_t  max[SENSOR_COUNT];
   uint16_t burnMinutes;               // minutes the furnace was at or above burnThreshold()
+  uint32_t heat;                      // degree-minutes of furnace minus return (heatOf) - coal used = coalK x heat
+};
+
+struct __attribute__((packed)) RefillRecord {
+  uint32_t time;                      // when the coal went in (may be entered later)
+  uint16_t amount10;                  // buckets x 10 (coal is carried up loose in buckets)
+  uint8_t  full;                      // 1 = filled the hopper to the top
+  uint8_t  reserved;
 };
 
 using MinuteRecord = MinuteLog<SENSOR_COUNT>::Record;
@@ -177,8 +226,10 @@ WebServer               server(WEB_PORT);
 Preferences             prefs;
 RemoteUpdate            updater(UPDATE_MANIFEST_URL, FW_VERSION);
 MinuteLog<SENSOR_COUNT> minutes("minutes");                 // partition label in partitions.csv (31 days)
+AliveLog                alive("alive");
 RingFile<DayRecord>     daily("/daily.bin", DAILY_CAPACITY);
 RingFile<EventRecord>   events("/events.bin", EVENT_CAPACITY);
+RingFile<RefillRecord>  refills("/refills.bin", REFILL_CAPACITY);
 Settings                settings;
 SensorState             state[SENSOR_COUNT];
 WarningState            warnings[WARN_COUNT];
@@ -188,8 +239,30 @@ float    recent[TREND_MINUTES][SENSOR_COUNT];   // last minutes for the trends, 
 uint8_t  recentNext        = 0;
 uint8_t  recentCount       = 0;
 int16_t  goOutForecast     = -1;                // minutes until the furnace reaches its min limit, -1 = not heading there
-EventRecord pendingEvents[8];                   // events from before NTP set the clock
+EventRecord pendingEvents[8];                   // events from before NTP set the clock, time = seconds since boot
 uint8_t  pendingEventCount = 0;
+BootReason bootReason      = BOOT_OTHER;
+uint32_t powerLostAt       = 0;                 // estimated start of the power cut this boot ended, 0 = none to log
+uint32_t lastAliveMark     = 0;
+SpanCharacteristic* hotWaterContact = nullptr;
+bool     hotWaterReady     = false;
+
+// Coal is counted in buckets - what goes into the hopper; kilograms and costs are the web app's (x bucketKg).
+float    coalK             = NAN;               // buckets of coal per degree-minute, learnt from refills (flash "coalK")
+uint16_t coalSamples       = 0;                 // refill-to-refill intervals it was learnt from (flash "coalN")
+uint32_t lastFullAt        = 0;                 // last refill to the top, 0 = none
+float    addedSinceFull    = 0;                 // buckets put in since then without filling up
+float    heatSinceFull     = NAN;               // degree-minutes since then, NAN = beyond the minute log
+RefillRecord lastRefill    = {};                // the newest refill (time 0 = none)
+float    coalLevel         = NAN;               // buckets in the hopper (estimate)
+float    coalRate          = NAN;               // buckets per hour over the last day
+float    coalHoursLeft     = NAN;               // at that pace; INFINITY when the furnace hardly burns
+uint32_t ashAt             = 0;                 // ash pan last emptied (flash "ashAt"); counting starts with the clock
+float    heatSinceAsh      = NAN;               // degree-minutes since then, NAN = beyond the minute log
+float    ashBuckets        = NAN;               // coal burned since then, buckets (once coalK is known)
+uint16_t burningMinutes    = 0;                 // in a row - ends summer mode at SEASON_AUTO_MIN
+bool     stallWatch        = false;             // started from a power cut: watch whether the furnace comes back
+float    stallFrom         = NAN;               // furnace temperature at the first reading after that cut
 
 uint32_t lastRequestMs     = 0;
 uint32_t lastRequestMinute = 0;
@@ -267,29 +340,92 @@ void logEvent(EventType type, uint8_t sensor, int16_t value) {
   time_t now = time(nullptr);
   EventRecord e = {(uint32_t)now, (uint8_t)type, sensor, value};
   if (!clockSet(now)) {
+    e.time = millis() / 1000;
     if (pendingEventCount < 8) pendingEvents[pendingEventCount++] = e;
     return;
   }
   events.add(e);
 }
 
+// The clock is set: events from before it get their real time (boot time + their seconds since boot).
 void flushPendingEvents(time_t now) {
+  uint32_t bootTime = now - millis() / 1000;
   for (uint8_t i = 0; i < pendingEventCount; i++) {
-    pendingEvents[i].time = now;
+    pendingEvents[i].time += bootTime;
     events.add(pendingEvents[i]);
   }
   pendingEventCount = 0;
 }
 
+BootReason readBootReason() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return BOOT_POWER_ON;
+    case ESP_RST_SW:       return BOOT_RESTART;
+    case ESP_RST_BROWNOUT: return BOOT_BROWNOUT;
+    case ESP_RST_PANIC:
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return BOOT_CRASH;
+    default:               return BOOT_OTHER;
+  }
+}
+
+// A start from a power cut puts the cut itself in the journal, from the last "still alive" mark (the ESP has
+// no clock that runs without power) to this boot - every cut, a blip of a few seconds too.
+void logPowerCut(time_t now) {
+  uint32_t bootTime = now - millis() / 1000;
+  uint32_t off = min(bootTime > powerLostAt ? bootTime - powerLostAt : 0, (uint32_t)0x7FFFFF);
+  uint8_t  high = (off >> 16) | (bootReason == BOOT_BROWNOUT ? 0x80 : 0);
+  EventRecord e = {bootTime, (uint8_t)EV_POWER_CUT, high, (int16_t)(uint16_t)(off & 0xFFFF)};
+  events.add(e);
+  powerLostAt = 0;
+}
+
+// ------------------------------------------------------------------ problem states across restarts
+
+// Alarms, dead probes and warnings survive a restart (update, power cut): a problem still there afterwards
+// keeps its contact open from the first second, so Apple Home does not announce it again and the journal
+// does not get a second start. Written to flash only when one of them changes.
+struct __attribute__((packed)) SavedAlerts {
+  int8_t  alarm[SENSOR_COUNT];
+  uint8_t faulty;       // bit per probe
+  uint8_t warnings;     // bit per warning
+  uint8_t hotWater;     // the hot-water contact is open
+};
+
+void saveAlerts() {
+  SavedAlerts a = {};
+  for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    a.alarm[i] = state[i].alarm;
+    if (state[i].faulty) a.faulty |= 1 << i;
+  }
+  for (uint8_t w = 0; w < WARN_COUNT; w++)
+    if (warnings[w].active) a.warnings |= 1 << w;
+  a.hotWater = hotWaterReady;
+  prefs.putBytes("alerts", &a, sizeof(a));
+}
+
+void restoreAlerts() {
+  SavedAlerts a;
+  if (!prefs.isKey("alerts") || prefs.getBytes("alerts", &a, sizeof(a)) != sizeof(a)) return;
+  for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    state[i].alarm  = constrain(a.alarm[i], -1, 1);
+    state[i].faulty = a.faulty >> i & 1;
+    if (state[i].faulty) state[i].badReadings = FAULT_AFTER;
+  }
+  for (uint8_t w = 0; w < WARN_COUNT; w++) warnings[w].active = a.warnings >> w & 1;
+  hotWaterReady = a.hotWater;
+}
+
 // ------------------------------------------------------------------ HomeKit
 
-SpanCharacteristic* newContactAccessory(const char* name) {
+SpanCharacteristic* newContactAccessory(const char* name, bool open) {
   new SpanAccessory();
     new Service::AccessoryInformation();
       new Characteristic::Identify();
       new Characteristic::Name(name);
     new Service::ContactSensor();
-      return new Characteristic::ContactSensorState(0);
+      return new Characteristic::ContactSensorState(open ? 1 : 0);
 }
 
 void createAccessories() {
@@ -314,14 +450,16 @@ void createAccessories() {
         new Characteristic::Name(SENSORS[i].name);
         s.temperature = new Characteristic::CurrentTemperature(0);
         s.temperature->setRange(-55, 125);
-        s.fault = new Characteristic::StatusFault(0);
+        s.fault = new Characteristic::StatusFault(s.faulty ? 1 : 0);
         new Characteristic::TemperatureDisplayUnits(0);   // Celsius - Eve shows a weather history only with this set
       s.history = new EveHistory(s.historyName, s.historyPath);
   }
 
   // One alarm contact per probe, so a dead probe that keeps its alarm open never hides a new alarm elsewhere.
-  for (size_t i = 0; i < SENSOR_COUNT; i++) state[i].alarmContact = newContactAccessory(SENSORS[i].alarmName);
-  for (uint8_t w = 0; w < WARN_COUNT; w++) warnings[w].contact = newContactAccessory(WARNING_NAMES[w]);
+  for (size_t i = 0; i < SENSOR_COUNT; i++)
+    state[i].alarmContact = newContactAccessory(SENSORS[i].alarmName, state[i].alarm != 0 || state[i].faulty);
+  for (uint8_t w = 0; w < WARN_COUNT; w++) warnings[w].contact = newContactAccessory(WARNING_NAMES[w], warnings[w].active);
+  hotWaterContact = newContactAccessory(HOT_WATER_NAME, hotWaterReady);
 }
 
 // Pushes the state of one probe to HomeKit; only changed values are sent.
@@ -364,17 +502,34 @@ void logAlarmChange(size_t i, int8_t before, float t) {
   if (now == before) return;
   Serial.printf("%s: alarm %s\n", SENSORS[i].name, now > 0 ? "TOO HOT" : now < 0 ? "TOO COLD" : "cleared");
   logEvent(now > 0 ? EV_ALARM_HIGH : now < 0 ? EV_ALARM_LOW : EV_ALARM_CLEAR, i, toHundredths(t));
+  saveAlerts();
+}
+
+// Summer mode silences "too cold" on the furnace and the return water - they are cold on purpose then.
+float lowLimit(size_t i) {
+  return !settings.heating && (i == FURNACE || i == RETURN_WATER) ? NAN : state[i].low;
 }
 
 void updateAlarm(size_t i, float t) {
   SensorState& s = state[i];
   int8_t before = s.alarm;
+  float low = lowLimit(i);
   // NAN limits never compare true, so a disabled limit simply never fires.
   if (t >= s.high)                                        s.alarm = +1;
-  else if (t <= s.low)                                    s.alarm = -1;
+  else if (t <= low)                                      s.alarm = -1;
   else if (s.alarm > 0 && t <= s.high - ALARM_HYSTERESIS) s.alarm = 0;
-  else if (s.alarm < 0 && t >= s.low + ALARM_HYSTERESIS)  s.alarm = 0;
+  else if (s.alarm < 0 && !(t < low + ALARM_HYSTERESIS))  s.alarm = 0;
   logAlarmChange(i, before, t);
+}
+
+// New limits or season - judge the current value from scratch, without the old hysteresis; a still-active alarm
+// is not logged again, one that ends by the change gets its end in the journal.
+void rejudgeAlarm(size_t i) {
+  SensorState& s = state[i];
+  int8_t before = s.alarm;
+  s.alarm = isnan(s.lastGood) ? 0 : s.lastGood >= s.high ? 1 : s.lastGood <= lowLimit(i) ? -1 : 0;
+  logAlarmChange(i, before, s.lastGood);
+  reportSensor(i);
 }
 
 // Returns true when the reading was accepted.
@@ -391,8 +546,11 @@ bool registerReading(size_t i, float t) {
   s.unconfirmed = NAN;
   s.lastGood = t;
   s.badReadings = 0;
-  if (s.faulty) logEvent(EV_FAULT_CLEAR, i, toHundredths(t));
-  s.faulty = false;
+  if (s.faulty) {
+    s.faulty = false;
+    logEvent(EV_FAULT_CLEAR, i, toHundredths(t));
+    saveAlerts();
+  }
   s.historySum += t;
   s.historyCount++;
   updateAlarm(i, t);
@@ -406,6 +564,7 @@ void registerBadReading(size_t i) {
   if (s.badReadings >= FAULT_AFTER && !s.faulty) {
     s.faulty = true;
     logEvent(EV_FAULT, i, NO_VALUE);
+    saveAlerts();
   }
 }
 
@@ -435,13 +594,16 @@ float trendPerHour(size_t i) {
 }
 
 // A warning switches on after its condition held for holdOn minutes and off after it was gone for holdOff minutes;
-// a warning switched off in the settings clears at once.
-void setWarning(WarningId w, bool condition, uint8_t holdOn, uint8_t holdOff, bool enabled, float value) {
+// a warning switched off in the settings clears at once. While the condition cannot be judged (`known` false - too
+// few readings for a trend in the first minutes after a restart) the warning keeps its state.
+void setWarning(WarningId w, bool condition, bool known, uint8_t holdOn, uint8_t holdOff, bool enabled, float value) {
   WarningState& s = warnings[w];
   bool before = s.active;
   if (!enabled) {
     s.active = false;
     s.pending = s.calm = 0;
+  } else if (!known) {
+    return;
   } else if (condition) {
     s.calm = 0;
     if (!s.active && ++s.pending >= holdOn) s.active = true;
@@ -453,13 +615,22 @@ void setWarning(WarningId w, bool condition, uint8_t holdOn, uint8_t holdOff, bo
   s.contact->setVal(s.active ? 1 : 0);
   Serial.printf("Warning %s: %s\n", WARNING_NAMES[w], s.active ? "ON" : "off");
   logEvent(s.active ? EV_WARN_ON : EV_WARN_OFF, w, toHundredths(value));
+  saveAlerts();
 }
 
 float burnThreshold() {
   return isnan(state[FURNACE].low) ? 40 : state[FURNACE].low;
 }
 
+// A journal value is degrees x 100 in an int16 - bucket counts are capped to fit; NAN stays "no value".
+float upTo320(float v) {
+  return isnan(v) ? NAN : fminf(v, 320);
+}
+
 void evaluateWarnings() {
+  // Summer mode: the warnings about burning stay quiet, the freeze warning and hot water keep working.
+  const bool heating = settings.heating;
+
   // Furnace dying out: only while it still burns (above its min limit, or 30 degrees without one).
   const SensorState& f = state[FURNACE];
   float slope = trendPerHour(FURNACE);
@@ -476,7 +647,7 @@ void evaluateWarnings() {
       }
     }
   }
-  setWarning(WARN_GOING_OUT, dying, 5, 10, settings.goOutOn, f.lastGood);
+  setWarning(WARN_GOING_OUT, dying, !burning || !isnan(slope), 5, 10, heating && settings.goOutOn, f.lastGood);
 
   // Freezing: the coldest water probe, with one degree of hysteresis.
   float coldest = NAN;
@@ -484,12 +655,146 @@ void evaluateWarnings() {
     if (SENSORS[i].water && !state[i].faulty && !isnan(state[i].lastGood))
       coldest = isnan(coldest) ? state[i].lastGood : fminf(coldest, state[i].lastGood);
   bool freezing = !isnan(coldest) && coldest < settings.freezeTemp + (warnings[WARN_FREEZE].active ? 1 : 0);
-  setWarning(WARN_FREEZE, freezing, 2, 2, settings.freezeOn, coldest);
+  setWarning(WARN_FREEZE, freezing, !isnan(coldest), 2, 2, settings.freezeOn, coldest);
 
   // Embers creeping into the coal hopper: its temperature climbing fast.
   float hopper = trendPerHour(COAL_HOPPER);
   bool burnback = !isnan(hopper) && hopper >= settings.burnbackRate;
-  setWarning(WARN_BURNBACK, burnback, 3, 10, settings.burnbackOn, state[COAL_HOPPER].lastGood);
+  setWarning(WARN_BURNBACK, burnback, !isnan(hopper) || state[COAL_HOPPER].faulty, 3, 10, heating && settings.burnbackOn,
+             state[COAL_HOPPER].lastGood);
+
+  // Low coal: at the current pace the hopper estimate runs out within lowCoalHours, or is nearly empty
+  // (half again as long before it clears, so a wobbling pace does not flap it). Logged with the buckets left.
+  float lowHours = settings.lowCoalHours * (warnings[WARN_LOW_COAL].active ? 1.5f : 1);
+  bool lowCoal = !isnan(coalLevel) && (coalHoursLeft < lowHours || coalLevel < settings.hopperBuckets * 0.05f);
+  setWarning(WARN_LOW_COAL, lowCoal, true, 2, 5, heating && settings.coalOn && settings.lowCoalOn, upTo320(coalLevel));
+
+  // Stalled after a power cut: it burned when the power came back and keeps cooling - many furnace controllers
+  // need a hand after a cut. Clears once the furnace warms up again.
+  bool stalled;
+  if (warnings[WARN_STALLED].active) stalled = !(slope >= 2) && !(f.lastGood >= stallFrom - 1);
+  else stalled = stallWatch && millis() < STALL_WATCH_MS && f.lastGood <= stallFrom - STALL_DROP && slope <= STALL_SLOPE;
+  setWarning(WARN_STALLED, stalled, !isnan(slope) || !stallWatch, 3, 10, heating && settings.stalledOn, f.lastGood);
+
+  // Ash pan: due after ashLimit buckets of coal (once the coal use is learnt) or ashDays since it was emptied.
+  time_t now = time(nullptr);
+  bool ashDue = ashAt && clockSet(now) && ((now - ashAt) / 86400.0f >= settings.ashDays || ashBuckets >= settings.ashLimit);
+  setWarning(WARN_ASH, ashDue, true, 1, 1, heating && settings.coalOn && settings.ashOn, upTo320(ashBuckets));
+
+  // Hot water ready: not a problem, just a contact for a push when the boiler is warm enough.
+  const SensorState& b = state[BOILER];
+  if (!b.faulty && !isnan(b.lastGood)) {
+    bool ready = b.lastGood >= settings.hotWater - (hotWaterReady ? HOT_WATER_HYSTERESIS : 0);
+    if (ready != hotWaterReady) {
+      hotWaterReady = ready;
+      hotWaterContact->setVal(ready ? 1 : 0);
+      saveAlerts();
+    }
+  }
+}
+
+// ------------------------------------------------------------------ coal
+
+// Heat the furnace gives off in one minute, in degrees: furnace minus return water (0 without both readings).
+// Coal burned is taken as proportional to its sum, the degree-minutes; the factor coalK is learnt from refills
+// to the top - between two of them the hopper burned exactly what was put in. The power cuts in the minute log
+// cost nothing, rightly: the feeder stands still without power.
+float heatOf(const MinuteRecord& r) {
+  int16_t f = r.v[FURNACE], w = r.v[RETURN_WATER];
+  return f == NO_VALUE || w == NO_VALUE || f <= w ? 0 : (f - w) / 100.0f;
+}
+
+// Degree-minutes in [from, to) as far as the minute log goes; `covered` gets the minutes with both readings.
+float heatBetween(uint32_t from, uint32_t to, uint32_t* covered = nullptr) {
+  float heat = 0;
+  uint32_t n = 0;
+  if (to > from) minutes.forEach(from / 60, (to - 1) / 60, [&](uint32_t, const MinuteRecord& r) {
+    if (r.v[FURNACE] != NO_VALUE && r.v[RETURN_WATER] != NO_VALUE) n++;
+    heat += heatOf(r);
+  });
+  if (covered) *covered = n;
+  return heat;
+}
+
+// All refills, oldest first - one entered later for an earlier hour lands in its place.
+std::vector<RefillRecord> sortedRefills() {
+  std::vector<RefillRecord> v;
+  refills.forEach(0, [&](const RefillRecord& r) { v.push_back(r); });
+  std::stable_sort(v.begin(), v.end(), [](const RefillRecord& a, const RefillRecord& b) { return a.time < b.time; });
+  return v;
+}
+
+// Learns coalK from the latest COAL_INTERVALS intervals between refills to the top that the minute log still
+// covers (burned = everything put in after the first, the closing refill included), and finds where the
+// hopper stands since the last refill to the top. Reads up to the whole minute log - at boot and per refill.
+// A learnt coalK outlives its intervals (summer, a long gap) in flash; without two refills to the top it goes.
+void recomputeCoal() {
+  uint32_t logStart = minutes.newest() ? minutes.oldest() * 60 : UINT32_MAX;
+  float put[COAL_INTERVALS], heat[COAL_INTERVALS];
+  uint16_t found = 0, fulls = 0;
+  uint32_t prevFull = 0;
+  float added = 0;
+  lastRefill = {};
+  for (const RefillRecord& r : sortedRefills()) {
+    lastRefill = r;
+    added += r.amount10 / 10.0f;
+    if (!r.full) continue;
+    fulls++;
+    if (prevFull >= logStart) {
+      float h = heatBetween(prevFull, r.time);
+      if (h >= COAL_MIN_HEAT) {
+        put[found % COAL_INTERVALS] = added;
+        heat[found % COAL_INTERVALS] = h;
+        found++;
+      }
+    }
+    prevFull = r.time;
+    added = 0;
+  }
+  if (found) {
+    float sumPut = 0, sumHeat = 0;
+    for (uint16_t k = 0; k < min(found, (uint16_t)COAL_INTERVALS); k++) { sumPut += put[k]; sumHeat += heat[k]; }
+    coalK = sumPut / sumHeat;
+    coalSamples = found;
+    prefs.putFloat("coalK", coalK);
+    prefs.putUShort("coalN", coalSamples);
+  } else if (fulls < 2) {
+    coalK = NAN;
+    coalSamples = 0;
+    prefs.remove("coalK");
+    prefs.remove("coalN");
+  }
+  lastFullAt = prevFull;
+  addedSinceFull = added;
+  heatSinceFull = prevFull && prevFull >= logStart ? heatBetween(prevFull, (minutes.newest() + 1) * 60) : NAN;
+  heatSinceAsh = ashAt && ashAt >= logStart ? heatBetween(ashAt, (minutes.newest() + 1) * 60) : ashAt ? NAN : 0;
+}
+
+// Hopper level, burning pace (last 24 h of readings) and time left - every 10 minutes, after a refill and after
+// a settings change.
+void updateCoal(uint32_t now) {
+  coalRate = coalLevel = coalHoursLeft = ashBuckets = NAN;
+  if (!settings.coalOn || isnan(coalK)) return;
+  if (!isnan(heatSinceAsh)) ashBuckets = coalK * heatSinceAsh;
+  uint32_t covered;
+  float heat = heatBetween(now - 86400, now, &covered);
+  if (covered >= 60) coalRate = coalK * heat / (covered / 60.0f);
+  if (settings.hopperBuckets <= 0 || !lastFullAt || isnan(heatSinceFull)) return;
+  coalLevel = constrain(settings.hopperBuckets + addedSinceFull - coalK * heatSinceFull, 0.0f, settings.hopperBuckets);
+  if (!isnan(coalRate)) coalHoursLeft = coalRate > 0.01f ? coalLevel / coalRate : INFINITY;
+}
+
+// Switches the heating season (from the web app, or on by itself when the furnace burns in summer mode): the
+// furnace and return alarms are judged again under the new limits, and the journal gets the change.
+void setHeating(bool on, bool automatic) {
+  if (settings.heating == on) return;
+  settings.heating = on;
+  prefs.putBool("heating", on);
+  logEvent(EV_SEASON, automatic, on);
+  Serial.printf("Heating season %s%s\n", on ? "on" : "off (summer mode)", automatic ? " - furnace burning" : "");
+  rejudgeAlarm(FURNACE);
+  rejudgeAlarm(RETURN_WATER);
+  evaluateWarnings();
 }
 
 // One reading cycle: probes -> HomeKit -> minute log -> trends -> warnings.
@@ -507,7 +812,21 @@ void readAll() {
   Serial.printf("Readings: %.2f / %.2f / %.2f / %.2f C\n", values[0], values[1], values[2], values[3]);
 
   time_t now = time(nullptr);
-  if (clockSet(now)) minutes.add(now / 60, rec);
+  if (clockSet(now)) {
+    minutes.add(now / 60, rec);
+    if (!isnan(heatSinceFull)) heatSinceFull += heatOf(rec);
+    if (!isnan(heatSinceAsh)) heatSinceAsh += heatOf(rec);
+  }
+
+  float furnace = values[FURNACE];
+  // The first reading after a power cut: was the furnace burning? Then watch whether it comes back (WARN_STALLED).
+  if (stallWatch && isnan(stallFrom) && !isnan(furnace)) {
+    stallFrom = furnace;
+    if (furnace < burnThreshold()) stallWatch = false;
+  }
+  // Summer mode ends by itself once the furnace burns for SEASON_AUTO_MIN in a row - more alarms, never fewer.
+  burningMinutes = !isnan(furnace) && furnace >= burnThreshold() ? min(burningMinutes + 1, 60000) : 0;
+  if (!settings.heating && burningMinutes >= SEASON_AUTO_MIN) setHeating(true, true);
   pushRecent(values);
   evaluateWarnings();
 }
@@ -525,11 +844,12 @@ uint32_t nextMidnight(uint32_t midnight) {
   return localMidnight(midnight + 36 * 3600);   // 23 or 25 hour days included
 }
 
-// Daily min / avg / max and the furnace's burning minutes, from the minute log (survives reboots).
+// Daily min / avg / max, the furnace's burning minutes and its heat output, from the minute log (survives reboots).
 void summarizeDay(uint32_t dayStart, uint32_t dayEnd) {
   float mn[SENSOR_COUNT], mx[SENSOR_COUNT], sum[SENSOR_COUNT] = {};
   uint16_t count[SENSOR_COUNT] = {};
   uint16_t burn = 0;
+  float heat = 0;
   float threshold = burnThreshold();
   for (size_t i = 0; i < SENSOR_COUNT; i++) { mn[i] = INFINITY; mx[i] = -INFINITY; }
   minutes.forEach(dayStart / 60, dayEnd / 60 - 1, [&](uint32_t, const MinuteRecord& r) {
@@ -542,6 +862,7 @@ void summarizeDay(uint32_t dayStart, uint32_t dayEnd) {
       count[i]++;
     }
     if (r.v[FURNACE] != NO_VALUE && r.v[FURNACE] / 100.0f >= threshold) burn++;
+    heat += heatOf(r);
   });
 
   DayRecord d = {};
@@ -554,6 +875,7 @@ void summarizeDay(uint32_t dayStart, uint32_t dayEnd) {
     any |= count[i] > 0;
   }
   d.burnMinutes = burn;
+  d.heat = lroundf(heat);
   if (any) daily.add(d);
 }
 
@@ -561,11 +883,22 @@ void summarizeDay(uint32_t dayStart, uint32_t dayEnd) {
 void logHistory() {
   time_t now = time(nullptr);
   if (!clockSet(now)) return;
+  if (powerLostAt) logPowerCut(now);
   if (pendingEventCount) flushPendingEvents(now);
+  if (!ashAt) {                                   // the ash pan counts from the first time the device has a clock
+    ashAt = now;
+    prefs.putUInt("ashAt", ashAt);
+    heatSinceAsh = 0;
+  }
+  if (now - lastAliveMark >= ALIVE_INTERVAL_S) {
+    alive.mark(now);
+    lastAliveMark = now;
+  }
 
   uint32_t slot = now / HISTORY_INTERVAL_S;
   if (slot != lastHistorySlot) {
     lastHistorySlot = slot;
+    updateCoal(now);
     for (auto& s : state) {
       if (!s.historyCount) continue;
       s.history->add(now, s.historySum / s.historyCount);
@@ -591,14 +924,18 @@ void logHistory() {
 void setupHistory() {
   if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed - no history");
   // Files of an older layout would eat the space of the new ones: a layout change wipes the history once.
-  if (prefs.getUChar("fsLayout", 0) != FS_LAYOUT) {
+  bool newLayout = prefs.getUChar("fsLayout", 0) != FS_LAYOUT;
+  if (newLayout) {
     Serial.println("History layout changed - formatting LittleFS");
     LittleFS.format();
     prefs.putUChar("fsLayout", FS_LAYOUT);
   }
   if (!minutes.begin()) Serial.println("No \"minutes\" partition - per-minute history disabled");
+  if (!alive.begin()) Serial.println("No \"alive\" partition - power cuts timed from the minute log");
+  if (newLayout) alive.clear();                               // the area may hold old LittleFS blocks
   daily.begin();
   events.begin();
+  refills.begin();
   Serial.printf("LittleFS: %u of %u KB used\n", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
   for (auto& row : recent)
     for (auto& v : row) v = NAN;
@@ -628,6 +965,17 @@ void loadSettings() {
   settings.burnbackOn   = prefs.getBool("bbOn", d.burnbackOn);
   settings.burnbackRate = prefs.getFloat("bbRate", d.burnbackRate);
   settings.hotWater     = prefs.getFloat("hotWater", d.hotWater);
+  settings.coalOn       = prefs.getBool("coalOn", d.coalOn);
+  settings.hopperBuckets = prefs.getFloat("hopBk", d.hopperBuckets);
+  settings.bucketKg     = prefs.getFloat("bucketKg", d.bucketKg);
+  settings.coalPrice    = prefs.getFloat("coalPr", d.coalPrice);
+  settings.lowCoalOn    = prefs.getBool("lcOn", d.lowCoalOn);
+  settings.lowCoalHours = prefs.getFloat("lcHrs", d.lowCoalHours);
+  settings.heating      = prefs.getBool("heating", d.heating);
+  settings.stalledOn    = prefs.getBool("stallOn", d.stalledOn);
+  settings.ashOn        = prefs.getBool("ashOn", d.ashOn);
+  settings.ashLimit     = prefs.getFloat("ashLim", d.ashLimit);
+  settings.ashDays      = prefs.getFloat("ashDays", d.ashDays);
   settings.lat          = prefs.getFloat("lat", d.lat);
   settings.lon          = prefs.getFloat("lon", d.lon);
   prefs.getString("place", settings.place, sizeof(settings.place));
@@ -642,6 +990,17 @@ void saveSettings() {
   prefs.putBool("bbOn", settings.burnbackOn);
   prefs.putFloat("bbRate", settings.burnbackRate);
   prefs.putFloat("hotWater", settings.hotWater);
+  prefs.putBool("coalOn", settings.coalOn);
+  prefs.putFloat("hopBk", settings.hopperBuckets);
+  prefs.putFloat("bucketKg", settings.bucketKg);
+  prefs.putFloat("coalPr", settings.coalPrice);
+  prefs.putBool("lcOn", settings.lowCoalOn);
+  prefs.putFloat("lcHrs", settings.lowCoalHours);
+  prefs.putBool("heating", settings.heating);
+  prefs.putBool("stallOn", settings.stalledOn);
+  prefs.putBool("ashOn", settings.ashOn);
+  prefs.putFloat("ashLim", settings.ashLimit);
+  prefs.putFloat("ashDays", settings.ashDays);
   prefs.putFloat("lat", settings.lat);
   prefs.putFloat("lon", settings.lon);
   prefs.putString("place", settings.place);
@@ -682,7 +1041,7 @@ void handleManifest() {
 // Current readings, trends, limits, warnings, settings and device health.
 void handleNow() {
   String j;
-  j.reserve(1800);
+  j.reserve(2600);
   j += "{\"time\":";     j += (uint32_t)time(nullptr);
   j += ",\"uptime\":";   j += (uint32_t)(millis() / 1000);
   j += ",\"rssi\":";     j += (int)WiFi.RSSI();
@@ -713,7 +1072,24 @@ void handleNow() {
     j += warnings[w].active ? "true" : "false";
   }
   j += "],\"forecast\":"; j += goOutForecast < 0 ? String("null") : String(goOutForecast);
-  j += ",\"settings\":{\"goOutOn\":"; j += settings.goOutOn ? "true" : "false";
+  j += ",\"hotWater\":";  j += hotWaterReady ? "true" : "false";
+  j += ",\"stallFrom\":"; j += jsonNumber(stallFrom, 1);
+  j += ",\"ash\":{\"at\":"; j += ashAt;
+  j += ",\"buckets\":";   j += jsonNumber(ashBuckets, 1);
+  j += '}';
+  j += ",\"coal\":{\"k\":"; j += jsonNumber(coalK, 7);
+  j += ",\"samples\":";   j += coalSamples;
+  j += ",\"lastFull\":";  j += lastFullAt;
+  j += ",\"level\":";     j += jsonNumber(coalLevel, 1);
+  j += ",\"rate\":";      j += jsonNumber(coalRate, 2);
+  j += ",\"hoursLeft\":"; j += isinf(coalHoursLeft) ? String("1e9") : jsonNumber(coalHoursLeft, 1);
+  j += ",\"lastRefill\":";
+  if (lastRefill.time) {
+    j += '[';  j += lastRefill.time;  j += ',';  j += lastRefill.amount10;  j += ',';  j += (int)lastRefill.full;  j += ']';
+  } else {
+    j += "null";
+  }
+  j += "},\"settings\":{\"goOutOn\":"; j += settings.goOutOn ? "true" : "false";
   j += ",\"goOutRate\":";    j += jsonNumber(settings.goOutRate, 1);
   j += ",\"goOutHorizon\":"; j += settings.goOutHorizon;
   j += ",\"freezeOn\":";     j += settings.freezeOn ? "true" : "false";
@@ -721,6 +1097,17 @@ void handleNow() {
   j += ",\"burnbackOn\":";   j += settings.burnbackOn ? "true" : "false";
   j += ",\"burnbackRate\":"; j += jsonNumber(settings.burnbackRate, 1);
   j += ",\"hotWater\":";     j += jsonNumber(settings.hotWater, 1);
+  j += ",\"coalOn\":";       j += settings.coalOn ? "true" : "false";
+  j += ",\"hopperBuckets\":"; j += jsonNumber(settings.hopperBuckets, 1);
+  j += ",\"bucketKg\":";     j += jsonNumber(settings.bucketKg, 1);
+  j += ",\"coalPrice\":";    j += jsonNumber(settings.coalPrice, 0);
+  j += ",\"lowCoalOn\":";    j += settings.lowCoalOn ? "true" : "false";
+  j += ",\"lowCoalHours\":"; j += jsonNumber(settings.lowCoalHours, 0);
+  j += ",\"heating\":";      j += settings.heating ? "true" : "false";
+  j += ",\"stalledOn\":";    j += settings.stalledOn ? "true" : "false";
+  j += ",\"ashOn\":";        j += settings.ashOn ? "true" : "false";
+  j += ",\"ashLimit\":";     j += jsonNumber(settings.ashLimit, 0);
+  j += ",\"ashDays\":";      j += jsonNumber(settings.ashDays, 0);
   j += ",\"lat\":";          j += jsonNumber(settings.lat, 4);
   j += ",\"lon\":";          j += jsonNumber(settings.lon, 4);
   j += ",\"place\":\"";      j += settings.place;
@@ -875,12 +1262,7 @@ void handleLimits() {
   s.high = parseLimit(server.arg("high"));
   prefs.putFloat(prefKey("lo", i).c_str(), s.low);
   prefs.putFloat(prefKey("hi", i).c_str(), s.high);
-  // New limits - judge the current value from scratch, without the old hysteresis; a still-active alarm
-  // is not logged again, one that ends by the change gets its end in the journal.
-  int8_t before = s.alarm;
-  s.alarm = isnan(s.lastGood) ? 0 : s.lastGood >= s.high ? 1 : s.lastGood <= s.low ? -1 : 0;
-  logAlarmChange(i, before, s.lastGood);
-  reportSensor(i);
+  rejudgeAlarm(i);
   handleNow();
 }
 
@@ -900,6 +1282,17 @@ void handleSettings() {
   flag("burnbackOn", settings.burnbackOn);
   number("burnbackRate", settings.burnbackRate, 1, 60);
   number("hotWater", settings.hotWater, 20, 90);
+  flag("coalOn", settings.coalOn);
+  number("hopperBuckets", settings.hopperBuckets, 0, 500);
+  number("bucketKg", settings.bucketKg, 1, 50);
+  number("coalPrice", settings.coalPrice, 0, 20000);
+  flag("lowCoalOn", settings.lowCoalOn);
+  number("lowCoalHours", settings.lowCoalHours, 1, 96);
+  flag("stalledOn", settings.stalledOn);
+  flag("ashOn", settings.ashOn);
+  number("ashLimit", settings.ashLimit, 1, 200);
+  number("ashDays", settings.ashDays, 1, 60);
+  if (server.hasArg("heating")) setHeating(server.arg("heating") == "1", false);
   if (server.hasArg("lat") && server.hasArg("lon")) {
     settings.lat = parseNumber(server.arg("lat"));
     settings.lon = parseNumber(server.arg("lon"));
@@ -909,6 +1302,65 @@ void handleSettings() {
     strlcpy(settings.place, place.c_str(), sizeof(settings.place));
   }
   saveSettings();
+  if (clockSet(time(nullptr))) updateCoal(time(nullptr));
+  evaluateWarnings();
+  handleNow();
+}
+
+// GET. JSON [[time, kg x 10, full], ...] in the order they were entered (the last one can be taken back).
+void handleRefills() {
+  ChunkWriter w;
+  w.begin("application/json");
+  w.put("[", 1);
+  bool first = true;
+  refills.forEach(0, [&](const RefillRecord& r) {
+    char line[40];
+    int n = snprintf(line, sizeof(line), "%s[%u,%u,%u]", first ? "" : ",", (unsigned)r.time, r.amount10, r.full);
+    w.put(line, n);
+    first = false;
+  });
+  w.put("]", 1);
+  w.end();
+}
+
+void coalChanged() {
+  recomputeCoal();
+  updateCoal(time(nullptr));
+  evaluateWarnings();
+  handleNow();
+}
+
+// POST buckets, full (1/0), time (Unix; optional - a refill entered later, up to 7 days back). Answers /api/now.
+void handleRefill() {
+  uint32_t now = time(nullptr), t = argOr("time", now);
+  float buckets = parseNumber(server.arg("buckets"));
+  if (!clockSet(now) || isnan(buckets) || buckets < 0.1f || buckets > 500 || t > now + 300 || t + 7 * 86400 < now) {
+    server.send(400, "text/plain", "bad refill");
+    return;
+  }
+  RefillRecord r = {min(t, now), (uint16_t)lroundf(buckets * 10), (uint8_t)(server.arg("full") == "1"), 0};
+  refills.add(r);
+  coalChanged();
+}
+
+// POST: takes back the refill entered last. Answers /api/now.
+void handleRefillUndo() {
+  refills.removeLast();
+  coalChanged();
+}
+
+// POST: the ash pan was emptied - its reminder starts counting again. Answers /api/now.
+void handleAsh() {
+  time_t now = time(nullptr);
+  if (!clockSet(now)) {
+    server.send(503, "text/plain", "no clock yet");
+    return;
+  }
+  ashAt = now;
+  prefs.putUInt("ashAt", ashAt);
+  heatSinceAsh = 0;
+  logEvent(EV_ASH, 0, 0);
+  updateCoal(now);
   evaluateWarnings();
   handleNow();
 }
@@ -1001,6 +1453,10 @@ void onNetworkUp(int count) {
   server.on("/api/limits", HTTP_POST, handleLimits);
   server.on("/api/settings", HTTP_POST, handleSettings);
   server.on("/api/bus", HTTP_GET, handleBus);
+  server.on("/api/refills", HTTP_GET, handleRefills);
+  server.on("/api/refill", HTTP_POST, handleRefill);
+  server.on("/api/refill-undo", HTTP_POST, handleRefillUndo);
+  server.on("/api/ash", HTTP_POST, handleAsh);
   server.on("/api/update", HTTP_POST, handleUpdate);
   server.on("/api/clear-history", HTTP_POST, handleClearHistory);
   server.on("/api/firmware", HTTP_POST, handleFirmwareDone, handleFirmwareChunk);
@@ -1032,7 +1488,12 @@ void checkBootButton() {
   if (resetLevel == 2) {
     minutes.clear();                                         // all history
     LittleFS.format();
-    homeSpan.processSerialCommand("F");                      // erases WiFi + pairing and reboots
+    alive.clear();
+    prefs.remove("alerts");                                  // the new home starts without old problems
+    prefs.remove("coalK");                                   // ... and learns its own furnace's coal use
+    prefs.remove("coalN");
+    prefs.remove("ashAt");
+    homeSpan.processSerialCommand("F");                    // erases WiFi + pairing and reboots
   }
 }
 
@@ -1062,8 +1523,19 @@ void setup() {
   prefs.begin("furnace", false);
   loadLimits();
   loadSettings();
+  restoreAlerts();
   setupHistory();
-  logEvent(EV_BOOT, 0, FW_VERSION);
+  coalK = prefs.getFloat("coalK", NAN);
+  coalSamples = prefs.getUShort("coalN", 0);
+  ashAt = prefs.getUInt("ashAt", 0);
+  recomputeCoal();
+  bootReason = readBootReason();
+  // The power went within ALIVE_INTERVAL_S after the last mark (without marks: within the minute after the last
+  // stored one). A power cut is journaled as the cut itself, other starts as EV_BOOT.
+  if (bootReason == BOOT_POWER_ON || bootReason == BOOT_BROWNOUT)
+    powerLostAt = alive.newest() ? alive.newest() + ALIVE_INTERVAL_S / 2 : minutes.newest() ? minutes.newest() * 60 + 30 : 0;
+  if (!powerLostAt) logEvent(EV_BOOT, bootReason, FW_VERSION);
+  stallWatch = powerLostAt != 0;
   if (prefs.getBool("cleared", false)) {
     logEvent(EV_HISTORY_CLEARED, 0, 0);
     prefs.remove("cleared");
