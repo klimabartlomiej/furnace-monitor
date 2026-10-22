@@ -1,7 +1,759 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Furnace">
+<meta name="theme-color" content="#0b0d10">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>Furnace</title>
-<style>body{font-family:-apple-system,system-ui,sans-serif;background:#0b0d10;color:#f2f4f7;margin:24px}</style>
-</head><body><h2>Furnace</h2><p>The new web app is on its way.</p><pre id="d"></pre>
-<script>fetch('/api/now').then(r=>r.json()).then(j=>{document.getElementById('d').textContent=j.sensors.map(s=>s.name+': '+s.temp).join('\n')})</script>
-</body></html>
+<style>
+:root{
+  --bg:#0b0d10;--card:#15181e;--card2:#1e222a;--line:rgba(255,255,255,.07);
+  --text:#f2f4f7;--muted:#8a919e;--faint:#5d6471;
+  --red:#ff453a;--green:#30d158;--orange:#ff9f0a;--blue:#0a84ff;
+  --r:22px;color-scheme:dark;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{padding:calc(env(safe-area-inset-top) + 6px) 16px calc(env(safe-area-inset-bottom) + 96px);min-height:100vh;overscroll-behavior-y:none;-webkit-user-select:none;user-select:none}
+input{-webkit-user-select:text;user-select:text}
+button{font-family:inherit;color:inherit;cursor:pointer}
+.num{font-variant-numeric:tabular-nums}
+.view{display:none}
+.view.on{display:block;animation:in .22s ease-out}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+
+header.top{margin:12px 2px 16px}
+h1{font:700 34px/1.1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.02em;margin:0}
+.sub{color:var(--muted);font-size:14px;margin-top:6px;display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(48,209,88,.18);flex:none}
+.dot.warn{background:var(--orange);box-shadow:0 0 0 3px rgba(255,159,10,.18)}
+.dot.bad{background:var(--red);animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(255,69,58,.25)}50%{box-shadow:0 0 0 7px rgba(255,69,58,.04)}}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.card-h{display:flex;justify-content:space-between;align-items:baseline;font-weight:600;font-size:17px;margin-bottom:12px}
+.card-h small{color:var(--muted);font-weight:500;font-size:13px}
+
+.banner{display:flex;gap:12px;align-items:center;background:rgba(255,69,58,.12);border:1px solid rgba(255,69,58,.35);color:#ffdcd9;border-radius:18px;padding:12px 14px;margin-bottom:10px;font-size:15px}
+.banner svg{width:22px;height:22px;flex:none;color:var(--red)}
+.tip-card{display:flex;gap:12px;align-items:center;background:rgba(10,132,255,.12);border:1px solid rgba(10,132,255,.3);border-radius:18px;padding:12px 14px;margin-bottom:14px;font-size:14px;color:#cfe5ff}
+.tip-card button{margin-left:auto;background:none;border:0;color:var(--muted);font-size:20px;padding:0 4px}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.sensor{position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 14px 0;overflow:hidden;transition:transform .15s,border-color .3s}
+.sensor:active{transform:scale(.97)}
+.sensor .hd{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;font-weight:600;white-space:nowrap}
+.sensor .hd .n{overflow:hidden;text-overflow:ellipsis}
+.ico{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:var(--cb);color:var(--c);flex:none}
+.ico svg{width:17px;height:17px}
+.val{font:600 40px/1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.025em;margin:14px 0 4px}
+.val small{font-size:19px;font-weight:500;color:var(--muted);margin-left:2px;letter-spacing:0}
+.trend{font-size:13px;color:var(--muted);height:18px;white-space:nowrap}
+.trend.up{color:#ff9a7a}.trend.down{color:#7cc4ff}
+.spark{display:block;width:calc(100% + 28px);height:48px;margin:8px -14px 0}
+.pill{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;padding:2px 7px;border-radius:999px;background:var(--red);color:#fff;margin-right:6px;vertical-align:1px}
+.sensor.alarm{border-color:rgba(255,69,58,.65);box-shadow:0 0 28px rgba(255,69,58,.14)}
+.sensor.fault .val{color:var(--faint)}
+.sensor.fault .pill{background:#4a4f5a}
+
+.chart{position:relative;height:210px;touch-action:pan-y}
+.chart.big{height:300px;touch-action:none}
+.chart svg{display:block}
+.gl{stroke:rgba(255,255,255,.06)}
+.ylab,.xlab{fill:var(--faint);font:500 11px -apple-system,system-ui}
+.xlab{text-anchor:middle}
+.ln{fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round}
+.limit{stroke:rgba(255,69,58,.6);stroke-dasharray:5 5}
+.limlab{fill:rgba(255,130,120,.95);font:600 10px -apple-system,system-ui}
+.cur{stroke:rgba(255,255,255,.4);stroke-width:1}
+.tip{position:absolute;top:0;display:none;pointer-events:none;background:rgba(44,48,57,.94);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:7px 10px;font-size:13px;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.45);z-index:2}
+.tip .tt{color:var(--muted);font-size:12px;margin-bottom:3px}
+.tip i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.tip .mm{color:var(--muted);font-size:12px}
+.empty{height:100%;display:grid;place-items:center;color:var(--faint);font-size:14px;text-align:center;padding:0 20px}
+.hint{color:var(--faint);font-size:12px;text-align:center;margin-top:10px}
+
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:-2px 0 10px;font-size:13px;color:var(--muted)}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+
+.rows .row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.rows .row:first-child{border-top:0;padding-top:2px}
+.rows .k{font-size:15px}
+.rows .s{color:var(--faint);font-size:12px;margin-top:2px}
+.rows .v{font-weight:600;font-size:17px;text-align:right}
+
+.seg{display:flex;background:var(--card2);border-radius:12px;padding:3px;gap:2px;margin-bottom:12px}
+.seg button{flex:1;border:0;background:none;color:var(--muted);font-weight:600;font-size:14px;padding:8px 0;border-radius:9px;transition:background .2s,color .2s}
+.seg button.on{background:#3a3f4b;color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.chips{display:flex;gap:8px;overflow-x:auto;margin:0 -16px 12px;padding:0 16px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:8px 13px;font-weight:600;font-size:14px;transition:all .2s}
+.chip i{width:9px;height:9px;border-radius:50%;background:var(--c);opacity:.5}
+.chip.on{color:var(--text);border-color:var(--c);background:var(--cb)}
+.chip.on i{opacity:1}
+.big-now{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}
+.big-now .v{font:600 34px/1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.02em}
+.big-now .l{color:var(--muted);font-size:14px}
+.zoom{margin-left:auto;font-size:12px;color:var(--blue);background:rgba(10,132,255,.14);border:0;border-radius:999px;padding:5px 10px;font-weight:600;display:none}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);text-align:center}
+.stats div{padding:4px 0}
+.stats b{display:block;font-size:19px;font-weight:600}
+.stats span{color:var(--faint);font-size:12px;font-weight:600;letter-spacing:.04em}
+
+.lim{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.lim:first-of-type{border-top:0;padding-top:2px}
+.lim label{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px}
+.lim .cd{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}
+.lim .f{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;font-weight:700;color:var(--faint);letter-spacing:.06em}
+.lim input{width:76px;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:9px 6px;font:600 17px -apple-system,system-ui;text-align:center;outline:none;-moz-appearance:textfield}
+.lim input:focus{border-color:var(--blue)}
+.lim input::placeholder{color:var(--faint);font-weight:500}
+.note{color:var(--faint);font-size:13px;margin:10px 0 0}
+.bar{height:6px;border-radius:3px;background:var(--card2);overflow:hidden;margin-top:6px;width:120px;margin-left:auto}
+.bar i{display:block;height:100%;background:var(--blue);border-radius:3px}
+.wifi{display:inline-flex;gap:2px;align-items:flex-end;height:14px;margin-right:8px;vertical-align:-1px}
+.wifi i{width:4px;border-radius:1px;background:var(--faint)}
+.wifi i.on{background:var(--green)}
+.btn{width:100%;border:0;border-radius:14px;padding:13px;font-weight:600;font-size:16px;background:var(--card2);margin-top:10px}
+.btn.primary{background:var(--blue);color:#fff}
+.btn:disabled{opacity:.5}
+details.card summary{list-style:none;font-weight:600;font-size:17px;display:flex;justify-content:space-between;align-items:center}
+details.card summary::-webkit-details-marker{display:none}
+details.card summary::after{content:"\203A";font-size:22px;color:var(--faint);transition:transform .2s}
+details.card[open] summary::after{transform:rotate(90deg)}
+details .inner{margin-top:12px}
+.field{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:11px 12px;font-size:16px;margin-top:10px;outline:none}
+pre{background:var(--card2);border-radius:12px;padding:10px;font-size:11px;color:var(--muted);overflow-x:auto;margin:10px 0 0;white-space:pre}
+.progress{height:6px;border-radius:3px;background:var(--card2);overflow:hidden;margin-top:10px;display:none}
+.progress i{display:block;height:100%;width:0;background:var(--blue);transition:width .2s}
+
+nav.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;padding:7px 10px calc(env(safe-area-inset-bottom) + 4px);background:rgba(16,18,22,.82);-webkit-backdrop-filter:saturate(180%) blur(22px);backdrop-filter:saturate(180%) blur(22px);border-top:1px solid var(--line);z-index:10}
+nav.tabs button{flex:1;background:none;border:0;color:var(--faint);font-size:10.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px;padding:3px 0;transition:color .2s}
+nav.tabs svg{width:27px;height:27px}
+nav.tabs button.on{color:var(--text)}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 86px);transform:translate(-50%,16px);opacity:0;background:rgba(52,56,66,.96);padding:11px 18px;border-radius:999px;font-weight:600;font-size:14px;transition:all .25s;z-index:20;pointer-events:none;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.sk{border-radius:var(--r);height:164px;background:linear-gradient(90deg,#15181e 25%,#1d2129 50%,#15181e 75%);background-size:200% 100%;animation:sk 1.3s infinite}
+@keyframes sk{to{background-position:-200% 0}}
+</style>
+</head>
+<body>
+
+<section class="view on" id="v-home">
+  <header class="top">
+    <h1>Furnace</h1>
+    <div class="sub"><span class="dot" id="dot"></span><span id="status">Connecting…</span><span id="updated" style="margin-left:auto"></span></div>
+  </header>
+  <div id="a2hs"></div>
+  <div id="banner"></div>
+  <div class="grid" id="cards"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+  <div class="card">
+    <div class="card-h">Last 24 hours<small>touch to read</small></div>
+    <div class="legend" id="legend"></div>
+    <div class="chart" id="overview"></div>
+  </div>
+  <div class="card">
+    <div class="card-h">Today</div>
+    <div class="rows" id="today"></div>
+  </div>
+</section>
+
+<section class="view" id="v-charts">
+  <header class="top"><h1>Charts</h1></header>
+  <div class="chips" id="chips"></div>
+  <div class="seg" id="ranges">
+    <button data-r="24h">24 h</button><button data-r="7d">7 days</button><button data-r="30d">30 days</button><button data-r="1y">Year</button>
+  </div>
+  <div class="card">
+    <div class="big-now"><span class="v num" id="dnow">–</span><span class="l" id="dname"></span><button class="zoom" id="zoomreset">Reset zoom</button></div>
+    <div class="chart big" id="detail"></div>
+    <div class="hint">Drag to read values · pinch to zoom · double-tap to reset</div>
+  </div>
+  <div class="card stats" id="rstats"></div>
+</section>
+
+<section class="view" id="v-settings">
+  <header class="top"><h1>Settings</h1></header>
+  <div class="card">
+    <div class="card-h">Alarm limits</div>
+    <div id="limits"></div>
+    <p class="note">Crossing a limit opens the "… alarm" sensor in Apple Home and sends a notification. Leave a field empty to switch that alarm off.</p>
+  </div>
+  <div class="card">
+    <div class="card-h">Device</div>
+    <div class="rows" id="device"></div>
+  </div>
+  <details class="card">
+    <summary>Firmware</summary>
+    <div class="inner">
+      <div class="rows" id="fwinfo"></div>
+      <button class="btn primary" id="checkupd">Check for updates</button>
+      <p class="note">Install from a file (same WiFi only):</p>
+      <input class="field" type="file" id="fwfile" accept=".bin">
+      <input class="field" type="password" id="fwpwd" placeholder="OTA password" autocomplete="off">
+      <button class="btn" id="fwup">Install</button>
+      <div class="progress" id="fwprog"><i></i></div>
+    </div>
+  </details>
+  <details class="card">
+    <summary>Probes on the bus</summary>
+    <div class="inner"><button class="btn" id="scan">Scan now</button><pre id="bus">–</pre></div>
+  </details>
+</section>
+
+<nav class="tabs">
+  <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.9 3.2 4.9 5.6 4.9 10.1a4.9 4.9 0 0 1-9.8 0c0-2.2 1-3.7 2-4.6.1 1.7 1 2.8 2 3C10.6 8.9 11.6 5.8 12 3z"/></svg>Overview</button>
+  <button data-tab="charts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M4 16l5-6 4 3 7-8"/></svg>Charts</button>
+  <button data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings</button>
+</nav>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+
+// Probe order is fixed by SENSORS in the firmware: furnace, return water, coal hopper, boiler water.
+const FURNACE = 0, RETURN = 1, COAL = 2, BOILER = 3;
+const COLORS = ['#ff6b3d', '#4aa8ff', '#ffb340', '#34d1bf'];
+const ICONS = [
+  '<path d="M12 3c.9 3.2 4.9 5.6 4.9 10.1a4.9 4.9 0 0 1-9.8 0c0-2.2 1-3.7 2-4.6.1 1.7 1 2.8 2 3C10.6 8.9 11.6 5.8 12 3z"/>',
+  '<path d="M9 14 4.5 9.5 9 5"/><path d="M4.5 9.5H15a4.5 4.5 0 0 1 0 9h-2.5"/>',
+  '<path d="M4 9h16l-2.2 10.5H6.2z"/><path d="M8 9l1.6-4.5h4.8L16 9"/>',
+  '<path d="M12 3.5c3 4 6 7 6 10.5a6 6 0 0 1-12 0c0-3.5 3-6.5 6-10.5z"/>',
+];
+const WARN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17.5v.01"/></svg>';
+const RANGES = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
+const MIN_SPAN = 3600, MAX_SPAN = 2 * 365 * 86400;
+
+let now = null, online = true, lastOk = 0, view = null;
+const data = { f: [], h: [], d: [] };            // per resolution, per probe: [t, v] or [t, min, avg, max]
+const loadedAt = { f: 0, h: 0, d: 0 };
+const ui = Object.assign({ tab: 'home', range: '24h', shown: [FURNACE] }, readUi());
+
+function readUi() { try { return JSON.parse(localStorage.getItem('furnace-ui')) || {}; } catch (e) { return {}; } }
+function saveUi() { try { localStorage.setItem('furnace-ui', JSON.stringify(ui)); } catch (e) {} }
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+const tNow = () => Math.floor(Date.now() / 1000);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const hhmm = t => new Date(t * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+const day = t => new Date(t * 1000).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const dur = s => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min`; };
+const step = res => res === 'f' ? (now && now.interval) || 600 : res === 'h' ? 3600 : 86400;
+
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t.timer);
+  t.timer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+// ---------------------------------------------------------------- data
+
+async function api(path, opt) {
+  const r = await fetch(path, Object.assign({ cache: 'no-store' }, opt));
+  if (!r.ok) throw new Error(await r.text() || r.status);
+  return r;
+}
+
+async function refreshNow() {
+  try {
+    now = await (await api('/api/now')).json();
+    online = true;
+    lastOk = Date.now();
+  } catch (e) {
+    online = false;
+  }
+  render();
+}
+
+async function hist(s, res, since) {
+  const b = await (await api(`/api/hist?s=${s}&r=${res}&since=${since}`)).arrayBuffer();
+  const v = new DataView(b), out = [];
+  if (res === 'f') for (let o = 0; o + 6 <= b.byteLength; o += 6) out.push([v.getUint32(o, true), v.getInt16(o + 4, true) / 100]);
+  else for (let o = 0; o + 10 <= b.byteLength; o += 10)
+    out.push([v.getUint32(o, true), v.getInt16(o + 4, true) / 100, v.getInt16(o + 6, true) / 100, v.getInt16(o + 8, true) / 100]);
+  return out;
+}
+
+// Loads (or tops up) one resolution for every probe; cheap to call often.
+async function loadRes(res, force) {
+  if (!now) return;
+  while (data[res].length < now.sensors.length) data[res].push([]);
+  if (!force && Date.now() - loadedAt[res] < (res === 'f' ? 60e3 : 300e3)) return;
+  loadedAt[res] = Date.now();
+  try {
+    await Promise.all(data[res].map(async (arr, i) => {
+      const add = await hist(i, res, arr.length ? arr[arr.length - 1][0] + 1 : 0);
+      for (const p of add) arr.push(p);
+    }));
+  } catch (e) { loadedAt[res] = 0; }
+}
+
+// 10-minute points up to 8 days (the ESP keeps 28), hourly up to 120 days, daily beyond.
+const resFor = span => span <= 8 * 86400 ? 'f' : span <= 120 * 86400 ? 'h' : 'd';
+
+function since(pts, t) {           // index of the first point at or after t
+  let lo = 0, hi = pts.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (pts[m][0] < t) lo = m + 1; else hi = m; }
+  return lo;
+}
+function windowed(pts, t0, t1) {    // points in [t0, t1] plus one on each side, so lines run to the edges
+  return pts.slice(Math.max(0, since(pts, t0) - 1), since(pts, t1) + 1);
+}
+function nearest(pts, t) {
+  if (!pts.length) return null;
+  const i = since(pts, t);
+  if (i <= 0) return pts[0];
+  if (i >= pts.length) return pts[pts.length - 1];
+  return t - pts[i - 1][0] < pts[i][0] - t ? pts[i - 1] : pts[i];
+}
+function segments(pts, gap) {
+  const out = [];
+  let cur = [];
+  for (const p of pts) {
+    if (cur.length && p[0] - cur[cur.length - 1][0] > gap * 3.5) { out.push(cur); cur = []; }
+    cur.push(p);
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+// Least-squares slope over the last hour, degrees per hour.
+function trend(pts) {
+  if (pts.length < 3) return null;
+  const end = pts[pts.length - 1][0], w = pts.slice(since(pts, end - 3600));
+  if (w.length < 3) return null;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const [t, v] of w) { const x = (t - end) / 3600; sx += x; sy += v; sxx += x * x; sxy += x * v; }
+  const n = w.length, d = n * sxx - sx * sx;
+  return d ? (n * sxy - sx * sy) / d : null;
+}
+
+// ---------------------------------------------------------------- charts
+
+function niceStep(raw) {
+  const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+
+function xTicks(t0, t1, width) {
+  const span = t1 - t0, max = Math.max(2, Math.floor(width / 64)), out = [];
+  const options = [[1, 'h'], [2, 'h'], [3, 'h'], [6, 'h'], [12, 'h'], [24, 'd'], [48, 'd'], [168, 'w'], [336, 'w'], [730, 'm'], [1460, 'm'], [2190, 'm']];
+  const [hours, kind] = options.find(o => span / (o[0] * 3600) <= max) || [4380, 'm'];
+  const d = new Date(t0 * 1000);
+  d.setMinutes(0, 0, 0);
+  if (kind === 'm') {
+    const months = Math.round(hours / 730);
+    d.setDate(1); d.setHours(0);
+    for (; d / 1000 <= t1; d.setMonth(d.getMonth() + months))
+      if (d / 1000 >= t0) out.push({ t: d / 1000, label: d.toLocaleDateString('en-GB', { month: 'short' }) });
+    return out;
+  }
+  if (kind === 'h') while (d.getHours() % hours) d.setHours(d.getHours() + 1);
+  else { d.setHours(0); if (kind === 'w') while (d.getDay() !== 1) d.setDate(d.getDate() + 1); }
+  for (; d / 1000 <= t1; kind === 'h' ? d.setHours(d.getHours() + hours) : d.setDate(d.getDate() + hours / 24)) {
+    if (d / 1000 < t0) continue;
+    const label = kind === 'h' ? (d.getHours() === 0 ? d.toLocaleDateString('en-GB', { weekday: 'short' }) : d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))
+      : kind === 'd' ? d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' }) : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    out.push({ t: d / 1000, label });
+  }
+  return out;
+}
+
+// o: {series: [{color, name, agg, pts}], t0, t1, res, limits: [{v, label}], fill, band, empty}
+function chart(el, o) {
+  const W = el.clientWidth || 320, H = el.clientHeight || 210;
+  const L = 4, R = 40, T = 14, B = 24, pw = W - L - R, ph = H - T - B;
+  let lo = Infinity, hi = -Infinity;
+  for (const s of o.series) for (const p of s.pts) {
+    if (p[0] < o.t0 || p[0] > o.t1) continue;
+    const a = s.agg && o.band ? p[1] : s.agg ? p[2] : p[1], b = s.agg && o.band ? p[3] : s.agg ? p[2] : p[1];
+    if (a < lo) lo = a;
+    if (b > hi) hi = b;
+  }
+  if (!isFinite(lo)) {
+    el.geom = null;
+    el.innerHTML = `<div class="empty">${o.empty || 'No data for this period yet'}</div>`;
+    return;
+  }
+  for (const l of o.limits || []) if (l.v > lo - 12 && l.v < hi + 12) { lo = Math.min(lo, l.v); hi = Math.max(hi, l.v); }
+  if (hi - lo < 2) { const m = (hi + lo) / 2; lo = m - 1; hi = m + 1; }
+  const st = niceStep((hi - lo) / 4), y0 = Math.floor(lo / st) * st, y1 = Math.ceil(hi / st) * st;
+  const X = t => L + (t - o.t0) / (o.t1 - o.t0) * pw, Y = v => T + (y1 - v) / (y1 - y0) * ph;
+  const f1 = n => n.toFixed(1);
+
+  let axes = '', plot = '', defs = '';
+  for (let v = y0; v <= y1 + st / 2; v += st) {
+    const y = f1(Y(v));
+    axes += `<line class="gl" x1="${L}" x2="${L + pw}" y1="${y}" y2="${y}"/><text class="ylab" x="${W - 2}" y="${+y + 4}" text-anchor="end">${+v.toFixed(2)}°</text>`;
+  }
+  for (const k of xTicks(o.t0, o.t1, pw)) {
+    const x = X(k.t);
+    if (x < L + 14 || x > L + pw - 14) continue;
+    axes += `<line class="gl" x1="${f1(x)}" x2="${f1(x)}" y1="${T}" y2="${T + ph}"/><text class="xlab" x="${f1(x)}" y="${H - 6}">${k.label}</text>`;
+  }
+  for (const l of o.limits || []) if (l.v >= y0 && l.v <= y1) {
+    const y = f1(Y(l.v));
+    plot += `<line class="limit" x1="${L}" x2="${L + pw}" y1="${y}" y2="${y}"/><text class="limlab" x="${L + 6}" y="${y - 5}">${l.label}</text>`;
+  }
+  o.series.forEach((s, si) => {
+    const id = `${el.id}-g${si}`;
+    if (o.fill) defs += `<linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".34"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`;
+    for (const seg of segments(s.pts, step(o.res))) {
+      const line = seg.map((p, k) => (k ? 'L' : 'M') + f1(X(p[0])) + ' ' + f1(Y(s.agg ? p[2] : p[1]))).join('');
+      if (s.agg && o.band) {
+        const top = seg.map(p => f1(X(p[0])) + ',' + f1(Y(p[3]))), bottom = seg.map(p => f1(X(p[0])) + ',' + f1(Y(p[1]))).reverse();
+        plot += `<polygon points="${top.concat(bottom).join(' ')}" fill="${s.color}" fill-opacity=".17"/>`;
+      } else if (o.fill && seg.length > 1) {
+        plot += `<path d="${line}L${f1(X(seg[seg.length - 1][0]))} ${T + ph}L${f1(X(seg[0][0]))} ${T + ph}Z" fill="url(#${id})"/>`;
+      }
+      plot += seg.length > 1 ? `<path class="ln" d="${line}" stroke="${s.color}"/>`
+        : `<circle cx="${f1(X(seg[0][0]))}" cy="${f1(Y(s.agg ? seg[0][2] : seg[0][1]))}" r="2.5" fill="${s.color}"/>`;
+    }
+  });
+  el.innerHTML = `<svg width="${W}" height="${H}"><defs>${defs}<clipPath id="${el.id}-c"><rect x="${L}" y="0" width="${pw}" height="${H}"/></clipPath></defs>`
+    + `${axes}<g clip-path="url(#${el.id}-c)">${plot}</g><g class="cg"></g></svg><div class="tip"></div>`;
+  el.geom = { o, X, Y, L, T, pw, ph, W };
+}
+
+function scrub(el, clientX) {
+  const g = el.geom;
+  if (!g) return;
+  const r = el.getBoundingClientRect();
+  const t = g.o.t0 + (clientX - r.left - g.L) / g.pw * (g.o.t1 - g.o.t0);
+  let html = '', dots = '', x = null, when = null;
+  for (const s of g.o.series) {
+    const p = nearest(s.pts, t);
+    if (!p || Math.abs(p[0] - t) > step(g.o.res) * 2 || p[0] < g.o.t0 || p[0] > g.o.t1) continue;
+    const v = s.agg ? p[2] : p[1], px = g.X(p[0]);
+    if (x === null) { x = px; when = p[0]; }
+    dots += `<circle cx="${px.toFixed(1)}" cy="${g.Y(v).toFixed(1)}" r="4.5" fill="${s.color}" stroke="#15181e" stroke-width="2"/>`;
+    html += `<div><i style="background:${s.color}"></i>${g.o.series.length > 1 ? esc(s.name) + ' ' : ''}<b class="num">${v.toFixed(1)}°</b>`
+      + `${s.agg ? ` <span class="mm num">${p[1].toFixed(1)}–${p[3].toFixed(1)}</span>` : ''}</div>`;
+  }
+  if (x === null) return unscrub(el);
+  el.querySelector('.cg').innerHTML = `<line class="cur" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${g.T}" y2="${g.T + g.ph}"/>` + dots;
+  const label = g.o.res === 'd' ? day(when) : g.o.res === 'h' ? `${day(when)}, ${hhmm(when)}–${hhmm(when + 3600)}` : `${day(when)}, ${hhmm(when)}`;
+  const tip = el.querySelector('.tip');
+  tip.innerHTML = `<div class="tt">${label}</div>${html}`;
+  tip.style.display = 'block';
+  tip.style.left = clamp(x - tip.offsetWidth / 2, 0, g.W - tip.offsetWidth) + 'px';
+}
+function unscrub(el) {
+  const cg = el.querySelector('.cg'), tip = el.querySelector('.tip');
+  if (cg) cg.innerHTML = '';
+  if (tip) tip.style.display = 'none';
+}
+
+// One finger reads values; two fingers zoom and pan; a double tap goes back to the chosen range.
+function gestures(el, zoomable) {
+  const ptrs = new Map();
+  let pinch = null, lastTap = 0, hideTimer;
+  const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  const mid = (a, b) => (a.clientX + b.clientX) / 2;
+  el.addEventListener('pointerdown', e => {
+    clearTimeout(hideTimer);
+    if (e.pointerType !== 'mouse') el.setPointerCapture(e.pointerId);
+    ptrs.set(e.pointerId, e);
+    if (zoomable && ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      pinch = { d0: Math.max(30, dist(a, b)), x0: mid(a, b), v0: Object.assign({}, view) };
+      unscrub(el);
+    } else if (ptrs.size === 1) {
+      const t = performance.now();
+      if (zoomable && t - lastTap < 280) { resetView(); lastTap = 0; return; }
+      lastTap = t;
+      scrub(el, e.clientX);
+    }
+  });
+  el.addEventListener('pointermove', e => {
+    if (!ptrs.has(e.pointerId)) { if (e.pointerType === 'mouse') scrub(el, e.clientX); return; }
+    ptrs.set(e.pointerId, e);
+    if (pinch && ptrs.size >= 2 && el.geom) {
+      const [a, b] = [...ptrs.values()], r = el.getBoundingClientRect(), g = el.geom;
+      const span0 = pinch.v0.t1 - pinch.v0.t0;
+      const span = clamp(span0 * pinch.d0 / Math.max(30, dist(a, b)), MIN_SPAN, MAX_SPAN);
+      const anchor = pinch.v0.t0 + (pinch.x0 - r.left - g.L) / g.pw * span0;     // time under the fingers at the start
+      setView(anchor - (mid(a, b) - r.left - g.L) / g.pw * span, span);
+    } else if (ptrs.size === 1) {
+      scrub(el, e.clientX);
+    }
+  });
+  const end = e => {
+    ptrs.delete(e.pointerId);
+    if (pinch && ptrs.size < 2) { pinch = null; fetchForView(); }
+    if (!ptrs.size) hideTimer = setTimeout(() => unscrub(el), e.pointerType === 'mouse' ? 0 : 1600);
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  el.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') unscrub(el); });
+}
+
+// ---------------------------------------------------------------- home
+
+function sparkline(pts, color) {
+  if (pts.length < 2) return '<svg class="spark"></svg>';
+  const W = 200, H = 48, t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  let lo = Infinity, hi = -Infinity;
+  for (const p of pts) { lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]); }
+  if (hi - lo < 1) { const m = (hi + lo) / 2; lo = m - .5; hi = m + .5; }
+  const X = t => (t - t0) / (t1 - t0 || 1) * W, Y = v => 6 + (hi - v) / (hi - lo) * (H - 10);
+  const d = pts.map((p, k) => (k ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join('');
+  const id = 'sp' + color.slice(1);
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1">`
+    + `<stop offset="0" stop-color="${color}" stop-opacity=".38"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>`
+    + `<path d="${d}L${W} ${H}L0 ${H}Z" fill="url(#${id})"/><path d="${d}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+function describe(s) {
+  if (s.fault) return 'probe is not answering';
+  if (s.alarm > 0) return `too hot: ${s.temp.toFixed(1)}° (limit ${s.high}°)`;
+  return `too cold: ${s.temp.toFixed(1)}° (limit ${s.low}°)`;
+}
+
+function renderHome() {
+  const alarms = now ? now.sensors.filter(s => s.alarm || s.fault) : [];
+  $('#dot').className = 'dot' + (!online ? ' warn' : alarms.length ? ' bad' : '');
+  $('#status').textContent = !online ? 'Offline – retrying' : !now ? 'Connecting…' : alarms.length ? `${alarms.length} alert${alarms.length > 1 ? 's' : ''}` : 'All normal';
+  $('#updated').textContent = lastOk ? hhmm(lastOk / 1000) : '';
+  if (!now) return;
+
+  $('#banner').innerHTML = alarms.map(s => `<div class="banner">${WARN}<div><b>${esc(s.name)}</b> – ${describe(s)}</div></div>`).join('');
+  const t = tNow();
+  $('#cards').innerHTML = now.sensors.map((s, i) => {
+    const c = COLORS[i % COLORS.length], pts = (data.f[i] || []).slice(since(data.f[i] || [], t - 86400));
+    const k = trend(pts), state = s.fault ? 'fault' : s.alarm ? 'alarm' : '';
+    const pill = s.fault ? 'NO SIGNAL' : s.alarm > 0 ? 'TOO HOT' : s.alarm < 0 ? 'TOO COLD' : '';
+    const tr = k === null ? '' : Math.abs(k) < .5 ? '→ steady' : `${k > 0 ? '↑' : '↓'} ${Math.abs(k).toFixed(1)}°/h`;
+    return `<div class="sensor ${state}" data-i="${i}" style="--c:${c};--cb:${rgba(c, .16)}">`
+      + `<div class="hd"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[i] || ICONS[0]}</svg></span><span class="n">${esc(s.name)}</span></div>`
+      + `<div class="val num">${s.temp === null ? '–' : s.temp.toFixed(1)}<small>°C</small></div>`
+      + `<div class="trend num ${k > .5 ? 'up' : k < -.5 ? 'down' : ''}">${pill ? `<span class="pill">${pill}</span>` : ''}${tr}</div>${sparkline(pts, c)}</div>`;
+  }).join('');
+
+  $('#legend').innerHTML = now.sensors.map((s, i) => `<span><i style="background:${COLORS[i]}"></i>${esc(s.name)}</span>`).join('');
+  const t0 = t - 86400;
+  chart($('#overview'), {
+    series: now.sensors.map((s, i) => ({ color: COLORS[i], name: s.name, pts: windowed(data.f[i] || [], t0, t) })),
+    t0, t1: t, res: 'f', empty: 'The history fills up over the next hours',
+  });
+  renderToday();
+}
+
+function renderToday() {
+  const s = now.sensors, mid = new Date();
+  mid.setHours(0, 0, 0, 0);
+  const m = mid / 1000, rows = [];
+  if (s[FURNACE] && s[RETURN] && s[FURNACE].temp !== null && s[RETURN].temp !== null)
+    rows.push(['Furnace → return', 'heat going into the house', `${(s[FURNACE].temp - s[RETURN].temp).toFixed(1)}°`]);
+  const fp = (data.f[FURNACE] || []).slice(since(data.f[FURNACE] || [], m));
+  const thr = s[FURNACE] && s[FURNACE].low !== null ? s[FURNACE].low : 40;
+  let burn = 0;
+  for (let k = 1; k < fp.length; k++)
+    if (fp[k][1] >= thr && fp[k - 1][1] >= thr) burn += Math.min(fp[k][0] - fp[k - 1][0], 3 * step('f'));
+  rows.push(['Furnace burning', `time above ${thr}° today`, dur(burn)]);
+  for (const i of [BOILER, COAL]) {
+    if (!s[i]) continue;
+    const p = (data.f[i] || []).slice(since(data.f[i] || [], m));
+    if (!p.length) continue;
+    const top = p.reduce((a, b) => (b[1] > a[1] ? b : a));
+    rows.push([`${s[i].name} – highest`, `today at ${hhmm(top[0])}`, `${top[1].toFixed(1)}°`]);
+  }
+  $('#today').innerHTML = rows.map(r => `<div class="row"><div><div class="k">${esc(r[0])}</div><div class="s">${esc(r[1])}</div></div><div class="v num">${r[2]}</div></div>`).join('');
+}
+
+// ---------------------------------------------------------------- charts view
+
+function resetView() {
+  const t = tNow();
+  view = { t0: t - RANGES[ui.range], t1: t };
+  fetchForView();
+}
+function setView(t0, span) {
+  const t = tNow() + 300;
+  span = clamp(span, MIN_SPAN, MAX_SPAN);
+  t0 = clamp(t0, t - 5 * 365 * 86400, t - span);
+  view = { t0, t1: t0 + span };
+  requestPaint();
+}
+let paintQueued = false;
+function requestPaint() {
+  if (paintQueued) return;
+  paintQueued = true;
+  requestAnimationFrame(() => { paintQueued = false; paintDetail(); });
+}
+async function fetchForView() {
+  if (!view) resetView();
+  paintDetail();
+  await loadRes(resFor(view.t1 - view.t0));
+  paintDetail();
+}
+
+function paintDetail() {
+  if (!now || !view) return;
+  const res = resFor(view.t1 - view.t0), shown = ui.shown.filter(i => i < now.sensors.length);
+  const single = shown.length === 1, s0 = now.sensors[shown[0]];
+  const series = shown.map(i => ({ color: COLORS[i], name: now.sensors[i].name, agg: res !== 'f', pts: windowed((data[res][i] || []), view.t0, view.t1) }));
+  const limits = single ? [s0.high !== null && { v: s0.high, label: `max ${s0.high}°` }, s0.low !== null && { v: s0.low, label: `min ${s0.low}°` }].filter(Boolean) : [];
+  chart($('#detail'), { series, t0: view.t0, t1: view.t1, res, limits, fill: single, band: single });
+
+  $('#dnow').textContent = single ? (s0.temp === null ? '–' : s0.temp.toFixed(1) + '°') : '';
+  $('#dname').textContent = single ? s0.name + ' now' : `${shown.length} probes`;
+  const zoomed = Math.abs((view.t1 - view.t0) - RANGES[ui.range]) > 60 || view.t1 < tNow() - 600;
+  $('#zoomreset').style.display = zoomed ? 'block' : 'none';
+  $$('#ranges button').forEach(b => b.classList.toggle('on', b.dataset.r === ui.range && !zoomed));
+
+  const pts = series[0] ? series[0].pts.filter(p => p[0] >= view.t0 && p[0] <= view.t1) : [];
+  const lo = pts.length ? Math.min(...pts.map(p => p[1])) : null;
+  const hi = pts.length ? Math.max(...pts.map(p => res === 'f' ? p[1] : p[3])) : null;
+  const avg = pts.length ? pts.reduce((a, p) => a + (res === 'f' ? p[1] : p[2]), 0) / pts.length : null;
+  const cell = (k, v) => `<div><span>${k}</span><b class="num">${v === null ? '–' : v.toFixed(1) + '°'}</b></div>`;
+  $('#rstats').innerHTML = cell('MIN', lo) + cell('AVG', avg) + cell('MAX', hi) + cell('NOW', series[0] && s0 && single ? s0.temp : null);
+}
+
+function renderCharts() {
+  if (!now) return;
+  $('#chips').innerHTML = now.sensors.map((s, i) => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${COLORS[i]};--cb:${rgba(COLORS[i], .14)}"><i></i>${esc(s.name)}</button>`).join('');
+  if (!view) resetView(); else paintDetail();
+}
+
+// ---------------------------------------------------------------- settings
+
+const fmtLimit = v => (v === null ? '' : String(v));
+function renderSettings() {
+  if (!now) return;
+  if (!$('#limits').contains(document.activeElement))
+    $('#limits').innerHTML = now.sensors.map((s, i) => `<div class="lim" style="--c:${COLORS[i]}"><label><span class="cd"></span>${esc(s.name)}</label>`
+      + `<div class="f">MIN<input type="text" inputmode="decimal" data-i="${i}" data-k="low" value="${fmtLimit(s.low)}" placeholder="off"></div>`
+      + `<div class="f">MAX<input type="text" inputmode="decimal" data-i="${i}" data-k="high" value="${fmtLimit(s.high)}" placeholder="off"></div></div>`).join('');
+
+  const bars = now.rssi > -55 ? 4 : now.rssi > -65 ? 3 : now.rssi > -75 ? 2 : 1;
+  const up = now.uptime, upText = up > 86400 ? `${Math.floor(up / 86400)} d ${Math.floor(up % 86400 / 3600)} h` : dur(up);
+  const fs = now.fsUsed / now.fsTotal;
+  const row = (k, v, s) => `<div class="row"><div><div class="k">${k}</div>${s ? `<div class="s">${s}</div>` : ''}</div><div class="v num">${v}</div></div>`;
+  $('#device').innerHTML = row('Wi-Fi', `<span class="wifi">${[1, 2, 3, 4].map(b => `<i class="${b <= bars ? 'on' : ''}" style="height:${b * 3 + 2}px"></i>`).join('')}</span>${now.rssi} dBm`, now.ip)
+    + row('Running for', upText)
+    + row('History', `${Math.round(now.interval / 60)} min`, 'one point per probe')
+    + row('Storage', `${Math.round(fs * 100)} %<div class="bar"><i style="width:${Math.round(fs * 100)}%"></i></div>`, `${Math.round(now.fsUsed / 1024)} of ${Math.round(now.fsTotal / 1024)} KB`)
+    + row('Free memory', `${Math.round(now.heap / 1024)} KB`);
+  $('#fwinfo').innerHTML = row('Version', `v${now.fw}`, esc(now.update));
+}
+
+// Saved when a field is left (or Done is tapped) - never half-typed. A comma works as the decimal point.
+async function saveLimits(i) {
+  const field = k => $(`#limits input[data-i="${i}"][data-k="${k}"]`).value.trim().replace(',', '.');
+  const lo = field('low'), hi = field('high');
+  if ([lo, hi].some(v => v !== '' && !isFinite(+v))) return toast('Use a number, or leave the field empty');
+  try {
+    now = await (await api('/api/limits', { method: 'POST', body: new URLSearchParams({ s: i, low: lo, high: hi }) })).json();
+    toast(`${now.sensors[i].name}: limits saved`);
+  } catch (e) { toast('Could not save – is the furnace online?'); }
+  if (!$('#limits').contains(document.activeElement)) render();
+}
+
+function uploadFirmware() {
+  const file = $('#fwfile').files[0];
+  if (!file) return toast('Choose a .bin file first');
+  const xhr = new XMLHttpRequest(), bar = $('#fwprog');
+  bar.style.display = 'block';
+  xhr.upload.onprogress = e => { if (e.lengthComputable) bar.firstElementChild.style.width = (e.loaded / e.total * 100) + '%'; };
+  xhr.onload = () => {
+    if (xhr.status === 200) { toast('Installed – restarting…'); setTimeout(() => location.reload(), 25000); }
+    else { toast(xhr.status === 403 ? 'Wrong password' : 'Update failed: ' + xhr.responseText); bar.style.display = 'none'; }
+  };
+  xhr.onerror = () => { toast('Upload failed'); bar.style.display = 'none'; };
+  const form = new FormData();
+  form.append('firmware', file);
+  xhr.open('POST', '/api/firmware?pwd=' + encodeURIComponent($('#fwpwd').value));
+  xhr.send(form);
+}
+
+// ---------------------------------------------------------------- shell
+
+function render() {
+  if (ui.tab === 'home') renderHome();
+  else if (ui.tab === 'charts') renderCharts();
+  else renderSettings();
+}
+
+function showTab(tab) {
+  ui.tab = tab;
+  saveUi();
+  $$('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + tab));
+  $$('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  window.scrollTo(0, 0);
+  render();
+}
+
+function setup() {
+  $$('nav.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  $('#cards').onclick = e => {
+    const c = e.target.closest('.sensor');
+    if (!c) return;
+    ui.shown = [+c.dataset.i];
+    ui.range = '24h';
+    view = null;
+    showTab('charts');
+  };
+  $('#chips').onclick = e => {
+    const c = e.target.closest('.chip');
+    if (!c) return;
+    const i = +c.dataset.i;
+    ui.shown = ui.shown.includes(i) ? (ui.shown.length > 1 ? ui.shown.filter(x => x !== i) : ui.shown) : ui.shown.concat(i).sort();
+    saveUi();
+    renderCharts();
+  };
+  $('#ranges').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    ui.range = b.dataset.r;
+    saveUi();
+    resetView();
+  };
+  $('#zoomreset').onclick = resetView;
+  $('#limits').addEventListener('change', e => { if (e.target.dataset.i) saveLimits(+e.target.dataset.i); });
+  $('#checkupd').onclick = async () => {
+    try { await api('/api/update', { method: 'POST' }); toast('Checking for updates…'); setTimeout(refreshNow, 9000); }
+    catch (e) { toast('The furnace is offline'); }
+  };
+  $('#fwup').onclick = uploadFirmware;
+  $('#scan').onclick = async () => {
+    $('#bus').textContent = 'Scanning…';
+    try { $('#bus').textContent = await (await api('/api/bus')).text(); } catch (e) { $('#bus').textContent = 'Scan failed'; }
+  };
+  gestures($('#detail'), true);
+  gestures($('#overview'), false);
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { refreshNow(); loadRes('f', true).then(render); } });
+  let rt;
+  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
+
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('furnace-a2hs') === '1'; } catch (e) {}
+  if (/iPhone|iPad/.test(navigator.userAgent) && !standalone && !dismissed) {
+    $('#a2hs').innerHTML = '<div class="tip-card"><div><b>Tip:</b> tap Share → "Add to Home Screen" to open this like an app.</div><button aria-label="Close">×</button></div>';
+    $('#a2hs button').onclick = () => { $('#a2hs').innerHTML = ''; try { localStorage.setItem('furnace-a2hs', '1'); } catch (e) {} };
+  }
+}
+
+(async function start() {
+  setup();
+  showTab(ui.tab);
+  await refreshNow();
+  await loadRes('f', true);
+  render();
+  setInterval(refreshNow, 10000);
+  setInterval(() => loadRes('f').then(() => { if (ui.tab !== 'settings') render(); }), 60000);
+})();
+</script>
+</body>
+</html>

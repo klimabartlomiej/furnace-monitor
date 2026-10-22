@@ -25,7 +25,8 @@
 // Updates:
 //   - over the internet (any home): bump FW_VERSION, run release/publish.ps1; the ESP checks UPDATE_MANIFEST_URL
 //     every hour (or "@u" / the web app), installs the new version and rolls back if it does not come online,
-//   - on the same WiFi: Arduino IDE -> Tools -> Port -> "furnace at ..." (password set with the "O" command).
+//   - on the same WiFi: web app -> Settings -> Firmware -> install a .bin file, or Arduino IDE -> Tools -> Port ->
+//     "furnace at ..." (both use the OTA password set with the serial command "O").
 //
 // Arduino IDE: board "ESP32 Dev Module"; the partition table comes from partitions.csv in this folder
 // (2 x 1.69 MB app slots for OTA, 512 KB LittleFS for the history).
@@ -36,6 +37,7 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <LittleFS.h>
+#include <nvs.h>
 #include <time.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -47,7 +49,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 2;                        // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 3;                      // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -527,6 +529,57 @@ void handleUpdate() {
   handleNow();
 }
 
+// The web app's "install from file" uses the network-OTA password: HomeSpan keeps its SHA-256 in NVS OTA/OTADATA.
+bool otaPasswordMatches(const String& password) {
+  char stored[65] = "";
+  size_t len = sizeof(stored);
+  nvs_handle_t nvs;
+  bool found = false;
+  if (nvs_open("OTA", NVS_READONLY, &nvs) == ESP_OK) {
+    found = nvs_get_str(nvs, "OTADATA", stored, &len) == ESP_OK;
+    nvs_close(nvs);
+  }
+  String expected = found ? String(stored) : String(DEFAULT_OTA_PASSWORD);
+  String given = password;
+  if (!found) return given == expected;
+
+  uint8_t digest[32];
+  mbedtls_sha256((const uint8_t*)given.c_str(), given.length(), digest, 0);
+  char hex[65];
+  for (int i = 0; i < 32; i++) sprintf(hex + 2 * i, "%02x", digest[i]);
+  return expected.equalsIgnoreCase(hex);
+}
+
+String firmwareUploadError;
+
+// POST /api/firmware?pwd=... with the .bin as a multipart file. Goes to the spare app slot and boots on
+// probation like a remote update (RemoteUpdate.h), so a bad file rolls back by itself.
+void handleFirmwareChunk() {
+  HTTPUpload& up = server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    firmwareUploadError = otaPasswordMatches(server.arg("pwd")) ? "" : "wrong password";
+    if (firmwareUploadError.isEmpty() && !Update.begin(UPDATE_SIZE_UNKNOWN)) firmwareUploadError = Update.errorString();
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (firmwareUploadError.isEmpty() && Update.write(up.buf, up.currentSize) != up.currentSize) firmwareUploadError = Update.errorString();
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (firmwareUploadError.isEmpty() && !Update.end(true)) firmwareUploadError = Update.errorString();
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    firmwareUploadError = "upload aborted";
+  }
+}
+
+void handleFirmwareDone() {
+  if (!firmwareUploadError.isEmpty()) {
+    if (Update.isRunning()) Update.abort();
+    server.send(firmwareUploadError == "wrong password" ? 403 : 500, "text/plain", firmwareUploadError);
+    return;
+  }
+  server.send(200, "text/plain", "installed, restarting");
+  Serial.println("Firmware uploaded from the web app - restarting");
+  delay(500);
+  ESP.restart();
+}
+
 // Called by HomeSpan every time WiFi comes up; the web server is started once and survives reconnects.
 void onNetworkUp(int count) {
   Serial.printf("Network up (#%d), IP %s - web app http://%s.local:%u\n",
@@ -542,6 +595,7 @@ void onNetworkUp(int count) {
   server.on("/api/limits", HTTP_POST, handleLimits);
   server.on("/api/bus", HTTP_GET, handleBus);
   server.on("/api/update", HTTP_POST, handleUpdate);
+  server.on("/api/firmware", HTTP_POST, handleFirmwareDone, handleFirmwareChunk);
   server.onNotFound([] { server.send(404, "text/plain", "not found"); });
   server.begin();
   webStarted = true;
