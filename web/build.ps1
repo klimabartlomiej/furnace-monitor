@@ -73,7 +73,7 @@ $html = Get-Gzip ([IO.File]::ReadAllBytes("$PSScriptRoot\index.html"))
 $icon = Get-IconPng
 [IO.File]::WriteAllBytes("$PSScriptRoot\icon.png", $icon)   # preview copy, not used by the build
 
-$manifest = '{"name":"Furnace","short_name":"Furnace","start_url":"/","display":"standalone",' +
+$manifest = '{"name":"Piec","short_name":"Piec","start_url":"/","display":"standalone","lang":"pl",' +
             '"background_color":"#0b0d10","theme_color":"#0b0d10",' +
             '"icons":[{"src":"/icon.png","sizes":"180x180","type":"image/png"}]}'
 

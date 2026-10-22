@@ -2,11 +2,12 @@
 
 ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - no Homebridge, no Raspberry Pi.
 
-- **Apple Home** (HomeSpan): four temperature sensors plus one "... alarm" contact sensor per probe, which opens
-  when a temperature leaves its limits or a probe dies - turn on its notifications for a push on the phone.
+- **Apple Home** (HomeSpan): four temperature sensors (Piec, Powrót, Zasobnik węgla, Bojler) plus one "Alarm ..."
+  contact sensor per probe, which opens when a temperature leaves its limits or a probe dies - turn on its
+  notifications for a push on the phone.
 - **Eve app graphs**: every sensor keeps an Eve-compatible history on the ESP itself (`EveHistory.h`, protocol as
   reverse-engineered by [fakegato-history](https://github.com/simont77/fakegato-history)).
-- **Web app** `http://furnace.local:8080` (home WiFi only): live values, charts up to a year, alarm limits.
+- **Web app** `http://furnace.local:8080` (home WiFi only, in Polish): live values, charts up to a year, alarm limits.
 - **Updates over the internet**: the ESP checks `release/manifest.json` every hour and installs newer firmware,
   with automatic rollback if the new version does not come online.
 
@@ -23,8 +24,8 @@ Probe addresses are pinned in `SENSORS` in `PiecTemp.ino`; `diagnostics/PiecTemp
 
 1. Without stored WiFi the ESP opens the open hotspot **Furnace-Setup** - join it with a phone, pick the network,
    type its password, leave the setup code empty.
-2. Home app -> Add Accessory -> More options -> **Furnace Sensors**, setup code **466-37-726**.
-3. Turn on notifications for the "... alarm" accessories.
+2. Home app -> Add Accessory -> More options -> **Czujniki pieca**, setup code **466-37-726**.
+3. Turn on notifications for the "Alarm ..." accessories.
 
 BOOT button: hold ~5 s and release = new WiFi; hold ~15 s and release = full reset (WiFi, HomeKit pairing and
 history) before moving the device to another home. After 5 minutes without WiFi the hotspot also opens by itself.

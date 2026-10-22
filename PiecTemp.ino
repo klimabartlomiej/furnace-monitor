@@ -2,10 +2,10 @@
 // ESP32 + DS18B20 probes on one 1-Wire bus, exposed straight to Apple Home through HomeSpan (no bridge, no Pi).
 //
 // Every probe shows up in the Home app twice:
-//   "<name>"        - temperature sensor; gets a fault flag when the probe stops answering
-//   "<name> alarm"  - contact sensor that OPENS when the temperature leaves its limits or the probe dies;
-//                     turn on notifications for it in the Home app to get a push on your phone
-// Pairing: Home app -> Add Accessory -> More options -> "Furnace Sensors", setup code 466-37-726.
+//   name       - temperature sensor; gets a fault flag when the probe stops answering
+//   alarmName  - contact sensor that OPENS when the temperature leaves its limits or the probe dies;
+//                turn on notifications for it in the Home app to get a push on your phone
+// Pairing: Home app -> Add Accessory -> More options -> "Czujniki pieca", setup code 466-37-726.
 // Eve app: every temperature sensor carries an Eve history (EveHistory.h).
 //
 // Web app http://furnace.local:8080 (home WiFi only): live cards, charts from 24 h to a year, alarm limits,
@@ -49,7 +49,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 3;                      // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 4;                    // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -76,8 +76,11 @@ constexpr float    MAX_JUMP           = 10.0;            // a bigger change betw
 constexpr float    CONFIRM_TOLERANCE  = 2.0;             // the next reading must be this close to confirm a jump
 constexpr uint8_t  FAULT_AFTER        = 3;               // bad readings in a row before a probe is reported dead
 
+// Names are what the Home app and the web app show (Polish - the household's language); HomeKit accepts only
+// letters, digits, spaces and apostrophes in them.
 struct SensorConfig {
   const char*   name;          // name in the Home app, in the web app and in the log
+  const char*   alarmName;     // name of the probe's alarm contact sensor
   DeviceAddress address;       // {} = take the next unassigned probe found on the bus
   float         defaultLow;    // alarm limits until they are changed in the web app; NAN = off
   float         defaultHigh;
@@ -86,10 +89,10 @@ struct SensorConfig {
 // Pinned addresses: a dead or removed probe never shifts the others.
 // Identified on the bench 2026-10-22 (hand-warming test). The web app relies on this order.
 SensorConfig SENSORS[] = {
-  { "Furnace",      {0x28, 0x4D, 0x83, 0x77, 0x91, 0x0C, 0x02, 0xF8}, 40.0, 90.0 },   // counterfeit chip (11 ms conversion), failed at ~60 C in place
-  { "Return water", {0x28, 0xAA, 0xEF, 0x8D, 0x4A, 0x14, 0x01, 0xAE}, NAN,  NAN  },
-  { "Coal hopper",  {0x28, 0xAA, 0x61, 0x94, 0x4A, 0x14, 0x01, 0x6C}, NAN,  50.0 },   // high = embers creeping back into the hopper
-  { "Boiler water", {0x28, 0xAA, 0xDB, 0x95, 0x4D, 0x14, 0x01, 0x6B}, 35.0, NAN  },
+  { "Piec",           "Alarm pieca",     {0x28, 0x4D, 0x83, 0x77, 0x91, 0x0C, 0x02, 0xF8}, 40.0, 90.0 },   // furnace; counterfeit chip (11 ms conversion), failed at ~60 C in place
+  { "Powrót",         "Alarm powrotu",   {0x28, 0xAA, 0xEF, 0x8D, 0x4A, 0x14, 0x01, 0xAE}, NAN,  NAN  },   // return water
+  { "Zasobnik węgla", "Alarm zasobnika", {0x28, 0xAA, 0x61, 0x94, 0x4A, 0x14, 0x01, 0x6C}, NAN,  50.0 },   // coal hopper; high = embers creeping back
+  { "Bojler",         "Alarm bojlera",   {0x28, 0xAA, 0xDB, 0x95, 0x4D, 0x14, 0x01, 0x6B}, 35.0, NAN  },   // hot water tank
 };
 
 // ------------------------------------------------------------------ state
@@ -104,7 +107,6 @@ struct SensorState {
   RingLog*            hourly       = nullptr;
   RingLog*            daily        = nullptr;
   Aggregate           hour;               // readings of the current hour
-  char     alarmName[32]   = "";
   char     serial[16]      = "";          // Eve keeps histories apart by serial number
   char     historyName[40] = "";
   char     historyPath[16] = "";
@@ -207,7 +209,7 @@ void createAccessories() {
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
     SensorState& s = state[i];
     snprintf(s.serial, sizeof(s.serial), "FURNACE-%u", (unsigned)(i + 1));
-    snprintf(s.historyName, sizeof(s.historyName), "%s History", SENSORS[i].name);
+    snprintf(s.historyName, sizeof(s.historyName), "%s historia", SENSORS[i].name);
     new SpanAccessory();
       new Service::AccessoryInformation();
         new Characteristic::Identify();
@@ -227,11 +229,10 @@ void createAccessories() {
 
   // One alarm contact per probe, so a dead probe that keeps its alarm open never hides a new alarm elsewhere.
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
-    snprintf(state[i].alarmName, sizeof(state[i].alarmName), "%s alarm", SENSORS[i].name);
     new SpanAccessory();
       new Service::AccessoryInformation();
         new Characteristic::Identify();
-        new Characteristic::Name(state[i].alarmName);
+        new Characteristic::Name(SENSORS[i].alarmName);
       new Service::ContactSensor();
         state[i].alarmContact = new Characteristic::ContactSensorState(0);
   }
@@ -252,7 +253,7 @@ void reportSensor(size_t i) {
   int open = (s.alarm != 0 || s.faulty) ? 1 : 0;   // 1 = contact open = alarm
   if (s.alarmContact->getVal() != open) {
     s.alarmContact->setVal(open);
-    Serial.printf("%s: %s\n", s.alarmName, open ? "OPEN" : "closed");
+    Serial.printf("%s: %s\n", SENSORS[i].alarmName, open ? "OPEN" : "closed");
   }
 }
 
@@ -663,7 +664,7 @@ void setup() {
   homeSpan.setHostNameSuffix("");            // host name is exactly DEVICE_NAME
   homeSpan.enableOTA();                      // password lives in flash (CLI "O"), not in this public code
   homeSpan.setConnectionCallback(onNetworkUp);
-  homeSpan.begin(Category::Bridges, "Furnace Sensors", DEVICE_NAME);
+  homeSpan.begin(Category::Bridges, "Czujniki pieca", DEVICE_NAME);
   createAccessories();
 
   new SpanUserCommand('a', "- list DS18B20 probes on the bus", [](const char*) { Serial.print(busReport()); });
