@@ -2,6 +2,8 @@
 #   index.html -> gzip                         -> WEBAPP_HTML_GZ, WEBAPP_ETAG (hash of it)
 #   app icon   -> drawn here, 180x180 PNG      -> WEBAPP_ICON_PNG   (iPhone "Add to Home Screen")
 #   manifest   -> WEBAPP_MANIFEST
+# The same files are the remote app on GitHub Pages (.github/workflows/pages.yml): index.html, icon.png and
+# manifest.webmanifest are written here too - paths are relative, so they work at the ESP's root and under /<repo>/.
 # Run after every change of index.html:  powershell -ExecutionPolicy Bypass -File web\build.ps1
 
 $ErrorActionPreference = 'Stop'
@@ -71,11 +73,12 @@ function Format-CArray([string]$name, [byte[]]$bytes) {
 
 $html = Get-Gzip ([IO.File]::ReadAllBytes("$PSScriptRoot\index.html"))
 $icon = Get-IconPng
-[IO.File]::WriteAllBytes("$PSScriptRoot\icon.png", $icon)   # preview copy, not used by the build
+[IO.File]::WriteAllBytes("$PSScriptRoot\icon.png", $icon)   # for GitHub Pages; the firmware gets its own copy
 
-$manifest = '{"name":"Piec","short_name":"Piec","start_url":"/","display":"standalone","lang":"pl",' +
+$manifest = '{"name":"Piec","short_name":"Piec","start_url":"./","scope":"./","display":"standalone","lang":"pl",' +
             '"background_color":"#0b0d10","theme_color":"#0b0d10",' +
-            '"icons":[{"src":"/icon.png","sizes":"180x180","type":"image/png"}]}'
+            '"icons":[{"src":"icon.png","sizes":"180x180","type":"image/png"}]}'
+[IO.File]::WriteAllText("$PSScriptRoot\manifest.webmanifest", $manifest, (New-Object Text.UTF8Encoding $false))
 
 # ETag of the page: the phone keeps its copy and gets "304 Not Modified" until the page changes.
 $sha = [Security.Cryptography.SHA1]::Create()

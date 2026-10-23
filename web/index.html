@@ -8,8 +8,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Piec">
 <meta name="theme-color" content="#0b0d10">
-<link rel="apple-touch-icon" href="/icon.png">
-<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.webmanifest">
 <title>Piec</title>
 <style>
 :root{
@@ -122,10 +122,17 @@ nav.tabs button{position:relative}
 .chip i{width:9px;height:9px;border-radius:50%;background:var(--c);opacity:.5}
 .chip.on{color:var(--text);border-color:var(--c);background:var(--cb)}
 .chip.on i{opacity:1}
-.tgp{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
-.tgp .k{font-weight:600;font-size:15px}
-.tgflags{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px}
-.tgflags .chip{padding:6px 11px;font-size:13px}
+.pair{display:none;padding:calc(env(safe-area-inset-top) + 28px) 16px 24px;max-width:520px;margin:0 auto}
+body.unpaired .view,body.unpaired nav.tabs{display:none!important}
+body.unpaired .pair{display:block}
+.code{display:none;margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--card2);font:13px/1.4 ui-monospace,Menlo,monospace;word-break:break-all;user-select:all;-webkit-user-select:all}
+.unotes{text-align:left;max-height:42vh;overflow:auto;margin-top:6px;font-size:14px;color:var(--muted)}
+.unotes p{margin:0 0 8px}
+.unotes b{color:var(--text)}
+.ustate{margin-top:12px;font-size:14px;color:var(--text)}
+.ustate.bad{color:var(--red)}
+.progress.on{display:block}
+.banner .progress{margin-top:8px;background:rgba(255,255,255,.14)}
 .big-now{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}
 .big-now .v{font:600 34px/1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.02em}
 .big-now .l{color:var(--muted);font-size:14px}
@@ -364,8 +371,8 @@ nav.tabs button.on{color:var(--text)}
   </div>
   <div class="card"><div id="seasonset"></div></div>
   <div class="card">
-    <div class="card-h">Telegram</div>
-    <div id="tgset"></div>
+    <div class="card-h">Dostęp zdalny</div>
+    <div id="remoteset"></div>
   </div>
   <div class="card">
     <div class="card-h">Temperatura na zewnątrz</div>
@@ -381,12 +388,26 @@ nav.tabs button.on{color:var(--text)}
     <summary>Oprogramowanie</summary>
     <div class="inner">
       <div class="rows" id="fwinfo"></div>
-      <button class="btn primary" id="checkupd">Sprawdź aktualizacje</button>
+      <div id="fwupd"></div>
+      <button class="btn" id="checkupd">Sprawdź aktualizacje</button>
+      <div id="fwfilebox">
       <p class="note">Instalacja z pliku (tylko w domowym Wi-Fi):</p>
       <input class="field" type="file" id="fwfile" accept=".bin">
       <input class="field" type="password" id="fwpwd" placeholder="Hasło OTA" autocomplete="off">
       <button class="btn" id="fwup">Zainstaluj</button>
       <div class="progress" id="fwprog"><i></i></div>
+      </div>
+    </div>
+  </details>
+  <details class="card" id="backupcard">
+    <summary>Kopia zapasowa</summary>
+    <div class="inner">
+      <p class="note" style="margin-top:0">Całe urządzenie w jednym pliku: historia, ustawienia, Wi-Fi, parowanie z aplikacją Dom i dostęp zdalny. Po przywróceniu na nowej płytce Dom i telefony widzą ją jak starą. Plik zawiera hasło Wi-Fi – nie udostępniaj go.</p>
+      <a class="btn" href="/api/backup" download>Pobierz kopię</a>
+      <p class="note">Przywrócenie zastępuje wszystko na tym urządzeniu. Stare urządzenie musi być wtedy wyłączone.</p>
+      <input class="field" type="file" id="bkfile" accept=".bin">
+      <button class="btn danger" id="bkup">Przywróć z kopii…</button>
+      <div class="progress" id="bkprog"><i></i></div>
     </div>
   </details>
   <details class="card">
@@ -418,6 +439,21 @@ nav.tabs button.on{color:var(--text)}
   <div class="when" id="rwhen"><button data-m="0">Teraz</button><button data-m="30">30 min temu</button><button data-m="60">1 godz. temu</button><button data-m="120">2 godz. temu</button></div>
   <label class="rf"><span id="rwhenl">Godzina</span><input type="time" id="rtime"></label>
 </div><div class="acts"><button id="rno">Anuluj</button><button class="ok" id="ryes">Zapisz</button></div></div></div>
+<div class="modal" id="umodal"><div class="dialog"><div class="body">
+  <h3 id="utitle"></h3>
+  <div class="unotes" id="unotes"></div>
+  <div class="ustate" id="ustate"></div>
+  <div class="progress" id="uprog"><i></i></div>
+</div><div class="acts"><button id="uno">Później</button><button class="ok" id="uyes">Zainstaluj</button></div></div></div>
+<section class="pair" id="pair">
+  <header class="top"><h1>Piec</h1><div class="sub">Połącz ten telefon z piecem</div></header>
+  <div class="card">
+    <p class="note" style="margin-top:0">W domu, w Wi-Fi pieca, otwórz aplikację pieca (furnace.local:8080) → Ustawienia → Dostęp zdalny → „Otwórz na tym telefonie”. Albo stuknij tam „Kopiuj kod” i wklej go tutaj.</p>
+    <input class="field" id="paircode" placeholder="Kod parowania" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button class="btn" id="pairpaste">Wklej ze schowka</button>
+    <button class="btn primary" id="pairgo">Połącz</button>
+  </div>
+</section>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -458,12 +494,13 @@ const WARNINGS = [
   { name: 'Piec stoi po zaniku prądu', icon: I_NOPOWER },
   { name: 'Opróżnij popielnik', icon: I_ASH },
 ];
-// Release notes shown once after the device updated itself (the web app ships inside the firmware).
+// Release notes: offered with a new version (release/publish.ps1 copies them into the manifest) and shown once
+// after the device updated itself. Every FW_VERSION needs its entry - the app's version is the highest key.
 const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
-  13: 'Telegram: alarmy z przyciskiem „Widzę”, przypomnienia, Stan, Dziennik, dosypanie i popielnik z czatu, podsumowanie o 7:00. Ustawienia → Telegram.',
+  14: 'Piec z każdego miejsca: ta sama aplikacja na klimabartlomiej.github.io/furnace-monitor, przez szyfrowany przekaźnik (Ustawienia → Dostęp zdalny). Nowe wersje nie instalują się już same – aplikacja pokazuje, co zmieniają, i instaluje po stuknięciu „Zainstaluj”, z paskiem postępu. Powiadomienia na telefon w tej aplikacji: alarmy, ostrzeżenia, brak prądu i „piec offline” (Ustawienia → Dostęp zdalny). Kopia zapasowa całego urządzenia (Ustawienia) – do przeniesienia na nową płytkę. Telegram usunięty.',
   12: 'Korekta wskazań w Ustawieniach: stała poprawka plus lub minus dla każdego czujnika.',
   11: 'Przycisk BOOT: przytrzymanie 15 s zawsze robi pełny reset (także parowania z aplikacją Dom), nawet gdy urządzenie akurat łączy się z WiFi.',
   10: 'Poprawki: podsumowania dobowe znów się zapisują (godziny pracy, węgiel, tydzień), zmiana czasu, dokładniejsze liczby po powrocie do aplikacji, ochrona przed pomyłką w progach i podwójnym kliknięciem, pewniejsze aktualizacje. Przełącznik sezonu przeniesiony niżej w Ustawieniach.',
@@ -545,10 +582,11 @@ function toast(msg) {
   t.timer = setTimeout(() => t.classList.remove('show'), 2600);
 }
 
-function confirmDialog(title, text) {
+function confirmDialog(title, text, yes = 'Usuń') {
   return new Promise(resolve => {
     $('#mtitle').textContent = title;
     $('#mtext').textContent = text;
+    $('#myes').textContent = yes;
     $('#modal').classList.add('on');
     const done = v => { $('#modal').classList.remove('on'); resolve(v); };
     $('#myes').onclick = () => done(true);
@@ -562,6 +600,9 @@ function updateText(s) {
     .replace(/^up to date \(v(\d+)\)$/, 'aktualna (v$1)')
     .replace(/^v(\d+) installed and confirmed$/, 'v$1 zainstalowana i potwierdzona')
     .replace(/^not checked yet$/, 'jeszcze nie sprawdzano')
+    .replace(/^v(\d+) available$/, 'dostępna v$1')
+    .replace(/^v(\d+) written, restarting$/, 'v$1 zapisana – restart')
+    .replace(/^v(\d+) did not work here - waiting for a newer one$/, 'v$1 nie działała tutaj – czekam na nowszą')
     .replace(/^check failed: (.*)$/, 'nie udało się sprawdzić ($1)');
 }
 
@@ -569,6 +610,11 @@ function updateText(s) {
 
 // Every request gives up after `ms` - a hung one must not leave old data looking current.
 async function api(path, opt = {}, ms = 12000) {
+  if (REMOTE) {
+    const r = await relayRequest(path, opt, ms);
+    if (!r.ok) throw new Error(await r.text() || r.status);
+    return r;
+  }
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
   try {
     const r = await fetch(path, Object.assign({ cache: 'no-store', signal: ctl.signal }, opt));
@@ -579,14 +625,15 @@ async function api(path, opt = {}, ms = 12000) {
   }
 }
 
-// One request at a time. Sends the phone's clock (the ESP takes it only when it has no NTP). A device on newer
-// firmware than this page reloads it once; a device whose history was wiped (BOOT 15 s) drops the cached data.
+// One request at a time. Sends the phone's clock (the ESP takes it only when it has no NTP). A device on other
+// firmware than this page reloads it once (from GitHub Pages only for a newer one - the page may be ahead of the
+// device there); a device whose history was wiped (BOOT 15 s) drops the cached data.
 let nowLoading = null;
 function refreshNow() {
   if (!nowLoading) nowLoading = (async () => {
     try {
       const fresh = await (await api(`/api/now?t=${tNow()}`)).json();
-      if (fresh.fw !== APP_VERSION && reloadOnce(fresh.fw)) return;
+      if (fresh.fw !== APP_VERSION && (!REMOTE || fresh.fw > APP_VERSION) && reloadOnce(fresh.fw)) return;
       if (live.length && fresh.oldest && live[0].t < fresh.oldest - 120) dropCache();
       now = fresh;
       online = true;
@@ -596,6 +643,7 @@ function refreshNow() {
     }
     nowLoading = null;
     render(true);
+    updateUi();
   })();
   return nowLoading;
 }
@@ -1127,7 +1175,7 @@ function renderHome() {
   const warns = now ? now.warnings.map((on, w) => on ? w : -1).filter(w => w >= 0) : [];
   const problems = warns.filter(w => w !== 5), count = alarms.length + problems.length;       // the ash pan is a reminder
   $('#dot').className = 'dot' + (online !== true ? ' warn' : alarms.length ? ' bad' : problems.length ? ' warn' : '');
-  $('#status').textContent = online === false ? 'Brak połączenia – ponawiam' : !now || online === null ? 'Łączenie…'
+  $('#status').textContent = online === false ? offlineText() : !now || online === null ? 'Łączenie…'
     : (count ? `${count} ${plural(count, 'alarm', 'alarmy', 'alarmów')}` : 'Wszystko w normie')
       + (warns.includes(5) ? ' · popielnik' : '') + (now.settings.heating ? '' : ' · tryb lato');
   // When the data is not from this moment, say from when (a date when it is not today).
@@ -1135,10 +1183,12 @@ function renderHome() {
   $$('#cards, #overview').forEach(el => el.classList.toggle('stale', online !== true));
   if (!now) return;
 
-  let notices = updateNotice();
+  let notices = updateNotice() + updateBanner();
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   if (/iPhone|iPad/.test(navigator.userAgent) && !standalone && recall('furnace-a2hs') !== '1')
-    notices += `<div class="banner blue">${SVG(I_INFO)}<div><b>Wskazówka:</b> stuknij Udostępnij → „Do ekranu początkowego”, a strona otworzy się jak aplikacja.</div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`;
+    notices += REMOTE
+      ? `<div class="banner blue">${SVG(I_INFO)}<div><b>Dodaj do ekranu początkowego:</b> Udostępnij → „Do ekranu początkowego”. Jeśli aplikacja z ikony poprosi o kod, skopiuj go tutaj i wklej tam.<br><button class="bbtn" id="copypair">Kopiuj kod</button></div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`
+      : `<div class="banner blue">${SVG(I_INFO)}<div><b>Wskazówka:</b> stuknij Udostępnij → „Do ekranu początkowego”, a strona otworzy się jak aplikacja.</div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`;
   notices += missedNotice() + seasonNotice();
   notices += warns.map(w => `<div class="banner orange">${SVG(WARNINGS[w].icon)}<div><b>${WARNINGS[w].name}</b> – ${warningText(w)}</div></div>`).join('');
   notices += alarms.map(s => `<div class="banner red">${SVG(I_WARN)}<div><b>${esc(s.name)}</b> – ${describe(s)}</div></div>`).join('');
@@ -1679,73 +1729,469 @@ function warnBlock(w, on, desc, fields) {
     + `<div class="warn-desc">${desc}</div>${fieldRows(fields)}</div>`;
 }
 
-// ---------------------------------------------------------------- Telegram
+// ---------------------------------------------------------------- remote access
 
-// The bot lives on the ESP; here only its token, who may use it and what each person gets.
-let tgInfo = null, tgAt = 0;
-const TG_STATUS = { ok: 'działa', 'not set': 'nie ustawiono', 'wrong token': 'błędny token', 'no internet': 'brak internetu', 'no connection': 'brak połączenia z Telegramem' };
-const TG_FLAGS = [[1, 'Alarmy'], [2, 'Podsumowanie 7:00'], [4, 'Diagnostyka']];
+// Opened from GitHub Pages (https), the app reaches the ESP through the relay (relay/ in the repo): every request
+// and answer is AES-GCM sealed with a key only the ESP and the paired phones have - Relay.h has the format.
+// "?remote" forces this mode on a local test server.
+const REMOTE = location.protocol === 'https:' || new URLSearchParams(location.search).has('remote');
+const PAGES_URL = 'https://klimabartlomiej.github.io/furnace-monitor/';
+const relay = { host: '', secret: '', key: null, room: '', ws: null, opening: null, pending: new Map(), device: null,
+                nextId: crypto.getRandomValues(new Uint32Array(1))[0] };   // ids of several phones never meet
+const AAD_REQUEST = new Uint8Array([81]), AAD_ANSWER = new Uint8Array([82]);   // 'Q', 'R'
+const b64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+const hexOf = u => Array.from(u, b => b.toString(16).padStart(2, '0')).join('');
 
-async function loadTelegram(force) {
-  if (!force && Date.now() - tgAt < 10e3) return;
-  tgAt = Date.now();
-  try { tgInfo = await (await api('/api/telegram')).json(); } catch (e) { tgAt = 0; }
+// "<relay host>/<secret>" from the home app, alone or inside its link (...#p=<code>).
+function parsePairing(text) {
+  let t = String(text || '').trim();
+  const link = t.match(/#p=([^&\s]+)/);
+  if (link) t = decodeURIComponent(link[1]);
+  const m = t.match(/^([a-z0-9.-]+(?::\d+)?)\/([A-Za-z0-9_-]{43})$/i);
+  return m ? { host: m[1].toLowerCase(), secret: m[2] } : null;
 }
 
-async function postTelegram(fields, message) {
+const pairingCode = () => `${relay.host}/${relay.secret}`;
+
+function loadPairing() {
+  const p = parsePairing(recall('furnace-pair'));
+  if (p) Object.assign(relay, p);
+  return !!p;
+}
+
+// A link from the home app pairs this phone. On an iPhone, Safari and the icon on the home screen keep separate
+// data: there the link stays in the address, so "Do ekranu początkowego" takes it along.
+function takePairingFromLink() {
+  if (!/^#p=/.test(location.hash)) return;
+  const p = parsePairing(location.hash);
+  if (p) store('furnace-pair', `${p.host}/${p.secret}`);
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if (standalone || !/iPhone|iPad/.test(navigator.userAgent)) history.replaceState(null, '', location.pathname + location.search);
+}
+
+function showPairing() {
+  document.body.classList.add('unpaired');
+  const go = text => {
+    const p = parsePairing(text);
+    if (!p) return toast('To nie jest kod parowania');
+    store('furnace-pair', `${p.host}/${p.secret}`);
+    location.reload();
+  };
+  $('#pairgo').onclick = () => go($('#paircode').value);
+  $('#pairpaste').onclick = async () => {
+    try { go(await navigator.clipboard.readText()); } catch (e) { toast('Wklej kod w pole powyżej'); }
+  };
+}
+
+async function relayKeys() {
+  if (relay.key) return;
+  const secret = b64url(relay.secret), label = new TextEncoder();
+  const hash = async name => new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array([...label.encode(name), ...secret])));
+  relay.key = await crypto.subtle.importKey('raw', await hash('furnace-key'), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  relay.room = hexOf((await hash('furnace-room')).slice(0, 16));
+}
+
+// One WebSocket while the app is in front; closed in the background, opened again by the next request.
+function relayOpen() {
+  if (relay.ws && relay.ws.readyState === WebSocket.OPEN) return Promise.resolve(relay.ws);
+  if (document.hidden) return Promise.reject(new Error('in the background'));    // the timers must not reopen it
+  if (!relay.opening) relay.opening = (async () => {
+    await relayKeys();
+    const plain = /^(localhost|127\.|10\.|192\.168\.)/.test(relay.host);    // a relay on a test machine
+    const ws = new WebSocket(`${plain ? 'ws' : 'wss'}://${relay.host}/ws?role=app&room=${relay.room}`);
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = e => (typeof e.data === 'string' ? onRelayText(e.data) : onRelayData(e.data));
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { reject(new Error('relay timeout')); ws.close(); }, 8000);
+      ws.onopen = () => { clearTimeout(timer); resolve(); };
+      ws.onerror = () => { clearTimeout(timer); reject(new Error('relay unreachable')); };
+    });
+    ws.onclose = () => {
+      if (relay.ws === ws) relay.ws = null;
+      failPending('relay closed');
+    };
+    relay.ws = ws;
+    return ws;
+  })().finally(() => { relay.opening = null; });
+  return relay.opening;
+}
+
+function relayClose() {
+  const ws = relay.ws;
+  relay.ws = null;
+  if (ws) ws.close();
+  failPending('closed');
+}
+
+function failPending(why) {
+  for (const p of relay.pending.values()) p.reject(new Error(why));
+  relay.pending.clear();
+}
+
+// The relay says whether the ESP is connected; offline = a power cut or no internet at the furnace.
+function onRelayText(text) {
+  let m;
+  try { m = JSON.parse(text); } catch (e) { return; }
+  if (m.t !== 'device') return;
+  relay.device = m;
+  if (!m.online) {
+    failPending('offline');
+    online = false;
+    render(true);
+  } else if (online === false) {
+    refreshNow();
+  }
+}
+
+async function onRelayData(buf) {
+  const u = new Uint8Array(buf);
+  if (u.length < 12 + 10 + 16 || !relay.key) return;
+  let plain;
   try {
-    tgInfo = await (await api('/api/telegram', { method: 'POST', body: new URLSearchParams(fields) })).json();
-    if (message) toast(message);
-  } catch (e) { toast('Nie udało się – brak połączenia z piecem?'); }
-  renderTelegram();
+    plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: u.subarray(0, 12), additionalData: AAD_ANSWER }, relay.key, u.subarray(12)));
+  } catch (e) { return; }                                            // not sealed with this phone's key
+  const v = new DataView(plain.buffer), id = v.getUint32(1, true), p = relay.pending.get(id);
+  if (plain[0] !== 1 || !p) return;                                  // another phone's answer, or one given up on
+  const seq = v.getUint16(5, true);
+  p.parts[seq] = plain.subarray(10);
+  p.status = v.getUint16(8, true);
+  if (plain[7]) p.last = seq;
+  if (p.last === undefined || p.parts.filter(Boolean).length !== p.last + 1) return;
+  relay.pending.delete(id);
+  p.resolve(new Response(new Blob(p.parts), { status: p.status }));
 }
 
-function renderTelegram() {
-  const el = $('#tgset'), t = tgInfo;
-  if (!t || editing(el)) return;
-  const ok = t.status === 'ok';
-  let html = t.configured
-    ? row(esc(t.bot || 'Bot'), `<span style="color:var(--${ok ? 'green' : 'orange'})">${esc(TG_STATUS[t.status] || t.status)}</span>`, 'napisz do bota /start, a pojawisz się poniżej do dodania')
-    : '<p class="note" style="margin-top:0">Alarmy, stan i dosypywanie przez Telegram – z każdego miejsca. Załóż bota u @BotFather (/newbot) i wklej tutaj jego token.</p>';
-  html += `<input class="field" type="password" id="tgtoken" placeholder="${t.configured ? 'Nowy token – tylko gdy zmieniasz bota' : 'Token od @BotFather'}" autocomplete="off">`
-    + `<button class="btn${t.configured ? '' : ' primary'}" id="tgsave">${t.configured ? 'Zmień token' : 'Zapisz token'}</button>`;
-  for (const p of t.pending)
-    html += `<div class="tgp"><div><div class="k">${esc(p.name)}</div><div class="s note" style="margin:2px 0 0">chce dostęp do bota</div></div><button class="mini" data-approve="${p.chat}">Dodaj</button></div>`;
-  for (const p of t.people)
-    html += `<div class="tgp"><div class="k">${esc(p.name)}</div><button class="mini" data-remove="${p.chat}">Usuń</button><div class="tgflags">`
-      + TG_FLAGS.map(([f, label]) => `<button class="chip ${p.flags & f ? 'on' : ''}" data-chat="${p.chat}" data-flag="${f}" style="--c:var(--blue);--cb:rgba(10,132,255,.14)"><i></i>${label}</button>`).join('')
-      + '</div></div>';
-  if (t.people.length) html += '<button class="btn" id="tgtest">Wyślij wiadomość próbną</button>';
-  if (t.configured) html += '<button class="btn danger" id="tgoff">Wyłącz bota</button>';
+async function relayRequest(path, opt, ms) {
+  const ws = await relayOpen();
+  const id = relay.nextId = (relay.nextId + 1) >>> 0;
+  const enc = new TextEncoder(), p = enc.encode(path), body = enc.encode(opt.body ? String(opt.body) : '');
+  const plain = new Uint8Array(12 + p.length + body.length), v = new DataView(plain.buffer);
+  plain[0] = 2;
+  v.setUint32(1, id, true);
+  v.setUint32(5, tNow(), true);
+  plain[9] = (opt.method || 'GET') === 'POST' ? 1 : 0;
+  v.setUint16(10, p.length, true);
+  plain.set(p, 12);
+  plain.set(body, 12 + p.length);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: AAD_REQUEST }, relay.key, plain));
+  if (12 + sealed.length > 1024) throw new Error('request too long');      // Relay.h MAX_REQUEST
+  const msg = new Uint8Array(12 + sealed.length);
+  msg.set(iv);
+  msg.set(sealed, 12);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { relay.pending.delete(id); reject(new Error('timeout')); }, ms);
+    relay.pending.set(id, {
+      parts: [],
+      resolve: r => { clearTimeout(timer); resolve(r); },
+      reject: e => { clearTimeout(timer); reject(e); },
+    });
+    ws.send(msg);
+  });
+}
+
+// ---- notifications (remote app only: Web Push needs https and a service worker - web/sw.js)
+
+const relayHttp = path => `${/^(localhost|127\.|10\.|192\.168\.)/.test(relay.host) ? 'http' : 'https'}://${relay.host}${path}?room=${relay.room}`;
+const standaloneApp = () => navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+
+function idbSet(key, value) {
+  return new Promise(resolve => {
+    const req = indexedDB.open('furnace', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onerror = () => resolve(false);
+    req.onsuccess = () => {
+      const tx = req.result.transaction('kv', 'readwrite');
+      if (value === null) tx.objectStore('kv').delete(key); else tx.objectStore('kv').put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    };
+  });
+}
+
+// 'on', 'off', 'denied', 'install' (an iPhone: only from the home-screen icon) or 'none' (no Web Push here).
+let pushNow = null;
+async function pushState() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window))
+    return /iPhone|iPad/.test(navigator.userAgent) && !standaloneApp() ? 'install' : 'none';
+  if (Notification.permission === 'denied') return 'denied';
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = reg && await reg.pushManager.getSubscription();
+  return sub ? 'on' : 'off';
+}
+
+async function enablePush() {
+  try {
+    if ((await Notification.requestPermission()) !== 'granted') return toast('Bez zgody na powiadomienia nic nie przyjdzie');
+    const reg = await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    await relayKeys();
+    const { key } = await (await fetch(relayHttp('/push/key'))).json();
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64url(key) });
+    await idbSet('pair', pairingCode());                       // the service worker opens the furnace's alerts with it
+    const r = await fetch(relayHttp('/push/subscribe'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
+    if (!r.ok) throw new Error((await r.json()).error);
+    toast('Powiadomienia włączone');
+  } catch (e) { toast('Nie udało się włączyć powiadomień: ' + e.message); }
+  pushNow = await pushState();
+  renderRemote();
+}
+
+async function disablePush(quiet) {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (sub) {
+      await relayKeys();
+      fetch(relayHttp('/push/unsubscribe'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {});
+      await sub.unsubscribe();
+    }
+    await idbSet('pair', null);
+    if (!quiet) toast('Powiadomienia wyłączone');
+  } catch (e) {}
+  pushNow = await pushState();
+  renderRemote();
+}
+
+async function testPush() {
+  try {
+    const sub = await (await navigator.serviceWorker.getRegistration()).pushManager.getSubscription();
+    const r = await fetch(relayHttp('/push/test'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+    toast(r.ok ? 'Wysłano – powinno przyjść za chwilę' : 'Przekaźnik nie zna tego telefonu – włącz powiadomienia jeszcze raz');
+  } catch (e) { toast('Nie udało się wysłać'); }
+}
+
+function pushRows() {
+  const st = pushNow;
+  if (st === null) { pushState().then(s => { pushNow = s; renderRemote(); }); return ''; }
+  const text = {
+    on: '<span style="color:var(--green)">włączone</span>',
+    off: 'wyłączone',
+    denied: '<span style="color:var(--orange)">zablokowane</span>',
+    install: 'najpierw ikona',
+    none: 'niedostępne',
+  }[st];
+  const hint = {
+    on: 'alarmy, ostrzeżenia, brak prądu, piec offline',
+    off: 'alarmy, ostrzeżenia, brak prądu, piec offline',
+    denied: 'zezwól na powiadomienia dla tej strony w ustawieniach telefonu',
+    install: 'dodaj aplikację do ekranu początkowego i otwórz ją z ikony',
+    none: 'ta przeglądarka nie obsługuje powiadomień',
+  }[st];
+  return `<div class="rows">${row('Powiadomienia', text, hint)}</div>`
+    + (st === 'off' ? '<button class="btn primary" id="pushon">Włącz powiadomienia</button>' : '')
+    + (st === 'on' ? '<button class="btn" id="pushtest">Wyślij próbne</button><button class="btn" id="pushoff">Wyłącz powiadomienia</button>' : '');
+}
+
+function offlineText() {
+  const d = relay.device;
+  if (REMOTE && d && !d.online) return d.since ? `Piec offline od ${when(d.since / 1000)} – brak prądu lub internetu?` : 'Piec offline';
+  return 'Brak połączenia – ponawiam';
+}
+
+function copyText(text) {
+  const fallback = () => {
+    const t = document.createElement('textarea');
+    t.value = text;
+    t.setAttribute('readonly', '');
+    t.style.cssText = 'position:fixed;top:0;opacity:0';
+    document.body.appendChild(t);
+    t.select();
+    t.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    t.remove();
+    toast(ok ? 'Skopiowano' : 'Nie udało się skopiować – przepisz kod');
+    const c = $('#rcode');
+    if (!ok && c) c.style.display = 'block';
+  };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => toast('Skopiowano'), fallback);
+  else fallback();
+}
+
+// Settings → Dostęp zdalny. At home: the relay's address, its state, the pairing link and code, a new key.
+// From outside: this phone's pairing, sharing it, unpairing.
+let remoteInfo = null, remoteAt = 0;
+const REMOTE_STATE = { off: 'wyłączony', 'no WiFi': 'brak Wi-Fi', connecting: 'łączenie…', connected: 'połączony', paused: 'wstrzymany na czas aktualizacji' };
+
+async function loadRemote(force) {
+  if (REMOTE || (!force && Date.now() - remoteAt < 10e3)) return;
+  remoteAt = Date.now();
+  try { remoteInfo = await (await api('/api/remote')).json(); } catch (e) { remoteAt = 0; }
+}
+
+async function postRemote(fields, message) {
+  try {
+    remoteInfo = await (await api('/api/remote', { method: 'POST', body: new URLSearchParams(fields) })).json();
+    if (message) toast(message);
+  } catch (e) { toast(/host/.test(e.message) ? 'Błędny adres przekaźnika' : 'Nie udało się – brak połączenia z piecem?'); }
+  renderRemote();
+}
+
+function renderRemote() {
+  const el = $('#remoteset'), r = remoteInfo;
+  if (editing(el)) return;
+  const green = t => `<span style="color:var(--green)">${t}</span>`, orange = t => `<span style="color:var(--orange)">${esc(t)}</span>`;
+  if (REMOTE) {
+    const d = relay.device;
+    el.innerHTML = pushRows() + '<div class="rows">' + row('Ten telefon', green('sparowany'), esc(relay.host))
+      + (d ? row('Piec', d.online ? green('online') : '<span style="color:var(--red)">offline</span>', d.since ? `${d.online ? 'od' : 'ostatnio'} ${when(d.since / 1000)}` : '') : '') + '</div>'
+      + '<button class="btn" id="rshare">Udostępnij dostęp innej osobie</button>'
+      + '<button class="btn danger" id="runpair">Odłącz ten telefon…</button>';
+    return;
+  }
+  if (!r) { el.innerHTML = '<p class="note" style="margin-top:0">Ładowanie…</p>'; return; }
+  let html = '<p class="note" style="margin-top:0">Ta aplikacja z każdego miejsca, przez przekaźnik w internecie. Wszystko jest szyfrowane kluczem, który znają tylko piec i sparowane telefony – przekaźnik niczego nie widzi ani nie przechowuje.</p>';
+  if (r.host) {
+    const state = r.state === 'connected' ? green('połączony') : orange(REMOTE_STATE[r.state] || String(r.state).replace(/^error: /, 'błąd: '));
+    html += '<div class="rows">' + row('Przekaźnik', state, esc(r.host) + (r.state === 'connected' && r.since ? ` · od ${when(r.since)}` : '')) + '</div>'
+      + `<a class="btn primary" href="${PAGES_URL}#p=${encodeURIComponent(r.code)}" target="_blank" rel="noopener">Otwórz na tym telefonie</a>`
+      + '<p class="note">Powiadomienia na telefon (alarmy, brak prądu) włącza się w tamtej aplikacji: Ustawienia → Dostęp zdalny.</p>'
+      + '<button class="btn" id="rcopy">Kopiuj kod dla innego telefonu</button>'
+      + `<div class="code" id="rcode">${esc(r.code)}</div>`;
+  }
+  html += `<input class="field" id="rhost" placeholder="Adres przekaźnika, np. furnace-relay.nazwa.workers.dev" value="${esc(r.host)}" autocomplete="off" autocapitalize="off" spellcheck="false">`
+    + `<button class="btn${r.host ? '' : ' primary'}" id="rsave">${r.host ? 'Zmień adres przekaźnika' : 'Włącz dostęp zdalny'}</button>`;
+  if (r.host) html += '<button class="btn danger" id="rrenew">Nowy klucz – odłącz wszystkie telefony…</button>';
   el.innerHTML = html;
 }
 
-function onTelegramClick(e) {
+async function onRemoteClick(e) {
   const b = e.target.closest('button');
-  if (!b || !tgInfo) return;
-  if (b.id === 'tgsave') {
-    const v = $('#tgtoken').value.trim();
-    if (!v) return toast('Wklej token od @BotFather');
-    postTelegram({ token: v }, 'Token zapisany – sprawdzam bota…').then(() => setTimeout(() => loadTelegram(true).then(renderTelegram), 6000));
-  } else if (b.dataset.approve) {
-    postTelegram({ approve: b.dataset.approve }, 'Dodano – bot napisze powitanie');
-  } else if (b.dataset.remove) {
-    confirmDialog('Usunąć tę osobę?', 'Przestanie dostawać wiadomości i nie będzie mogła używać bota.').then(yes => yes && postTelegram({ remove: b.dataset.remove }, 'Usunięto'));
-  } else if (b.dataset.flag) {
-    const p = tgInfo.people.find(x => x.chat === b.dataset.chat);
-    if (p) postTelegram({ chat: p.chat, flags: p.flags ^ +b.dataset.flag });
-  } else if (b.id === 'tgtest') {
-    postTelegram({ test: 1 }, 'Wysłano wiadomość próbną');
-  } else if (b.id === 'tgoff') {
-    confirmDialog('Wyłączyć bota?', 'Token zostanie usunięty, lista osób zostaje.').then(yes => yes && postTelegram({ token: '' }, 'Bot wyłączony'));
+  if (!b) return;
+  if (b.id === 'rsave') {
+    const host = $('#rhost').value.trim().toLowerCase().replace(/^\w+:\/\//, '').replace(/\/.*$/, '');
+    if (!host && !(await confirmDialog('Wyłączyć dostęp zdalny?', 'Telefony poza domem stracą połączenie z piecem.', 'Wyłącz'))) return;
+    await postRemote({ host }, host ? 'Zapisano – łączę z przekaźnikiem…' : 'Dostęp zdalny wyłączony');
+    setTimeout(() => loadRemote(true).then(renderRemote), 6000);
+  } else if (b.id === 'rcopy') {
+    copyText(remoteInfo.code);
+  } else if (b.id === 'rrenew') {
+    if (await confirmDialog('Nowy klucz?', 'Każdy sparowany telefon straci dostęp i trzeba go będzie sparować od nowa.', 'Zmień klucz'))
+      postRemote({ renew: 1 }, 'Nowy klucz – sparuj telefony od nowa');
+  } else if (b.id === 'rshare') {
+    const url = `${PAGES_URL}#p=${encodeURIComponent(pairingCode())}`;
+    if (navigator.share) navigator.share({ title: 'Piec', url }).catch(() => {});
+    else copyText(url);
+  } else if (b.id === 'pushon') {
+    enablePush();
+  } else if (b.id === 'pushoff') {
+    disablePush();
+  } else if (b.id === 'pushtest') {
+    testPush();
+  } else if (b.id === 'runpair') {
+    if (!(await confirmDialog('Odłączyć ten telefon?', 'Żeby znów go połączyć, potrzebny będzie kod z aplikacji w domu.', 'Odłącz'))) return;
+    await disablePush(true);
+    try { localStorage.removeItem('furnace-pair'); } catch (err) {}
+    dropCache();
+    location.reload();
   }
+}
+
+// ---------------------------------------------------------------- updates
+
+// A newer firmware is only offered (the ESP checks every hour): the dialog shows what it brings and the ESP
+// installs it on "Zainstaluj" - the progress comes with /api/now. A forced release installs by itself and the
+// dialog has no "later". Notes from this page (on GitHub Pages it may be newer than the device) or the manifest.
+const MANIFEST_URL = 'https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json';
+let manifestNotes = null, watchUntil = 0, watchTimer = null, updateOpen = false, updateTarget = 0;
+
+async function loadNotes() {
+  if (!manifestNotes) {
+    try { manifestNotes = (await (await fetch(MANIFEST_URL, { cache: 'no-store' })).json()).notes || {}; } catch (e) {}
+  }
+  return Object.assign({}, manifestNotes || {}, CHANGES);
+}
+
+const updatePercent = () => (now && now.upd && now.upd.size ? Math.floor(now.upd.done / now.upd.size * 100) : 0);
+
+function updatePhaseText() {
+  const u = now.upd;
+  if (u.phase === 1) return 'Sprawdzam wersję…';
+  if (u.phase === 2) return `Pobieram v${u.to}: ${updatePercent()} % (${Math.round(u.done / 1024)} z ${Math.round(u.size / 1024)} KB)`;
+  return `Zapisano v${u.to} – restart, piec za chwilę wróci`;
+}
+
+function updateBanner() {
+  const u = now.upd || { phase: 0 };
+  if (u.phase) return `<div class="banner blue">${SVG(I_INFO)}<div style="flex:1"><b>Aktualizacja</b> – ${esc(updatePhaseText())}<div class="progress on"><i style="width:${updatePercent()}%"></i></div></div></div>`;
+  if (now.avail > now.fw) return `<div class="banner blue">${SVG(I_INFO)}<div><b>Dostępna wersja ${now.avail}</b>${now.forced ? ' – wymagana, zainstaluje się sama' : ''}<br><button class="bbtn" id="updshow">Co nowego / zainstaluj</button></div></div>`;
+  return '';
+}
+
+// After every /api/now: opens the dialog for a newly offered version (once per opening of the app), keeps it
+// current, and polls quickly while an update runs - through the restart, until the new version answers.
+function updateUi() {
+  if (!now) return;
+  const u = now.upd || { phase: 0 };
+  if (u.phase) {
+    updateTarget = u.to;
+    watchUntil = Math.max(watchUntil, Date.now() + 120e3);
+  }
+  if (updateTarget && now.fw >= updateTarget && online) {          // done: the new version answers
+    updateTarget = 0;
+    watchUntil = 0;
+    if (updateOpen) closeUpdate();
+  }
+  // Once per version and opening of the app: offered, or a forced one already installing by itself.
+  const offered = now.avail > now.fw && !u.phase, version = u.phase ? u.to : offered ? now.avail : 0;
+  let shown = 0;
+  try { shown = +sessionStorage.getItem('furnace-offer') || 0; } catch (e) {}
+  if (!updateOpen && version && shown !== version && (offered || now.forced)) openUpdate();
+  else if (updateOpen) renderUpdate();
+  clearTimeout(watchTimer);
+  if (Date.now() < watchUntil) watchTimer = setTimeout(refreshNow, u.phase ? 1500 : 3000);
+}
+
+async function openUpdate() {
+  updateOpen = true;
+  try { sessionStorage.setItem('furnace-offer', now.upd && now.upd.phase ? now.upd.to : now.avail); } catch (e) {}
+  $('#unotes').innerHTML = '';
+  renderUpdate();
+  $('#umodal').classList.add('on');
+  const all = await loadNotes(), from = now.fw, to = Math.max(now.avail, updateTarget);
+  const list = Object.keys(all).map(Number).filter(v => v > from && v <= to).sort((a, b) => b - a);
+  $('#unotes').innerHTML = list.map(v => `<p><b>v${v}</b> – ${esc(all[v])}</p>`).join('') || '';
+}
+
+function closeUpdate() {
+  updateOpen = false;
+  $('#umodal').classList.remove('on');
+}
+
+function renderUpdate() {
+  const u = now.upd || { phase: 0 }, busy = u.phase > 0 || (updateTarget && now.fw < updateTarget);
+  const to = u.phase ? u.to : Math.max(now.avail, updateTarget);
+  $('#utitle').textContent = busy ? `Aktualizacja do wersji ${to}` : now.forced ? `Wymagana aktualizacja do wersji ${to}` : `Dostępna wersja ${to}`;
+  const failed = !busy && /^check failed/.test(now.update) && Date.now() < watchUntil;
+  const st = $('#ustate');
+  st.className = 'ustate' + (failed ? ' bad' : '');
+  st.textContent = u.phase ? updatePhaseText() : busy ? (online ? 'Uruchamiam…' : 'Trwa instalacja – piec na chwilę zniknie i wróci sam…')
+    : failed ? 'Nie udało się: ' + updateText(now.update) : now.forced ? 'Ta wersja jest wymagana – zainstaluje się sama.' : '';
+  $('#uprog').className = 'progress' + (u.phase ? ' on' : '');
+  $('#uprog').firstElementChild.style.width = updatePercent() + '%';
+  $('#uyes').style.display = busy ? 'none' : '';
+  $('#uyes').textContent = failed ? 'Spróbuj ponownie' : 'Zainstaluj';
+  $('#uno').style.display = !busy && now.forced ? 'none' : '';
+  $('#uno').textContent = busy ? 'Ukryj' : 'Później';
+}
+
+async function installUpdate() {
+  const to = now.avail;
+  try {
+    now = await (await api('/api/update', { method: 'POST', body: new URLSearchParams({ install: to }) })).json();
+    updateTarget = to;
+    watchUntil = Date.now() + 60e3;
+    renderUpdate();
+    updateUi();
+  } catch (e) { toast('Brak połączenia z piecem'); }
 }
 
 function renderSettings() {
   if (!now) return;
   const st = now.settings;
-  renderTelegram();
-  loadTelegram().then(renderTelegram);
+  renderRemote();
+  loadRemote().then(renderRemote);
   $('#seasonset').innerHTML = `<div class="warn-block"><div class="warn-head"><span class="badge ${st.heating ? 'c-orange' : 'c-blue'}">${SVG(st.heating ? I_FLAME : I_SUN)}</span>`
     + `${st.heating ? 'Sezon grzewczy' : 'Tryb lato'}<input class="sw" type="checkbox" data-k="heating" data-msg="Sezon grzewczy" ${st.heating ? 'checked' : ''}></div>`
     + `<div class="warn-desc">${st.heating ? 'Latem wyłącz – alarmy „za zimno” pieca i powrotu oraz ostrzeżenia o paleniu ucichną. Bojler i mróz działają dalej.'
@@ -1802,7 +2248,11 @@ function renderSettings() {
     + row('Pamięć na historię', `${Math.round(fs * 100)} %<div class="bar"><i style="width:${Math.round(fs * 100)}%"></i></div>`, `${Math.round(now.fsUsed / 1024)} z ${Math.round(now.fsTotal / 1024)} KB`)
     + row('Wolna pamięć RAM', `${Math.round(now.heap / 1024)} KB`);
   $('#fwinfo').innerHTML = row('Wersja', `v${now.fw}`, esc(updateText(now.update)))
-    + (now.ota ? '' : '<p class="note">Instalacja z pliku jest wyłączona – nie ustawiono hasła OTA (polecenie „O” przez USB). Aktualizacje z internetu działają.</p>');
+    + (now.ota || REMOTE ? '' : '<p class="note">Instalacja z pliku jest wyłączona – nie ustawiono hasła OTA (polecenie „O” przez USB). Aktualizacje z internetu działają.</p>');
+  const u = now.upd || { phase: 0 };
+  $('#fwupd').innerHTML = u.phase ? `<div class="ustate">${esc(updatePhaseText())}</div><div class="progress on"><i style="width:${updatePercent()}%"></i></div>`
+    : now.avail > now.fw ? `<button class="btn primary" id="fwoffer">Dostępna wersja ${now.avail} – zobacz i zainstaluj</button>` : '';
+  $('#fwfilebox').style.display = REMOTE ? 'none' : '';
   $('#fwup').disabled = !now.ota;
 }
 
@@ -1918,6 +2368,29 @@ function uploadFirmware() {
   xhr.send(form);
 }
 
+// Restoring a backup (made on the old board) - over the home WiFi, like the firmware file.
+async function restoreBackup() {
+  const file = $('#bkfile').files[0];
+  if (!file) return toast('Wybierz plik kopii');
+  const yes = await confirmDialog('Przywrócić kopię?', 'Wszystko na tym urządzeniu zostanie zastąpione danymi z kopii: historia, ustawienia, Wi-Fi i parowanie z aplikacją Dom. Stare urządzenie musi być wyłączone.', 'Przywróć');
+  if (!yes) return;
+  const xhr = new XMLHttpRequest(), bar = $('#bkprog'), btn = $('#bkup');
+  const reset = () => { bar.classList.remove('on'); btn.disabled = false; };
+  btn.disabled = true;
+  bar.classList.add('on');
+  xhr.upload.onprogress = e => { if (e.lengthComputable) bar.firstElementChild.style.width = (e.loaded / e.total * 100) + '%'; };
+  xhr.onload = () => {
+    if (xhr.status === 200) { dropCache(); toast('Przywrócono – trwa restart…'); reloadWhenBack(10000); return; }
+    toast('Nie udało się: ' + xhr.responseText);
+    reset();
+  };
+  xhr.onerror = () => { toast('Wysyłanie nieudane'); reset(); };
+  const form = new FormData();
+  form.append('backup', file);
+  xhr.open('POST', '/api/restore');
+  xhr.send(form);
+}
+
 async function clearHistory() {
   const ok = await confirmDialog('Usunąć całą historię?', 'Znikną wszystkie pomiary, podsumowania dobowe, historia w Eve i dziennik zdarzeń. Tego nie da się cofnąć.');
   if (!ok) return;
@@ -1954,6 +2427,8 @@ function setup() {
   $('#notices').onclick = e => {
     if (e.target.id === 'fwseen') { store('furnace-fw', now.fw); renderHome(); }
     if (e.target.id === 'a2hs') { store('furnace-a2hs', '1'); renderHome(); }
+    if (e.target.id === 'copypair') copyText(`${PAGES_URL}#p=${encodeURIComponent(pairingCode())}`);
+    if (e.target.id === 'updshow') openUpdate();
     if (e.target.id === 'missedseen') { store('furnace-seen', tNow()); render(); }
     if (e.target.id === 'seasonno') { store('furnace-season-no', tNow()); renderHome(); }
     if (e.target.id === 'tosummer') saveSetting({ heating: '0' }, 'Tryb lato włączony');
@@ -2008,7 +2483,7 @@ function setup() {
     render();
   };
   $('#seasonset').addEventListener('change', onWarnChange);
-  $('#tgset').addEventListener('click', onTelegramClick);
+  $('#remoteset').addEventListener('click', onRemoteClick);
   $('#rno').onclick = () => $('#rmodal').classList.remove('on');
   $('#ryes').onclick = saveRefill;
   $('#rwhen').onclick = e => { const b = e.target.closest('button'); if (b) setRefillAgo(+b.dataset.m); };
@@ -2049,11 +2524,33 @@ function setup() {
     saveSetting({ lat: '', lon: '', place: '' }, 'Usunięto lokalizację').then(() => loadOutdoor().then(render));
   };
   $('#checkupd').onclick = async () => {
-    try { await api('/api/update', { method: 'POST' }); toast('Sprawdzam aktualizacje…'); setTimeout(refreshNow, 9000); }
-    catch (e) { toast('Brak połączenia z piecem'); }
+    try {
+      await api('/api/update', { method: 'POST' });
+      try { sessionStorage.removeItem('furnace-offer'); } catch (e) {}
+      toast('Sprawdzam aktualizacje…');
+      watchUntil = Date.now() + 20e3;
+      refreshNow();
+    } catch (e) { toast('Brak połączenia z piecem'); }
   };
   $('#fwup').onclick = uploadFirmware;
+  $('#fwupd').onclick = e => { if (e.target.id === 'fwoffer') openUpdate(); };
+  $('#uyes').onclick = installUpdate;
+  $('#uno').onclick = closeUpdate;
+  // From GitHub Pages the export comes through the relay, not as a link to the ESP.
+  $('#csv').onclick = async e => {
+    if (!REMOTE) return;
+    e.preventDefault();
+    try {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(await (await api($('#csv').getAttribute('href'), {}, 60000)).blob());
+      a.download = 'piec.csv';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10e3);
+    } catch (err) { toast('Eksport nieudany'); }
+  };
   $('#clearhist').onclick = clearHistory;
+  $('#bkup').onclick = restoreBackup;
+  $('#backupcard').style.display = REMOTE ? 'none' : '';      // the file holds the WiFi password: home WiFi only
   $('#scan').onclick = async () => {
     $('#bus').textContent = 'Skanowanie…';
     try { $('#bus').textContent = await (await api('/api/bus')).text(); } catch (e) { $('#bus').textContent = 'Skanowanie nieudane'; }
@@ -2062,14 +2559,23 @@ function setup() {
   gestures($('#overview'), false);
   document.addEventListener('gesturestart', e => e.preventDefault());
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) saveCache();
-    else refreshNow().then(loadLive).then(() => render(true));
+    if (document.hidden) {
+      saveCache();
+      if (REMOTE) relayClose();
+    } else {
+      refreshNow().then(loadLive).then(() => render(true));
+    }
   });
   let rt;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
 }
 
 (async function start() {
+  if (REMOTE) {
+    takePairingFromLink();
+    if (!loadPairing()) return showPairing();
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
   setup();
   loadCache();
   try { showTab(ui.tab); } catch (e) { now = null; live = []; journal = []; days = []; showTab(ui.tab); }   // a broken cache must not block

@@ -1,0 +1,25 @@
+# The remote-access relay (relay/) on Cloudflare Workers, deployed on every change to it - nothing to install
+# on the laptop. Needs the repository secret CLOUDFLARE_API_TOKEN (a token from Cloudflare's "Edit Cloudflare
+# Workers" template); the account is named in relay/wrangler.toml.
+name: Relay on Cloudflare
+
+on:
+  push:
+    branches: [main]
+    paths: ['relay/**', '.github/workflows/relay.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: relay
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: relay
+          wranglerVersion: '4'
