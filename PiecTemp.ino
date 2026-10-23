@@ -65,7 +65,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 11;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 12;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -157,6 +157,7 @@ struct Settings {
   bool     ashOn        = true;   // ash pan reminder: after ashLimit buckets burned or ashDays since emptied
   float    ashLimit     = 15;
   float    ashDays      = 7;
+  float    offset[SENSOR_COUNT] = {};   // per probe, added to every reading: a probe reading 2 degrees low gets +2
   float    lat          = NAN;    // location of the house; the web app fetches the outdoor temperature for it
   float    lon          = NAN;
   char     place[48]    = "";
@@ -529,6 +530,17 @@ void updateAlarm(size_t i, float t) {
 
 // New limits or season - judge the current value from scratch, without the old hysteresis; a still-active alarm
 // is not logged again, one that ends by the change gets its end in the journal.
+// A new calibration offset moves what is already known about the probe by the same step - the trends (and the
+// warnings built on them) must not see it as a sudden rise or fall. Home gets the corrected value at once.
+void shiftProbe(size_t i, float delta) {
+  SensorState& s = state[i];
+  if (!isnan(s.lastGood)) s.lastGood += delta;
+  if (!isnan(s.unconfirmed)) s.unconfirmed += delta;
+  for (auto& row : recent)
+    if (!isnan(row[i])) row[i] += delta;
+  rejudgeAlarm(i);
+}
+
 void rejudgeAlarm(size_t i) {
   SensorState& s = state[i];
   int8_t before = s.alarm;
@@ -835,6 +847,7 @@ void readAll() {
   MinuteRecord rec;
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
     float t = readSensor(i);
+    if (!isnan(t)) t += settings.offset[i];          // calibration: everything downstream sees the corrected value
     bool ok = !isnan(t) && registerReading(i, t);
     if (isnan(t)) registerBadReading(i);
     values[i] = ok ? t : NAN;
@@ -1014,6 +1027,7 @@ void loadSettings() {
   settings.ashOn        = prefs.getBool("ashOn", d.ashOn);
   settings.ashLimit     = prefs.getFloat("ashLim", d.ashLimit);
   settings.ashDays      = prefs.getFloat("ashDays", d.ashDays);
+  for (size_t i = 0; i < SENSOR_COUNT; i++) settings.offset[i] = prefs.getFloat(prefKey("off", i).c_str(), 0);
   settings.lat          = prefs.getFloat("lat", d.lat);
   settings.lon          = prefs.getFloat("lon", d.lon);
   prefs.getString("place", settings.place, sizeof(settings.place));
@@ -1039,6 +1053,7 @@ void saveSettings() {
   prefs.putBool("ashOn", settings.ashOn);
   prefs.putFloat("ashLim", settings.ashLimit);
   prefs.putFloat("ashDays", settings.ashDays);
+  for (size_t i = 0; i < SENSOR_COUNT; i++) prefs.putFloat(prefKey("off", i).c_str(), settings.offset[i]);
   prefs.putFloat("lat", settings.lat);
   prefs.putFloat("lon", settings.lon);
   prefs.putString("place", settings.place);
@@ -1125,6 +1140,7 @@ void handleNow() {
     j += ",\"alarm\":";   j += (int)s.alarm;
     j += ",\"fault\":";   j += s.faulty ? "true" : "false";
     j += ",\"water\":";   j += SENSORS[i].water ? "true" : "false";
+    j += ",\"offset\":";  j += jsonNumber(settings.offset[i], 1);
     j += '}';
   }
   j += "],\"warnings\":[";
@@ -1363,6 +1379,11 @@ void handleSettings() {
   flag("ashOn", settings.ashOn);
   number("ashLimit", settings.ashLimit, 1, 200);
   number("ashDays", settings.ashDays, 1, 60);
+  float oldOffset[SENSOR_COUNT];
+  for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    oldOffset[i] = settings.offset[i];
+    number(prefKey("off", i).c_str(), settings.offset[i], -10, 10);
+  }
   if (server.hasArg("lat") && server.hasArg("lon")) {
     float lat = parseNumber(server.arg("lat")), lon = parseNumber(server.arg("lon"));   // both empty = no location
     if (isnan(lat) != isnan(lon) || fabsf(lat) > 90 || fabsf(lon) > 180) bad = "lat";
@@ -1379,6 +1400,8 @@ void handleSettings() {
     return;
   }
   if (server.hasArg("heating")) setHeating(server.arg("heating") == "1", false);
+  for (size_t i = 0; i < SENSOR_COUNT; i++)
+    if (settings.offset[i] != oldOffset[i]) shiftProbe(i, settings.offset[i] - oldOffset[i]);
   saveSettings();
   if (clockSet(time(nullptr))) updateCoal(time(nullptr));
   evaluateWarnings();

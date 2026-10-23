@@ -200,6 +200,15 @@ nav.tabs button{position:relative}
 .lim input,.wrow input[type=text]{width:76px;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:9px 6px;font:600 17px -apple-system,system-ui;text-align:center;outline:none}
 .lim input:focus,.wrow input[type=text]:focus{border-color:var(--blue)}
 .lim input::placeholder{color:var(--faint);font-weight:500}
+.offr{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.offr:first-child{border-top:0;padding-top:2px}
+.offr label{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px}
+.offr .cd{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}
+.offr .s{color:var(--faint);font-size:12px;font-weight:500;margin:2px 0 0 19px}
+.stp{display:flex;align-items:center;gap:6px}
+.stp button{width:36px;height:36px;border-radius:50%;border:0;background:var(--card2);color:var(--text);font-size:22px;line-height:1}
+.stp input{width:64px;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:8px 4px;font:600 16px -apple-system,system-ui;text-align:center;outline:none}
+.stp input.changed{border-color:var(--blue)}
 .warn-block{padding:14px 0;border-top:1px solid var(--line)}
 .warn-block:first-of-type{border-top:0;padding-top:2px}
 .warn-head{display:flex;align-items:center;gap:10px;font-weight:600;font-size:16px}
@@ -336,6 +345,11 @@ nav.tabs button.on{color:var(--text)}
     <p class="note">Przekroczenie progu otwiera czujnik „Alarm …” w aplikacji Dom i wysyła powiadomienie na telefon. Puste pole wyłącza dany alarm.</p>
   </div>
   <div class="card">
+    <div class="card-h">Korekta wskazań</div>
+    <div id="offsets"></div>
+    <p class="note">Stała poprawka dodawana do odczytu czujnika: gdy pokazuje za mało – plus, gdy za dużo – minus. Działa od razu wszędzie: w aplikacji, w Domu, w Eve, w alarmach i w historii od teraz.</p>
+  </div>
+  <div class="card">
     <div class="card-h">Ostrzeżenia</div>
     <div id="warnset"></div>
     <p class="note">Każde ostrzeżenie to osobny czujnik w aplikacji Dom – włącz dla niego powiadomienia. Dom powiadamia, gdy czujnik się otwiera (początek) i gdy się zamyka (koniec).</p>
@@ -441,6 +455,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  12: 'Korekta wskazań w Ustawieniach: stała poprawka plus lub minus dla każdego czujnika.',
   11: 'Przycisk BOOT: przytrzymanie 15 s zawsze robi pełny reset (także parowania z aplikacją Dom), nawet gdy urządzenie akurat łączy się z WiFi.',
   10: 'Poprawki: podsumowania dobowe znów się zapisują (godziny pracy, węgiel, tydzień), zmiana czasu, dokładniejsze liczby po powrocie do aplikacji, ochrona przed pomyłką w progach i podwójnym kliknięciem, pewniejsze aktualizacje. Przełącznik sezonu przeniesiony niżej w Ustawieniach.',
   9: 'Szybsze otwieranie: aplikacja od razu pokazuje ostatnie dane, a strona nie jest pobierana za każdym razem od nowa.',
@@ -1667,6 +1682,16 @@ function renderSettings() {
       + `<div class="f">MIN<input type="text" inputmode="decimal" data-i="${i}" data-k="low" value="${fmtNum(s.low)}" placeholder="wył."></div>`
       + `<div class="f">MAKS<input type="text" inputmode="decimal" data-i="${i}" data-k="high" value="${fmtNum(s.high)}" placeholder="wył."></div></div>`).join('');
 
+  if (!editing($('#offsets')) && !offsetTimers.some(Boolean))
+    $('#offsets').innerHTML = now.sensors.map((s, i) => {
+      const raw = s.temp === null ? null : s.temp - (s.offset || 0);
+      return `<div class="offr" style="--c:${COLORS[i]}"><div><label><span class="cd"></span>${esc(s.name)}</label>`
+        + `<div class="s">${s.temp === null ? 'brak odczytu' : `pokazuje ${n1(s.temp)}° · sam czujnik ${n1(raw)}°`}</div></div>`
+        + `<div class="stp"><button data-i="${i}" data-d="-0.1" aria-label="Mniej">−</button>`
+        + `<input type="text" inputmode="text" data-i="${i}" value="${signed(s.offset || 0)}" autocomplete="off">`
+        + `<button data-i="${i}" data-d="0.1" aria-label="Więcej">+</button></div></div>`;
+    }).join('');
+
   if (!editing($('#warnset')))
     $('#warnset').innerHTML =
       warnBlock(0, st.goOutOn, 'Gdy temperatura pieca szybko spada albo zaraz osiągnie próg min.', [['Spadek szybszy niż', 'goOutRate', st.goOutRate, '°/h'], ['Próg min. w ciągu', 'goOutHorizon', st.goOutHorizon, 'min']])
@@ -1706,6 +1731,30 @@ function renderSettings() {
   $('#fwinfo').innerHTML = row('Wersja', `v${now.fw}`, esc(updateText(now.update)))
     + (now.ota ? '' : '<p class="note">Instalacja z pliku jest wyłączona – nie ustawiono hasła OTA (polecenie „O” przez USB). Aktualizacje z internetu działają.</p>');
   $('#fwup').disabled = !now.ota;
+}
+
+// Calibration offsets: "+2,0", "−1,5", "0" - typed with a plus or minus sign, or stepped by 0.1 with the buttons
+// (the iPhone's number pad has no minus). Steps are saved 0.8 s after the last tap, not on every tap.
+const signed = v => (Math.abs(v) < .05 ? '0' : `${v > 0 ? '+' : '−'}${n1(Math.abs(v))}`);
+const parseSigned = s => { const v = +String(s).trim().replace('−', '-').replace('+', '').replace(',', '.'); return s.trim() === '' ? 0 : v; };
+const offsetTimers = [];
+
+async function saveOffset(i, input) {
+  offsetTimers[i] = null;
+  const v = parseSigned(input.value);
+  if (!isFinite(v) || v < -10 || v > 10) { toast('Korekta od −10 do +10°'); return render(); }
+  await saveSetting({ ['off' + i]: v.toFixed(1) }, `${now.sensors[i].name}: korekta ${signed(v)}°`);
+}
+
+function onOffsetStep(e) {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const i = +b.dataset.i, input = $(`#offsets input[data-i="${i}"]`);
+  const v = clamp(Math.round(((parseSigned(input.value) || 0) + +b.dataset.d) * 10) / 10, -10, 10);
+  input.value = signed(v);
+  input.classList.add('changed');
+  clearTimeout(offsetTimers[i]);
+  offsetTimers[i] = setTimeout(() => saveOffset(i, input), 800);
 }
 
 // Saved when a field is left (or Done is tapped) - never half-typed. A comma works as the decimal point.
@@ -1872,6 +1921,8 @@ function setup() {
   $('#zoomreset').onclick = resetView;
   $('#limits').addEventListener('change', e => { if (e.target.dataset.i) saveLimits(+e.target.dataset.i); });
   $('#warnset').addEventListener('change', onWarnChange);
+  $('#offsets').addEventListener('click', onOffsetStep);
+  $('#offsets').addEventListener('change', e => { const i = e.target.dataset.i; if (i !== undefined) saveOffset(+i, e.target); });
   $('#coalset').addEventListener('change', onWarnChange);
   $('#coalcard').onclick = async e => {
     if (e.target.closest('#refill')) openRefill();
