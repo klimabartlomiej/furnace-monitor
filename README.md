@@ -19,6 +19,10 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   level, time left, a "Mało węgla" contact in Apple Home, a 30-day chart with the frost dependence and the
   season so far. Can be switched off in the settings.
 - **Hot water**: a "Ciepła woda gotowa" contact opens when the boiler reaches its "ready" temperature.
+- **Telegram** (`Telegram.h`, optional): a bot created with @BotFather, token pasted in the web app. Alarms and
+  warnings with a "Widzę" button and reminders, the menu Stan / Dosypałem / Popielnik / Dziennik, `/diag`, a
+  summary of the day before at 7:00. Whoever writes `/start` is let in from the web app, each with their own
+  choice of alerts, summary and diagnostics. The ESP polls api.telegram.org itself - no server, free.
 - **Summer mode**: switches off "too cold" on the furnace and the return plus the burning warnings; the web app
   suggests it after three days without burning, and it ends by itself after two hours of burning.
 - **More warnings**: "Piec stoi po zaniku prądu" (the furnace keeps cooling after a power cut - its controller

@@ -61,11 +61,12 @@
 #include "EveHistory.h"
 #include "HistoryLog.h"
 #include "RemoteUpdate.h"
+#include "Telegram.h"
 #include "WebApp.h"
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 12;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 13;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -191,6 +192,22 @@ struct WarningState {
   uint8_t calm    = 0;    // minutes it has been gone
 };
 
+// Telegram ("Telegram" section): someone let in to the bot, and a problem waiting for "Widzę".
+enum TgFlag : uint8_t { TG_ALERTS = 1, TG_SUMMARY = 2, TG_DIAG = 4 };
+
+struct TgPerson {
+  int64_t chat;
+  char    name[24];
+  uint8_t flags;          // TgFlag
+};
+
+struct TgOpen {
+  uint8_t  key;           // 0-3 alarm of probe i, 4-7 dead probe i, 8 + w warning w
+  uint32_t lastSent;
+  uint8_t  reminders;
+  bool     seen;
+};
+
 enum EventType : uint8_t {
   EV_BOOT = 1, EV_UPDATED, EV_ALARM_HIGH, EV_ALARM_LOW, EV_ALARM_CLEAR, EV_FAULT, EV_FAULT_CLEAR,
   EV_WARN_ON, EV_WARN_OFF, EV_HISTORY_CLEARED, EV_POWER_CUT,
@@ -280,6 +297,24 @@ bool     conversionPending = false;
 bool     webStarted        = false;
 bool     serialClosed      = false;   // serial input switched off after SERIAL_WINDOW_MS
 
+constexpr uint8_t  TG_MAX_PEOPLE   = 6;
+constexpr uint8_t  TG_MAX_PENDING  = 4;
+constexpr uint16_t TG_REMIND_MIN   = 30;      // a problem nobody has marked "Widzę" is repeated this often...
+constexpr uint8_t  TG_REMINDERS    = 6;       // ... at most this many times
+constexpr uint8_t  TG_SUMMARY_HOUR = 7;       // the summary of the day before
+constexpr uint8_t  TG_NIGHT_FROM   = 22;      // at night the ash-pan reminder waits for the morning summary
+constexpr uint32_t TG_SHORT_CUT_S  = 60;      // power blips shorter than this go only into the summary
+
+TelegramBot tg;
+TgPerson    tgPeople[TG_MAX_PEOPLE];
+uint8_t     tgCount = 0;
+TgPerson    tgPending[TG_MAX_PENDING];        // wrote /start, waiting to be let in from the web app (RAM only)
+uint8_t     tgPendingCount = 0;
+TgOpen      tgOpen[SENSOR_COUNT * 2 + WARN_COUNT];
+uint8_t     tgOpenCount = 0;
+uint32_t    tgLastMinute = 0;
+uint32_t    tgPressed[4] = {};                // last button presses handled (message x data) - a double tap counts once
+
 bool clockSet(time_t t) { return t >= 1700000000; }
 
 // ------------------------------------------------------------------ probes on the bus
@@ -351,6 +386,7 @@ void logEvent(EventType type, uint8_t sensor, int16_t value) {
     return;
   }
   events.add(e);
+  tgEvent(e);
 }
 
 // The clock is set: events from before it get their real time (boot time + their seconds since boot).
@@ -359,6 +395,7 @@ void flushPendingEvents(time_t now) {
   for (uint8_t i = 0; i < pendingEventCount; i++) {
     pendingEvents[i].time += bootTime;
     events.add(pendingEvents[i]);
+    tgEvent(pendingEvents[i]);
   }
   pendingEventCount = 0;
 }
@@ -384,6 +421,7 @@ void logPowerCut(time_t now) {
   uint8_t  high = (off >> 16) | (bootReason == BOOT_BROWNOUT ? 0x80 : 0);
   EventRecord e = {bootTime, (uint8_t)EV_POWER_CUT, high, (int16_t)(uint16_t)(off & 0xFFFF)};
   events.add(e);
+  tgEvent(e);
   powerLostAt = 0;
 }
 
@@ -1424,11 +1462,22 @@ void handleRefills() {
   w.end();
 }
 
-void coalChanged() {
+// The coal model and the hopper recounted after the refills changed (web app or Telegram).
+void recountCoal() {
   recomputeCoal();
   updateCoal(time(nullptr));
   evaluateWarnings();
+}
+
+void coalChanged() {
+  recountCoal();
   handleNow();
+}
+
+void addRefill(float buckets, bool full, uint32_t t) {
+  RefillRecord r = {t, (uint16_t)lroundf(buckets * 10), (uint8_t)full, 0};
+  refills.add(r);
+  recountCoal();
 }
 
 // POST buckets, full (1/0), time (Unix; optional - a refill entered later, up to 7 days back). Answers /api/now.
@@ -1439,9 +1488,8 @@ void handleRefill() {
     server.send(400, "text/plain", "bad refill");
     return;
   }
-  RefillRecord r = {min(t, now), (uint16_t)lroundf(buckets * 10), (uint8_t)(server.arg("full") == "1"), 0};
-  refills.add(r);
-  coalChanged();
+  addRefill(buckets, server.arg("full") == "1", min(t, now));
+  handleNow();
 }
 
 // POST time: takes back the refill entered last - only if it is the one with that time (a second tap must not
@@ -1461,13 +1509,18 @@ void handleAsh() {
     server.send(503, "text/plain", "no clock yet");
     return;
   }
+  emptyAsh(now);
+  handleNow();
+}
+
+// The ash pan was emptied (web app or Telegram): its reminder starts counting again.
+void emptyAsh(uint32_t now) {
   ashAt = now;
   prefs.putUInt("ashAt", ashAt);
   heatSinceAsh = 0;
   logEvent(EV_ASH, 0, 0);
   updateCoal(now);
   evaluateWarnings();
-  handleNow();
 }
 
 void handleBus() {
@@ -1590,12 +1643,553 @@ void onNetworkUp(int count) {
   server.on("/api/refill", HTTP_POST, handleRefill);
   server.on("/api/refill-undo", HTTP_POST, handleRefillUndo);
   server.on("/api/ash", HTTP_POST, handleAsh);
+  server.on("/api/telegram", HTTP_GET, handleTelegram);
+  server.on("/api/telegram", HTTP_POST, handleTelegram);
   server.on("/api/update", HTTP_POST, handleUpdate);
   server.on("/api/clear-history", HTTP_POST, handleClearHistory);
   server.on("/api/firmware", HTTP_POST, handleFirmwareDone, handleFirmwareChunk);
   server.onNotFound([] { server.send(404, "text/plain", "not found"); });
   server.begin();
   webStarted = true;
+}
+
+// ------------------------------------------------------------------ Telegram
+
+// What the bot says and does - Telegram.h only moves the messages. Alarms and warnings go to everyone let in with
+// "alerts" on, with a "Widzę" button; a problem nobody has seen is repeated every TG_REMIND_MIN minutes. People ask
+// with the menu (Stan, Dosypałem, Popielnik, Dziennik) or commands; refills and the ash pan are recorded from
+// buttons. At TG_SUMMARY_HOUR the day before. Who may use the bot is decided in the web app: whoever writes /start
+// waits there to be let in. Texts in Polish with the web app's number style.
+
+String tgNum(float v) {
+  if (isnan(v)) return "–";
+  char b[16];
+  snprintf(b, sizeof(b), "%.1f", v);
+  String s(b);
+  s.replace('.', ',');
+  return s;
+}
+
+String tgPlural(long n, const char* one, const char* few, const char* many) {
+  long d = n % 10, h = n % 100;
+  return String(n) + " " + (n == 1 ? one : d >= 2 && d <= 4 && (h < 12 || h > 14) ? few : many);
+}
+
+// 1 wiadro, 3 wiadra, 5 wiader, 2,5 wiadra - like the web app.
+String tgBuckets(float b) {
+  float r = b >= 20 ? roundf(b) : roundf(b * 2) / 2;
+  if (b > 0 && r == 0) return "poniżej pół wiadra";
+  if (r != floorf(r)) return tgNum(r) + " wiadra";
+  return tgPlural(lroundf(r), "wiadro", "wiadra", "wiader");
+}
+
+String tgDuration(uint32_t s) {
+  if (s < 60) return String(s) + " s";
+  uint32_t m = (s + 30) / 60, h = m / 60;
+  if (!h) return String(m) + " min";
+  if (h >= 48) return tgPlural(h / 24, "dzień", "dni", "dni") + " " + (h % 24) + " h";
+  return String(h) + " h" + (m % 60 ? " " + String(m % 60) + " min" : "");
+}
+
+String tgClock(uint32_t t) {
+  time_t tt = t;
+  struct tm lt;
+  localtime_r(&tt, &lt);
+  char b[8];
+  strftime(b, sizeof(b), "%H:%M", &lt);
+  return b;
+}
+
+// "dziś 14:05", "wczoraj 22:10", "jutro 09:00", "25.10 14:05".
+String tgWhen(uint32_t t) {
+  long days = lroundf(((float)localMidnight(t) - (float)localMidnight(time(nullptr))) / 86400);
+  if (days == 0) return "dziś " + tgClock(t);
+  if (days == -1) return "wczoraj " + tgClock(t);
+  if (days == 1) return "jutro " + tgClock(t);
+  time_t tt = t;
+  struct tm lt;
+  localtime_r(&tt, &lt);
+  char b[16];
+  strftime(b, sizeof(b), "%d.%m %H:%M", &lt);
+  return b;
+}
+
+uint32_t tgCutSeconds(const EventRecord& e) { return (uint32_t)(e.sensor & 0x7F) << 16 | (uint16_t)e.value; }
+
+bool tgNight() {
+  time_t now = time(nullptr);
+  struct tm lt;
+  localtime_r(&now, &lt);
+  return lt.tm_hour >= TG_NIGHT_FROM || lt.tm_hour < TG_SUMMARY_HOUR;
+}
+
+// Copies at most n-1 bytes without cutting a letter in half (Telegram refuses broken UTF-8).
+void tgCopy(char* dst, size_t n, const String& s) {
+  size_t len = s.length();
+  if (len >= n) {
+    len = n - 1;
+    while (len && ((uint8_t)s[len] & 0xC0) == 0x80) len--;
+  }
+  memcpy(dst, s.c_str(), len);
+  dst[len] = 0;
+}
+
+void tgQueue(int64_t chat, const String& text, const String& buttons = "", bool menu = false) {
+  static TelegramBot::Out o;            // ~1 KB: not on the loop's stack
+  o = {};
+  o.chat = chat;
+  o.kind = TelegramBot::Out::SEND;
+  o.menu = menu;
+  tgCopy(o.text, sizeof(o.text), text);
+  tgCopy(o.buttons, sizeof(o.buttons), buttons);
+  tg.send(o);
+}
+
+void tgReply(const TelegramBot::In& in, const String& popup, bool clearButtons) {
+  static TelegramBot::Out o;
+  o = {};
+  o.kind = TelegramBot::Out::ANSWER;
+  strlcpy(o.callbackId, in.callbackId, sizeof(o.callbackId));
+  tgCopy(o.text, sizeof(o.text), popup);
+  tg.send(o);
+  if (!clearButtons) return;
+  o = {};
+  o.kind = TelegramBot::Out::CLEAR_BUTTONS;
+  o.chat = in.chat;
+  o.messageId = in.messageId;
+  tg.send(o);
+}
+
+// To everyone let in with `flag`, except `skip` (the one who did it).
+void tgBroadcast(uint8_t flag, const String& text, const String& buttons = "", int64_t skip = 0) {
+  if (!tg.configured()) return;
+  for (uint8_t k = 0; k < tgCount; k++)
+    if ((tgPeople[k].flags & flag) && tgPeople[k].chat != skip) tgQueue(tgPeople[k].chat, text, buttons);
+}
+
+int tgFind(int64_t chat) {
+  for (uint8_t k = 0; k < tgCount; k++)
+    if (tgPeople[k].chat == chat) return k;
+  return -1;
+}
+
+void tgSavePeople() {
+  if (tgCount) prefs.putBytes("tgPeople", tgPeople, tgCount * sizeof(TgPerson));
+  else prefs.remove("tgPeople");
+}
+
+// ---- problems
+
+// The present state of a problem - for its first message and for its reminders.
+String tgProblemText(uint8_t key) {
+  if (key < 4) {
+    const SensorState& s = state[key];
+    return String("🔴 ") + SENSORS[key].name + (s.alarm > 0 ? ": za gorąco – " : ": za zimno – ") + tgNum(s.lastGood)
+           + "° (próg " + tgNum(s.alarm > 0 ? s.high : s.low) + "°)";
+  }
+  if (key < 8) return String("🔴 ") + SENSORS[key - 4].name + ": czujnik nie odpowiada";
+  const SensorState& f = state[FURNACE];
+  float slope = trendPerHour(FURNACE);
+  switch (key - 8) {
+    case WARN_GOING_OUT:
+      return "🟠 Piec wygasa – " + tgNum(f.lastGood) + "°, spada " + tgNum(-slope) + "°/h"
+             + (goOutForecast >= 0 ? ", za ok. " + String(goOutForecast) + " min poniżej " + tgNum(f.low) + "°" : "");
+    case WARN_FREEZE: {
+      int cold = -1;
+      for (size_t i = 0; i < SENSOR_COUNT; i++)
+        if (SENSORS[i].water && !isnan(state[i].lastGood) && (cold < 0 || state[i].lastGood < state[cold].lastGood)) cold = i;
+      return "🔵 Ryzyko zamarznięcia" + (cold < 0 ? String("") : String(" – ") + SENSORS[cold].name + " " + tgNum(state[cold].lastGood) + "°");
+    }
+    case WARN_BURNBACK:
+      return "🔴 Cofanie żaru! Zasobnik " + tgNum(state[COAL_HOPPER].lastGood) + "°, rośnie "
+             + tgNum(trendPerHour(COAL_HOPPER)) + "°/h";
+    case WARN_LOW_COAL:
+      return "🟠 Mało węgla – w zasobniku ~" + tgBuckets(coalLevel)
+             + (isfinite(coalHoursLeft) ? ", starczy do " + tgWhen(time(nullptr) + coalHoursLeft * 3600) : String(""));
+    case WARN_STALLED:
+      return "🔴 Piec stoi po zaniku prądu – " + tgNum(f.lastGood) + "°, stygnie " + tgNum(-slope) + "°/h. Sprawdź sterownik.";
+    case WARN_ASH: {
+      long days = ashAt ? (time(nullptr) - ashAt) / 86400 : 0;
+      return "🪣 Pora opróżnić popielnik – od opróżnienia " + tgPlural(days, "dzień", "dni", "dni")
+             + (isnan(ashBuckets) ? String("") : ", spalono ~" + tgBuckets(ashBuckets));
+    }
+  }
+  return "";
+}
+
+String tgSeenButton(uint8_t key) { return "Widzę ✅=ack:" + String(key); }
+
+void tgProblem(uint8_t key) {
+  uint8_t k = 0;
+  while (k < tgOpenCount && tgOpen[k].key != key) k++;
+  if (k == tgOpenCount && tgOpenCount < sizeof(tgOpen) / sizeof(tgOpen[0])) tgOpenCount++;
+  if (k < tgOpenCount) tgOpen[k] = {key, (uint32_t)time(nullptr), 0, false};
+  tgBroadcast(TG_ALERTS, tgProblemText(key), tgSeenButton(key));
+}
+
+void tgSolved(uint8_t key, const String& text) {
+  for (uint8_t k = 0; k < tgOpenCount; k++)
+    if (tgOpen[k].key == key) tgOpen[k--] = tgOpen[--tgOpenCount];
+  tgBroadcast(TG_ALERTS, text);
+}
+
+// Every journal event passes here (logEvent, the power cut, the events from before the clock).
+void tgEvent(const EventRecord& e) {
+  if (!tg.configured() || !tgCount) return;
+  uint8_t i = e.sensor;
+  switch (e.type) {
+    case EV_ALARM_HIGH:
+    case EV_ALARM_LOW:
+      if (i < SENSOR_COUNT) tgProblem(i);
+      break;
+    case EV_ALARM_CLEAR:
+      if (i < SENSOR_COUNT) tgSolved(i, String("🟢 ") + SENSORS[i].name + ": wróciło do normy – " + tgNum(e.value / 100.0f) + "°");
+      break;
+    case EV_FAULT:
+      if (i < SENSOR_COUNT) tgProblem(4 + i);
+      break;
+    case EV_FAULT_CLEAR:
+      if (i < SENSOR_COUNT) tgSolved(4 + i, String("🟢 ") + SENSORS[i].name + ": czujnik znów działa");
+      break;
+    case EV_WARN_ON:
+      if (i == WARN_LOW_COAL) tgBroadcast(TG_ALERTS, tgProblemText(8 + i), "Dosypałem=refill");
+      else if (i == WARN_ASH) { if (!tgNight()) tgBroadcast(TG_ALERTS, tgProblemText(8 + i), "Wyczyściłem popielnik=ash"); }
+      else if (i < WARN_COUNT) tgProblem(8 + i);
+      break;
+    case EV_WARN_OFF:
+      if (i < WARN_COUNT && i != WARN_ASH) tgSolved(8 + i, String("🟢 ") + WARNING_NAMES[i] + " – koniec");
+      break;
+    case EV_POWER_CUT: {
+      uint32_t s = tgCutSeconds(e);
+      if (s >= TG_SHORT_CUT_S)
+        tgBroadcast(TG_ALERTS, "⚡ Brak prądu " + tgClock(e.time - s) + "–" + tgClock(e.time) + " (" + tgDuration(s) + ")");
+      break;
+    }
+    case EV_SEASON:
+      tgBroadcast(TG_ALERTS, e.value ? (i ? "🔥 Sezon grzewczy włączył się sam – piec pali od 6 godzin." : "🔥 Sezon grzewczy włączony.")
+                                     : "☀️ Tryb lato – alarmy „za zimno” pieca i powrotu ucichły.");
+      break;
+    case EV_UPDATED:
+      tgBroadcast(TG_DIAG, "ℹ️ Zaktualizowano do wersji " + String(e.value));
+      break;
+    case EV_BOOT:
+      if (i == BOOT_CRASH) tgBroadcast(TG_DIAG, "⚠️ Restart po błędzie programu (v" + String(e.value) + ")");
+      break;
+    case EV_HISTORY_CLEARED:
+      tgBroadcast(TG_DIAG, "ℹ️ Historia usunięta");
+      break;
+  }
+}
+
+// ---- answers
+
+String tgStatus() {
+  const char* icons[] = {"🔥", "↩️", "🪣", "💧"};
+  String s;
+  for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    const SensorState& p = state[i];
+    float tr = trendPerHour(i);
+    s += String(i < 4 ? icons[i] : "•") + " " + SENSORS[i].name + ": ";
+    if (p.faulty) { s += "czujnik nie odpowiada ❌\n"; continue; }
+    s += tgNum(p.lastGood) + "°";
+    if (!isnan(tr)) s += fabsf(tr) < 0.5f ? String(" →") : String(tr > 0 ? " ↑ " : " ↓ ") + tgNum(fabsf(tr)) + "°/h";
+    if (p.alarm) s += p.alarm > 0 ? "  ⚠️ za gorąco" : "  ⚠️ za zimno";
+    s += "\n";
+  }
+  s += String("Ciepła woda: ") + (hotWaterReady ? "gotowa ✅" : "za zimna") + "\n";
+  String warns;
+  for (uint8_t w = 0; w < WARN_COUNT; w++)
+    if (warnings[w].active) warns += (warns.length() ? ", " : "") + String(WARNING_NAMES[w]);
+  if (warns.length()) s += "⚠️ " + warns + "\n";
+  if (settings.coalOn && settings.heating && !isnan(coalLevel)) {
+    s += "Węgiel: ~" + tgBuckets(coalLevel) + " (" + String(lroundf(coalLevel / settings.hopperBuckets * 100)) + "%)";
+    if (isfinite(coalHoursLeft)) s += ", starczy do " + tgWhen(time(nullptr) + coalHoursLeft * 3600);
+    s += "\n";
+  }
+  if (settings.coalOn && settings.heating && ashAt)
+    s += "Popielnik: opróżniony " + tgWhen(ashAt) + (isnan(ashBuckets) ? String("") : ", spalono ~" + tgBuckets(ashBuckets)) + "\n";
+  if (!settings.heating) s += "☀️ Tryb lato\n";
+  return s;
+}
+
+String tgEventText(const EventRecord& e) {
+  String name = e.sensor < SENSOR_COUNT ? SENSORS[e.sensor].name : "";
+  float v = e.value / 100.0f;
+  switch (e.type) {
+    case EV_BOOT:            return "Uruchomienie (v" + String(e.value) + ")";
+    case EV_UPDATED:         return "Aktualizacja do v" + String(e.value);
+    case EV_ALARM_HIGH:      return name + ": za gorąco " + tgNum(v) + "°";
+    case EV_ALARM_LOW:       return name + ": za zimno " + tgNum(v) + "°";
+    case EV_ALARM_CLEAR:     return name + ": w normie";
+    case EV_FAULT:           return name + ": czujnik nie odpowiada";
+    case EV_FAULT_CLEAR:     return name + ": czujnik znów działa";
+    case EV_WARN_ON:         return e.sensor < WARN_COUNT ? String(WARNING_NAMES[e.sensor]) : String("Ostrzeżenie");
+    case EV_WARN_OFF:        return (e.sensor < WARN_COUNT ? String(WARNING_NAMES[e.sensor]) : String("Ostrzeżenie")) + " – koniec";
+    case EV_HISTORY_CLEARED: return "Historia usunięta";
+    case EV_POWER_CUT:       return "Brak prądu " + tgDuration(tgCutSeconds(e));
+    case EV_SEASON:          return e.value ? "Sezon grzewczy" : "Tryb lato";
+    case EV_ASH:             return "Opróżniono popielnik";
+  }
+  return "Zdarzenie";
+}
+
+String tgJournal() {
+  EventRecord last[10];
+  uint8_t n = 0, next = 0;
+  events.forEach(time(nullptr) - 14 * 86400, [&](const EventRecord& e) {
+    last[next] = e;
+    next = (next + 1) % 10;
+    if (n < 10) n++;
+  });
+  if (!n) return "Dziennik jest pusty.";
+  String s = "📒 Ostatnie zdarzenia:\n";
+  for (uint8_t k = 0; k < n; k++) {
+    const EventRecord& e = last[(next + 10 - 1 - k) % 10];
+    s += tgWhen(e.time) + " – " + tgEventText(e) + "\n";
+  }
+  return s;
+}
+
+String tgDiag() {
+  const char* starts[] = {"", "po zaniku prądu", "po restarcie", "po spadku napięcia", "po błędzie programu"};
+  uint32_t up = millis() / 1000;
+  return "ℹ️ Wersja v" + String(FW_VERSION) + " – " + updater.status()
+         + "\nDziała od " + tgDuration(up) + (bootReason <= BOOT_CRASH && bootReason ? String(" (start ") + starts[bootReason] + ")" : String(""))
+         + "\nWiFi " + String(WiFi.RSSI()) + " dBm · " + WiFi.localIP().toString()
+         + "\nRAM wolne " + String(ESP.getFreeHeap() / 1024) + " KB · historia " + String(LittleFS.usedBytes() / 1024) + " z "
+         + String(LittleFS.totalBytes() / 1024) + " KB"
+         + "\nZegar: " + tgWhen(time(nullptr));
+}
+
+// The day before, at TG_SUMMARY_HOUR.
+String tgSummary() {
+  uint32_t today = localMidnight(time(nullptr)), yesterday = localMidnight(today - 12 * 3600);
+  DayRecord d = {};
+  bool found = false;
+  daily.forEach(yesterday, [&](const DayRecord& r) {
+    if (r.time == yesterday) { d = r; found = true; }
+  });
+  uint32_t cuts = 0, cutSeconds = 0;
+  events.forEach(yesterday, [&](const EventRecord& e) {
+    if (e.type == EV_POWER_CUT && e.time < today) { cuts++; cutSeconds += tgCutSeconds(e); }
+  });
+  String s = "☀️ Dzień dobry! Wczoraj:\n";
+  if (found) {
+    s += "• piec pracował " + tgDuration(d.burnMinutes * 60u) + "\n";
+    if (settings.coalOn && !isnan(coalK)) {
+      float b = coalK * d.heat, kg = b * settings.bucketKg;
+      s += "• węgiel ~" + tgBuckets(b) + " (≈" + String(lroundf(kg)) + " kg"
+           + (settings.coalPrice > 0 ? ", " + String(lroundf(kg * settings.coalPrice / 1000)) + " zł" : String("")) + ")\n";
+    }
+  } else {
+    s += "• brak podsumowania dnia\n";
+  }
+  s += cuts ? "• zaniki prądu: " + String(cuts) + " (łącznie " + tgDuration(cutSeconds) + ")\n" : String("• bez zaników prądu\n");
+  s += "\n" + tgStatus();
+  if (warnings[WARN_ASH].active) s += "🪣 Pora opróżnić popielnik.\n";
+  return s;
+}
+
+String tgHelp() {
+  return "Co mogę zrobić:\n• Stan – temperatury, węgiel, alarmy\n• Dosypałem – zapisz dosypanie węgla\n"
+         "• Popielnik – zapisz opróżnienie popielnika\n• Dziennik – ostatnie zdarzenia\n• /diag – stan urządzenia";
+}
+
+void tgAskRefill(int64_t chat) {
+  String buttons = "1=r:10|2=r:20|3=r:30|4=r:40\n5=r:50|6=r:60|8=r:80|10=r:100";
+  if (!isnan(coalLevel) && settings.hopperBuckets > 0) {
+    float fill = roundf(fmaxf(0.5f, settings.hopperBuckets - coalLevel) * 2) / 2;
+    buttons += "\nDo pełna (~" + tgBuckets(fill) + ")=rf:" + String(lroundf(fill * 10)) + ":1";
+  }
+  tgQueue(chat, "Ile wiader dosypałeś?", buttons);
+}
+
+// ---- incoming
+
+void tgHandleButton(int k, const TelegramBot::In& in) {
+  // The same press delivered twice (a double tap before the buttons went away) counts once.
+  uint32_t mark = in.messageId * 31 + String(in.text).length() * 7 + in.text[0] + in.text[strlen(in.text) / 2];
+  for (uint32_t p : tgPressed)
+    if (p == mark) return tgReply(in, "", false);
+  memmove(tgPressed + 1, tgPressed, sizeof(tgPressed) - sizeof(tgPressed[0]));
+  tgPressed[0] = mark;
+
+  String data = in.text, name = tgPeople[k].name;
+  uint32_t now = time(nullptr);
+  if (data.startsWith("ack:")) {
+    uint8_t key = data.substring(4).toInt();
+    for (uint8_t o = 0; o < tgOpenCount; o++)
+      if (tgOpen[o].key == key) tgOpen[o].seen = true;
+    tgReply(in, "Dzięki – nie będę przypominać", true);
+    String what = tgProblemText(key);
+    int sp = what.indexOf(' ');                         // without the leading colour dot
+    tgBroadcast(TG_ALERTS, "✅ " + name + " widzi: " + what.substring(sp + 1), "", in.chat);
+  } else if (data == "refill") {
+    tgReply(in, "", false);
+    tgAskRefill(in.chat);
+  } else if (data.startsWith("r:")) {
+    long n = data.substring(2).toInt();
+    tgReply(in, "", true);
+    tgQueue(in.chat, tgBuckets(n / 10.0f) + " – do pełna?", "Do pełna=rf:" + String(n) + ":1|Nie do pełna=rf:" + String(n) + ":0");
+  } else if (data.startsWith("rf:")) {
+    long n = data.substring(3).toInt();
+    bool full = data.endsWith(":1");
+    if (!clockSet(now) || n < 1 || n > 5000) return tgReply(in, "Nie udało się zapisać", false);
+    addRefill(n / 10.0f, full, now);
+    tgReply(in, "Zapisano", true);
+    String done = "✅ Zapisano: " + tgBuckets(n / 10.0f) + (full ? ", do pełna." : ".");
+    if (!isnan(coalLevel)) done += " W zasobniku ~" + tgBuckets(coalLevel) + ".";
+    tgQueue(in.chat, done);
+    tgBroadcast(TG_ALERTS, "🪣 " + name + " dosypał(a) " + tgBuckets(n / 10.0f) + (full ? " – do pełna." : "."), "", in.chat);
+  } else if (data == "ash") {
+    if (!clockSet(now)) return tgReply(in, "Nie udało się zapisać", false);
+    emptyAsh(now);
+    tgReply(in, "Zapisano", true);
+    tgQueue(in.chat, "✅ Popielnik opróżniony – licznik liczy od nowa.");
+    tgBroadcast(TG_ALERTS, "🪣 " + name + " opróżnił(a) popielnik.", "", in.chat);
+  } else {
+    tgReply(in, "", false);
+  }
+}
+
+void tgHandle(const TelegramBot::In& in) {
+  int k = tgFind(in.chat);
+  if (k < 0) {
+    // Someone not let in: waits for the web app; told once.
+    bool known = false;
+    for (uint8_t p = 0; p < tgPendingCount; p++) known |= tgPending[p].chat == in.chat;
+    if (in.button) return tgReply(in, "Brak dostępu", false);
+    if (known) return;
+    if (tgPendingCount == TG_MAX_PENDING) memmove(tgPending, tgPending + 1, sizeof(TgPerson) * --tgPendingCount);
+    TgPerson& p = tgPending[tgPendingCount++];
+    p = {in.chat, "", (uint8_t)(TG_ALERTS | TG_SUMMARY)};
+    strlcpy(p.name, in.name[0] ? in.name : "?", sizeof(p.name));
+    tgQueue(in.chat, String("Cześć ") + p.name + "! To bot pieca. Żeby dostać dostęp, zatwierdź się w aplikacji pieca: "
+                     "Ustawienia → Telegram – jesteś tam jako „" + p.name + "”.");
+    return;
+  }
+  if (in.button) return tgHandleButton(k, in);
+  String cmd = in.text;
+  cmd.trim();
+  if (cmd.startsWith("/")) cmd = cmd.substring(1);
+  int cut = cmd.indexOf('@');
+  if (cut < 0) cut = cmd.indexOf(' ');
+  if (cut > 0) cmd = cmd.substring(0, cut);
+  cmd.toLowerCase();
+  int64_t chat = in.chat;
+  if (cmd == "start") tgQueue(chat, String("Cześć ") + tgPeople[k].name + "! " + tgHelp(), "", true);
+  else if (cmd == "stan") tgQueue(chat, tgStatus(), "", true);
+  else if (cmd == "dziennik") tgQueue(chat, tgJournal(), "", true);
+  else if (cmd == "diag") tgQueue(chat, tgDiag(), "", true);
+  else if (cmd == "dosypałem" || cmd == "dosypalem" || cmd == "dosypałam" || cmd == "dosypalam") tgAskRefill(chat);
+  else if (cmd == "popielnik") tgQueue(chat, "Opróżniłeś popielnik?", "Tak, wyczyściłem=ash");
+  else tgQueue(chat, tgHelp(), "", true);
+}
+
+// Every loop: what came in; once a minute: reminders and the morning summary.
+void tgLoop() {
+  TelegramBot::In in;
+  while (tg.receive(in)) tgHandle(in);
+  time_t now = time(nullptr);
+  if (!clockSet(now) || (uint32_t)(now / 60) == tgLastMinute) return;
+  tgLastMinute = now / 60;
+  if (!tg.configured() || !tgCount) return;
+
+  for (uint8_t k = 0; k < tgOpenCount; k++) {
+    TgOpen& o = tgOpen[k];
+    if (o.seen || o.reminders >= TG_REMINDERS || now - o.lastSent < TG_REMIND_MIN * 60u) continue;
+    o.lastSent = now;
+    o.reminders++;
+    tgBroadcast(TG_ALERTS, "🔁 Przypomnienie: " + tgProblemText(o.key), tgSeenButton(o.key));
+  }
+
+  struct tm lt;
+  localtime_r(&now, &lt);
+  uint32_t today = localMidnight(now);
+  if (lt.tm_hour == TG_SUMMARY_HOUR && prefs.getUInt("tgSumDay", 0) != today) {
+    prefs.putUInt("tgSumDay", today);
+    tgBroadcast(TG_SUMMARY, tgSummary());
+  }
+}
+
+// ---- web app
+
+void tgApprove(int64_t chat) {
+  for (uint8_t p = 0; p < tgPendingCount; p++) {
+    if (tgPending[p].chat != chat) continue;
+    if (tgCount < TG_MAX_PEOPLE) {
+      tgPeople[tgCount++] = tgPending[p];
+      tgSavePeople();
+      tgQueue(chat, String("✅ Masz dostęp do bota pieca. Będą przychodzić alarmy i podsumowanie o ") + TG_SUMMARY_HOUR
+                    + ":00. Menu jest na dole.\n\n" + tgHelp(), "", true);
+    }
+    memmove(tgPending + p, tgPending + p + 1, sizeof(TgPerson) * (tgPendingCount - p - 1));
+    tgPendingCount--;
+    return;
+  }
+}
+
+void tgRemove(int64_t chat) {
+  int k = tgFind(chat);
+  if (k >= 0) {
+    tgQueue(chat, "Dostęp do bota pieca został wyłączony.");
+    memmove(tgPeople + k, tgPeople + k + 1, sizeof(TgPerson) * (tgCount - k - 1));
+    tgCount--;
+    tgSavePeople();
+  }
+  for (uint8_t p = 0; p < tgPendingCount; p++)
+    if (tgPending[p].chat == chat) {
+      memmove(tgPending + p, tgPending + p + 1, sizeof(TgPerson) * (tgPendingCount - p - 1));
+      tgPendingCount--;
+      break;
+    }
+}
+
+String jsonText(const char* s) {
+  String out = "\"";
+  for (; *s; s++) {
+    if (*s == '"' || *s == '\\') out += '\\';
+    if ((uint8_t)*s >= 0x20) out += *s;
+  }
+  return out + "\"";
+}
+
+// GET: the bot, the people let in, those waiting. POST: token (empty = bot off), approve / remove = chat,
+// chat + flags, test = a test message to everyone. Answers the same JSON - never the token itself.
+void handleTelegram() {
+  auto chatArg = [](const char* k) { return (int64_t)strtoll(server.arg(k).c_str(), nullptr, 10); };
+  if (server.method() == HTTP_POST) {
+    if (server.hasArg("token")) {
+      String t = server.arg("token");
+      t.trim();
+      prefs.putString("tgToken", t);
+      tg.setToken(t);
+    }
+    if (server.hasArg("approve")) tgApprove(chatArg("approve"));
+    if (server.hasArg("remove")) tgRemove(chatArg("remove"));
+    if (server.hasArg("chat") && server.hasArg("flags")) {
+      int k = tgFind(chatArg("chat"));
+      if (k >= 0) {
+        tgPeople[k].flags = server.arg("flags").toInt() & (TG_ALERTS | TG_SUMMARY | TG_DIAG);
+        tgSavePeople();
+      }
+    }
+    if (server.hasArg("test")) tgBroadcast(0xFF, "✅ Wiadomość próbna z pieca – Telegram działa.");
+  }
+  auto list = [](const TgPerson* p, uint8_t n) {
+    String j = "[";
+    for (uint8_t k = 0; k < n; k++) {
+      char chat[24];
+      snprintf(chat, sizeof(chat), "%lld", (long long)p[k].chat);
+      j += String(k ? "," : "") + "{\"chat\":\"" + chat + "\",\"name\":" + jsonText(p[k].name) + ",\"flags\":" + p[k].flags + "}";
+    }
+    return j + "]";
+  };
+  String j = String("{\"configured\":") + (tg.configured() ? "true" : "false") + ",\"bot\":" + jsonText(tg.botName())
+             + ",\"status\":" + jsonText(tg.status()) + ",\"people\":" + list(tgPeople, tgCount)
+             + ",\"pending\":" + list(tgPending, tgPendingCount) + "}";
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json; charset=utf-8", j);
 }
 
 // ------------------------------------------------------------------ BOOT button
@@ -1678,6 +2272,9 @@ void setup() {
   ashAt = prefs.getUInt("ashAt", 0);
   if (!updater.crashLoop()) recomputeCoal();      // after crash restarts: no heavy work until a fix gets in
   keepOtaPassword();
+  if (prefs.isKey("tgPeople")) tgCount = prefs.getBytes("tgPeople", tgPeople, sizeof(tgPeople)) / sizeof(TgPerson);
+  tg.setToken(prefs.getString("tgToken", ""));
+  tg.begin();
   bootReason = readBootReason();
   // The power went within ALIVE_INTERVAL_S after the last mark (without marks: within the minute after the last
   // stored one). A power cut is journaled as the cut itself, other starts as EV_BOOT.
@@ -1722,6 +2319,7 @@ void loop() {
   logHistory();
   updater.loop();
   if (updater.takeJustConfirmed()) logEvent(EV_UPDATED, 0, FW_VERSION);
+  tgLoop();
 
   // Readings on the full minute once NTP has set the clock, every READ_INTERVAL_MS before that.
   time_t wall = time(nullptr);

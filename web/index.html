@@ -122,6 +122,10 @@ nav.tabs button{position:relative}
 .chip i{width:9px;height:9px;border-radius:50%;background:var(--c);opacity:.5}
 .chip.on{color:var(--text);border-color:var(--c);background:var(--cb)}
 .chip.on i{opacity:1}
+.tgp{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.tgp .k{font-weight:600;font-size:15px}
+.tgflags{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px}
+.tgflags .chip{padding:6px 11px;font-size:13px}
 .big-now{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}
 .big-now .v{font:600 34px/1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.02em}
 .big-now .l{color:var(--muted);font-size:14px}
@@ -360,6 +364,10 @@ nav.tabs button.on{color:var(--text)}
   </div>
   <div class="card"><div id="seasonset"></div></div>
   <div class="card">
+    <div class="card-h">Telegram</div>
+    <div id="tgset"></div>
+  </div>
+  <div class="card">
     <div class="card-h">Temperatura na zewnątrz</div>
     <div class="rows" id="place"></div>
     <input class="field" type="text" id="placeq" placeholder="Wpisz miejscowość…" autocomplete="off">
@@ -455,6 +463,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  13: 'Telegram: alarmy z przyciskiem „Widzę”, przypomnienia, Stan, Dziennik, dosypanie i popielnik z czatu, podsumowanie o 7:00. Ustawienia → Telegram.',
   12: 'Korekta wskazań w Ustawieniach: stała poprawka plus lub minus dla każdego czujnika.',
   11: 'Przycisk BOOT: przytrzymanie 15 s zawsze robi pełny reset (także parowania z aplikacją Dom), nawet gdy urządzenie akurat łączy się z WiFi.',
   10: 'Poprawki: podsumowania dobowe znów się zapisują (godziny pracy, węgiel, tydzień), zmiana czasu, dokładniejsze liczby po powrocie do aplikacji, ochrona przed pomyłką w progach i podwójnym kliknięciem, pewniejsze aktualizacje. Przełącznik sezonu przeniesiony niżej w Ustawieniach.',
@@ -1670,9 +1679,73 @@ function warnBlock(w, on, desc, fields) {
     + `<div class="warn-desc">${desc}</div>${fieldRows(fields)}</div>`;
 }
 
+// ---------------------------------------------------------------- Telegram
+
+// The bot lives on the ESP; here only its token, who may use it and what each person gets.
+let tgInfo = null, tgAt = 0;
+const TG_STATUS = { ok: 'działa', 'not set': 'nie ustawiono', 'wrong token': 'błędny token', 'no internet': 'brak internetu', 'no connection': 'brak połączenia z Telegramem' };
+const TG_FLAGS = [[1, 'Alarmy'], [2, 'Podsumowanie 7:00'], [4, 'Diagnostyka']];
+
+async function loadTelegram(force) {
+  if (!force && Date.now() - tgAt < 10e3) return;
+  tgAt = Date.now();
+  try { tgInfo = await (await api('/api/telegram')).json(); } catch (e) { tgAt = 0; }
+}
+
+async function postTelegram(fields, message) {
+  try {
+    tgInfo = await (await api('/api/telegram', { method: 'POST', body: new URLSearchParams(fields) })).json();
+    if (message) toast(message);
+  } catch (e) { toast('Nie udało się – brak połączenia z piecem?'); }
+  renderTelegram();
+}
+
+function renderTelegram() {
+  const el = $('#tgset'), t = tgInfo;
+  if (!t || editing(el)) return;
+  const ok = t.status === 'ok';
+  let html = t.configured
+    ? row(esc(t.bot || 'Bot'), `<span style="color:var(--${ok ? 'green' : 'orange'})">${esc(TG_STATUS[t.status] || t.status)}</span>`, 'napisz do bota /start, a pojawisz się poniżej do dodania')
+    : '<p class="note" style="margin-top:0">Alarmy, stan i dosypywanie przez Telegram – z każdego miejsca. Załóż bota u @BotFather (/newbot) i wklej tutaj jego token.</p>';
+  html += `<input class="field" type="password" id="tgtoken" placeholder="${t.configured ? 'Nowy token – tylko gdy zmieniasz bota' : 'Token od @BotFather'}" autocomplete="off">`
+    + `<button class="btn${t.configured ? '' : ' primary'}" id="tgsave">${t.configured ? 'Zmień token' : 'Zapisz token'}</button>`;
+  for (const p of t.pending)
+    html += `<div class="tgp"><div><div class="k">${esc(p.name)}</div><div class="s note" style="margin:2px 0 0">chce dostęp do bota</div></div><button class="mini" data-approve="${p.chat}">Dodaj</button></div>`;
+  for (const p of t.people)
+    html += `<div class="tgp"><div class="k">${esc(p.name)}</div><button class="mini" data-remove="${p.chat}">Usuń</button><div class="tgflags">`
+      + TG_FLAGS.map(([f, label]) => `<button class="chip ${p.flags & f ? 'on' : ''}" data-chat="${p.chat}" data-flag="${f}" style="--c:var(--blue);--cb:rgba(10,132,255,.14)"><i></i>${label}</button>`).join('')
+      + '</div></div>';
+  if (t.people.length) html += '<button class="btn" id="tgtest">Wyślij wiadomość próbną</button>';
+  if (t.configured) html += '<button class="btn danger" id="tgoff">Wyłącz bota</button>';
+  el.innerHTML = html;
+}
+
+function onTelegramClick(e) {
+  const b = e.target.closest('button');
+  if (!b || !tgInfo) return;
+  if (b.id === 'tgsave') {
+    const v = $('#tgtoken').value.trim();
+    if (!v) return toast('Wklej token od @BotFather');
+    postTelegram({ token: v }, 'Token zapisany – sprawdzam bota…').then(() => setTimeout(() => loadTelegram(true).then(renderTelegram), 6000));
+  } else if (b.dataset.approve) {
+    postTelegram({ approve: b.dataset.approve }, 'Dodano – bot napisze powitanie');
+  } else if (b.dataset.remove) {
+    confirmDialog('Usunąć tę osobę?', 'Przestanie dostawać wiadomości i nie będzie mogła używać bota.').then(yes => yes && postTelegram({ remove: b.dataset.remove }, 'Usunięto'));
+  } else if (b.dataset.flag) {
+    const p = tgInfo.people.find(x => x.chat === b.dataset.chat);
+    if (p) postTelegram({ chat: p.chat, flags: p.flags ^ +b.dataset.flag });
+  } else if (b.id === 'tgtest') {
+    postTelegram({ test: 1 }, 'Wysłano wiadomość próbną');
+  } else if (b.id === 'tgoff') {
+    confirmDialog('Wyłączyć bota?', 'Token zostanie usunięty, lista osób zostaje.').then(yes => yes && postTelegram({ token: '' }, 'Bot wyłączony'));
+  }
+}
+
 function renderSettings() {
   if (!now) return;
   const st = now.settings;
+  renderTelegram();
+  loadTelegram().then(renderTelegram);
   $('#seasonset').innerHTML = `<div class="warn-block"><div class="warn-head"><span class="badge ${st.heating ? 'c-orange' : 'c-blue'}">${SVG(st.heating ? I_FLAME : I_SUN)}</span>`
     + `${st.heating ? 'Sezon grzewczy' : 'Tryb lato'}<input class="sw" type="checkbox" data-k="heating" data-msg="Sezon grzewczy" ${st.heating ? 'checked' : ''}></div>`
     + `<div class="warn-desc">${st.heating ? 'Latem wyłącz – alarmy „za zimno” pieca i powrotu oraz ostrzeżenia o paleniu ucichną. Bojler i mróz działają dalej.'
@@ -1935,6 +2008,7 @@ function setup() {
     render();
   };
   $('#seasonset').addEventListener('change', onWarnChange);
+  $('#tgset').addEventListener('click', onTelegramClick);
   $('#rno').onclick = () => $('#rmodal').classList.remove('on');
   $('#ryes').onclick = saveRefill;
   $('#rwhen').onclick = e => { const b = e.target.closest('button'); if (b) setRefillAgo(+b.dataset.m); };
