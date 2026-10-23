@@ -65,7 +65,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 10;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 11;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -273,8 +273,6 @@ float    stallFrom         = NAN;               // furnace temperature at the fi
 
 uint32_t lastRequestMs     = 0;
 uint32_t lastRequestMinute = 0;
-uint32_t bootPressedMs     = 0;
-uint8_t  resetLevel        = 0;   // 1 = forget WiFi, 2 = full reset; acted on when BOOT is released
 uint32_t lastHistorySlot   = 0;
 uint32_t currentDay        = 0;   // local midnight (Unix time) of the day being summarized
 bool     conversionPending = false;
@@ -959,18 +957,20 @@ void logHistory() {
   currentDay = today;
 }
 
-void setupHistory() {
+// wipe: the first start after a full reset - everything goes.
+void setupHistory(bool wipe) {
   if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed - no history");
   // Files of an older layout would eat the space of the new ones: a layout change wipes the history once.
   bool newLayout = prefs.getUChar("fsLayout", 0) != FS_LAYOUT;
-  if (newLayout) {
-    Serial.println("History layout changed - formatting LittleFS");
+  if (newLayout || wipe) {
+    Serial.println(wipe ? "Full reset - wiping the history" : "History layout changed - formatting LittleFS");
     LittleFS.format();
     prefs.putUChar("fsLayout", FS_LAYOUT);
   }
   if (!minutes.begin()) Serial.println("No \"minutes\" partition - per-minute history disabled");
+  if (wipe) minutes.clear();
   if (!alive.begin()) Serial.println("No \"alive\" partition - power cuts timed from the minute log");
-  if (newLayout) alive.clear();                               // the area may hold old LittleFS blocks
+  if (newLayout || wipe) alive.clear();                       // old LittleFS blocks / the last home's marks
   daily.begin();
   events.begin();
   refills.begin();
@@ -1575,35 +1575,52 @@ void onNetworkUp(int count) {
   webStarted = true;
 }
 
-// ------------------------------------------------------------------ WiFi recovery
+// ------------------------------------------------------------------ BOOT button
 
-// Hold BOOT and release: after WIFI_RESET_HOLD_MS the WiFi is forgotten, after FULL_RESET_HOLD_MS also the
-// HomeKit pairing and all history; either way the ESP reboots into the setup hotspot.
-// Acts on release - rebooting while BOOT is still held would drop the chip into its flashing mode.
-void checkBootButton() {
-  if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
-    if (!bootPressedMs) bootPressedMs = millis();
-    uint32_t held = millis() - bootPressedMs;
-    if (resetLevel < 2 && held >= FULL_RESET_HOLD_MS) {
-      resetLevel = 2;
-      Serial.println("BOOT held 15 s - release for a FULL reset (WiFi, HomeKit pairing, history)");
-    } else if (resetLevel < 1 && held >= WIFI_RESET_HOLD_MS) {
-      resetLevel = 1;
-      Serial.println("BOOT held 5 s - release to forget the WiFi, keep holding for a full reset");
+// Hold BOOT and release: after WIFI_RESET_HOLD_MS the WiFi is forgotten; after FULL_RESET_HOLD_MS also the HomeKit
+// pairing, and the next start wipes the history. Either way the ESP restarts into the setup hotspot.
+// The button has its own task: HomeSpan blocks the loop while it waits for WiFi (~20 s) and for the whole setup
+// hotspot, and a hold measured in the loop came out short - 15 s at dad's became "forget the WiFi" and the old
+// HomeKit pairing stayed. The task only erases NVS (HomeSpan's WIFI, HAP and CHAR, like its factory reset; SRP
+// with the setup code and OTA with its password stay) and leaves the history to the next start, before anything
+// opens it. It acts on release: restarting while BOOT is held would drop the chip into its flashing mode.
+void eraseNamespace(const char* name) {
+  nvs_handle_t h;
+  if (nvs_open(name, NVS_READWRITE, &h) != ESP_OK) return;
+  nvs_erase_all(h);
+  nvs_commit(h);
+  nvs_close(h);
+}
+
+void buttonTask(void*) {
+  uint32_t pressedAt = 0;
+  uint8_t level = 0;
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(50));
+    if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
+      if (!pressedAt) pressedAt = millis();
+      uint32_t held = millis() - pressedAt;
+      if (level < 2 && held >= FULL_RESET_HOLD_MS) {
+        level = 2;
+        Serial.println("BOOT held 15 s - release for a FULL reset (WiFi, HomeKit pairing, history)");
+      } else if (level < 1 && held >= WIFI_RESET_HOLD_MS) {
+        level = 1;
+        Serial.println("BOOT held 5 s - release to forget the WiFi, keep holding for a full reset");
+      }
+      continue;
     }
-    return;
-  }
-  bootPressedMs = 0;
-  if (resetLevel == 1) homeSpan.processSerialCommand("X");   // erases the WiFi and reboots
-  if (resetLevel == 2) {
-    minutes.clear();                                         // all history
-    LittleFS.format();
-    alive.clear();
-    prefs.remove("alerts");                                  // the new home starts without old problems
-    prefs.remove("coalK");                                   // ... and learns its own furnace's coal use
-    prefs.remove("coalN");
-    prefs.remove("ashAt");
-    homeSpan.processSerialCommand("F");                    // erases WiFi + pairing and reboots
+    pressedAt = 0;
+    if (!level) continue;
+    eraseNamespace("WIFI");                        // HomeSpan's network: no WiFi -> setup hotspot
+    if (level == 2) {
+      eraseNamespace("HAP");                       // pairing + accessory ID: Home sees a new accessory
+      eraseNamespace("CHAR");
+      prefs.putBool("wipe", true);                 // the history goes at the next start (setup)
+    }
+    WiFi.disconnect(false, true);                  // also the network the WiFi driver kept
+    Serial.println(level == 2 ? "FULL reset - restarting" : "WiFi forgotten - restarting");
+    delay(300);
+    esp_restart();
   }
 }
 
@@ -1621,10 +1638,18 @@ void setup() {
   assignAddresses();
   Serial.print(busReport());
   prefs.begin("furnace", false);
+  // After a full reset with the BOOT button the new home starts empty: no history, no old problems, its own coal
+  // use and ash count (limits and settings stay).
+  bool wipe = prefs.getBool("wipe", false);
+  if (wipe) {
+    for (const char* key : {"alerts", "coalK", "coalN", "ashAt"}) prefs.remove(key);
+    prefs.putBool("cleared", true);
+  }
   loadLimits();
   loadSettings();
   restoreAlerts();
-  setupHistory();
+  setupHistory(wipe);
+  if (wipe) prefs.remove("wipe");
   coalK = prefs.getFloat("coalK", NAN);
   coalSamples = prefs.getUShort("coalN", 0);
   ashAt = prefs.getUInt("ashAt", 0);
@@ -1643,6 +1668,7 @@ void setup() {
   }
 
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+  xTaskCreatePinnedToCore(buttonTask, "bootButton", 4096, nullptr, 1, nullptr, 0);
   homeSpan.setStatusPin(STATUS_LED_PIN);
   homeSpan.setGetCharacteristicsCallback(EveHistory::onGetCharacteristics);
   homeSpan.setApSSID(AP_SSID);
@@ -1666,7 +1692,6 @@ void loop() {
   homeSpan.resetWatchdog();
   homeSpan.poll();
   if (webStarted) server.handleClient();
-  checkBootButton();
   if (!serialClosed && millis() >= SERIAL_WINDOW_MS) {
     homeSpan.setSerialInputDisable(true);
     serialClosed = true;
