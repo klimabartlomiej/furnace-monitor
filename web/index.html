@@ -158,6 +158,7 @@ nav.tabs button{position:relative}
 .coal .left.mid{color:var(--orange)}
 .coal .left.low{color:var(--red)}
 .coal .rows{margin-top:6px}
+.stale{opacity:.55;transition:opacity .3s}
 .ashrow{display:flex;align-items:center;gap:12px;padding:12px 0 2px;border-top:1px solid var(--line);margin-top:8px}
 .ashrow>div{flex:1;min-width:0}
 .ashrow .k{font-weight:600;font-size:15px}
@@ -319,7 +320,7 @@ nav.tabs button.on{color:var(--text)}
     <div class="card-h">Zaniki prądu<small>czas bez prądu dziennie, 30 dni</small></div>
     <div id="power"></div>
   </div>
-  <a class="btn" id="csv" download>Eksportuj widoczny zakres do CSV</a>
+  <a class="btn" id="csv" download target="_blank" rel="noopener">Eksportuj widoczny zakres do CSV</a>
 </section>
 
 <section class="view journal" id="v-journal">
@@ -329,7 +330,6 @@ nav.tabs button.on{color:var(--text)}
 
 <section class="view" id="v-settings">
   <header class="top"><h1>Ustawienia</h1></header>
-  <div class="card"><div id="seasonset"></div></div>
   <div class="card">
     <div class="card-h">Progi alarmów</div>
     <div id="limits"></div>
@@ -344,6 +344,7 @@ nav.tabs button.on{color:var(--text)}
     <div class="card-h">Węgiel</div>
     <div id="coalset"></div>
   </div>
+  <div class="card"><div id="seasonset"></div></div>
   <div class="card">
     <div class="card-h">Temperatura na zewnątrz</div>
     <div class="rows" id="place"></div>
@@ -440,6 +441,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  10: 'Poprawki: podsumowania dobowe znów się zapisują (godziny pracy, węgiel, tydzień), zmiana czasu, dokładniejsze liczby po powrocie do aplikacji, ochrona przed pomyłką w progach i podwójnym kliknięciem, pewniejsze aktualizacje. Przełącznik sezonu przeniesiony niżej w Ustawieniach.',
   9: 'Szybsze otwieranie: aplikacja od razu pokazuje ostatnie dane, a strona nie jest pobierana za każdym razem od nowa.',
   8: 'Zaniki prądu: w dzienniku, w karcie „Co się działo”, jako pasy na wykresach i na wykresie z 30 dni. Alarm trwający podczas zaniku prądu lub aktualizacji nie wysyła ponownego powiadomienia. Węgiel: przycisk „Dosypałem” (także z godziną wstecz), zużycie i koszty, stan zasobnika, ostrzeżenie „Mało węgla”, wykres zużycia z mrozem i sezonem. Podsumowanie ostatnich 7 dni. Czujnik „Ciepła woda gotowa” w aplikacji Dom. Tryb lato, ostrzeżenie „Piec stoi po zaniku prądu”, prognoza zużycia na jutro i przypomnienie o popielniku.',
 };
@@ -454,17 +456,26 @@ const STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200];
 const MIN_SPAN = 1800, MAX_SPAN = 2 * 365 * 86400, LIVE_SPAN = 26 * 3600;
 const LOCALE = 'pl-PL';
 
-let now = null, online = true, lastOk = 0, view = null;
+let now = null, online = null, lastOk = 0, view = null;     // online: null until the first answer
 let live = [], series = null, days = [], daysAt = 0, journal = [], journalAt = 0, refills = [], refillsAt = 0;
 const outdoor = { hourly: [], ahead: [], daily: [], current: null, at: 0, dailyAt: 0, key: '' };
 const ui = Object.assign({ tab: 'home', range: '6h', shown: [FURNACE], overview: 6 }, readUi());
 
+// The firmware version this page came with: CHANGES gets a note for every release.
+const APP_VERSION = Math.max(...Object.keys(CHANGES));
 // The last known state: the app opens straight away with it, then fetches only what is new (the ESP is slow to
-// send a whole day). Keyed by the newest release note, so data shaped by older firmware is never read.
-const CACHE_KEY = 'furnace-cache-' + Math.max(...Object.keys(CHANGES));
+// send a whole day). Keyed by the release, so data shaped by older firmware is never read; older keys are dropped.
+const CACHE_KEY = 'furnace-cache-' + APP_VERSION;
 function saveCache() {
   if (!now) return;
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: lastOk || Date.now(), now, live, journal, days, outdoor })); } catch (e) {}
+  try {
+    Object.keys(localStorage).filter(k => k.startsWith('furnace-cache-') && k !== CACHE_KEY).forEach(k => localStorage.removeItem(k));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: lastOk || Date.now(), now, live, journal, days, outdoor }));
+  } catch (e) {}
+}
+function dropCache() {
+  live = []; series = null; days = []; daysAt = 0; journal = []; journalAt = 0; refillsAt = 0;
+  try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
 }
 function loadCache() {
   try {
@@ -488,8 +499,8 @@ const n1 = v => v.toFixed(1).replace('.', ',');                    // 21,7 - Pol
 const nAxis = v => String(+v.toFixed(2)).replace('.', ',');
 const hhmm = t => new Date(t * 1000).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
 const day = t => new Date(t * 1000).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
-const dur = s => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h} godz. ${m} min` : `${m} min`; };
-const durShort = s => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return s < 60 ? `${s} s` : h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`; };
+const dur = s => { const m = Math.round(s / 60), h = Math.floor(m / 60); return h ? `${h} godz. ${m % 60} min` : `${m} min`; };
+const durShort = s => { if (s < 60) return `${s} s`; const m = Math.round(s / 60), h = Math.floor(m / 60); return h ? (m % 60 ? `${h} h ${m % 60} min` : `${h} h`) : `${m} min`; };
 const durCut = s => (s < 60 ? `${s} s` : dur(s));
 // EV_POWER_CUT: time = power back, seconds without power in 23 bits (sensor & 0x7F : value), sensor bit 7 = brownout.
 const cutSeconds = e => (e[2] & 0x7F) * 65536 + (e[3] & 0xFFFF);
@@ -531,21 +542,53 @@ function updateText(s) {
 
 // ---------------------------------------------------------------- data
 
-async function api(path, opt) {
-  const r = await fetch(path, Object.assign({ cache: 'no-store' }, opt));
-  if (!r.ok) throw new Error(await r.text() || r.status);
-  return r;
+// Every request gives up after `ms` - a hung one must not leave old data looking current.
+async function api(path, opt = {}, ms = 12000) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(path, Object.assign({ cache: 'no-store', signal: ctl.signal }, opt));
+    if (!r.ok) throw new Error(await r.text() || r.status);
+    return r;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-async function refreshNow() {
+// One request at a time. Sends the phone's clock (the ESP takes it only when it has no NTP). A device on newer
+// firmware than this page reloads it once; a device whose history was wiped (BOOT 15 s) drops the cached data.
+let nowLoading = null;
+function refreshNow() {
+  if (!nowLoading) nowLoading = (async () => {
+    try {
+      const fresh = await (await api(`/api/now?t=${tNow()}`)).json();
+      if (fresh.fw !== APP_VERSION && reloadOnce(fresh.fw)) return;
+      if (live.length && fresh.oldest && live[0].t < fresh.oldest - 120) dropCache();
+      now = fresh;
+      online = true;
+      lastOk = Date.now();
+    } catch (e) {
+      online = false;
+    }
+    nowLoading = null;
+    render(true);
+  })();
+  return nowLoading;
+}
+
+function reloadOnce(fw) {
   try {
-    now = await (await api('/api/now')).json();
-    online = true;
-    lastOk = Date.now();
-  } catch (e) {
-    online = false;
-  }
-  render();
+    if (sessionStorage.getItem('furnace-reload') === String(fw)) return false;
+    sessionStorage.setItem('furnace-reload', fw);
+  } catch (e) { return false; }
+  location.reload();
+  return true;
+}
+
+// After the ESP restarts: reload once it answers again (a fixed delay can land on an error page in standalone mode).
+function reloadWhenBack(firstTry) {
+  setTimeout(async function poll() {
+    try { await api('/api/now', {}, 3000); location.reload(); } catch (e) { setTimeout(poll, 3000); }
+  }, firstTry);
 }
 
 // /api/series buckets: uint32 time, then per probe int16 min, avg, max (x100, -32768 = no reading).
@@ -579,21 +622,35 @@ function parseDays(buf) {
 const seriesUrl = (from, to, step) => `/api/series?from=${Math.floor(from)}&to=${Math.ceil(to)}&step=${step}`;
 
 // The last 26 hours minute by minute, topped up every minute (cards, overview, today).
-async function loadLive() {
-  if (!now) return;
-  const t = tNow(), from = live.length ? live[live.length - 1].t + 60 : t - LIVE_SPAN;
-  try {
-    const add = parseBuckets(await (await api(seriesUrl(from, t, 60))).arrayBuffer());
-    live = live.concat(add);
-    const cut = t - LIVE_SPAN;
-    while (live.length && live[0].t < cut) live.shift();
-  } catch (e) {}
+// One load at a time (resume and the minute timer would otherwise append the same minutes twice), never more than
+// LIVE_SPAN back, only minutes newer than what is held.
+let liveLoading = null;
+function loadLive() {
+  if (!now) return Promise.resolve();
+  if (!liveLoading) liveLoading = (async () => {
+    const t = tNow(), last = live.length ? live[live.length - 1].t : 0;
+    try {
+      const add = parseBuckets(await (await api(seriesUrl(Math.max(last + 60, t - LIVE_SPAN), t, 60))).arrayBuffer());
+      const top = live.length ? live[live.length - 1].t : 0;
+      live = live.concat(add.filter(b => b.t > top));
+      const cut = t - LIVE_SPAN;
+      while (live.length && live[0].t < cut) live.shift();
+    } catch (e) {}
+    liveLoading = null;
+  })();
+  return liveLoading;
 }
 
+// Daily records: all once, then only the new ones; sooner when the newest is older than yesterday (after midnight).
 async function loadDays(force) {
-  if (!now || (!force && Date.now() - daysAt < 30 * 60e3)) return;
+  if (!now) return;
+  const newest = days.length ? days[days.length - 1].t : 0, stale = newest < midnight(tNow()) - 86400 - 3 * 3600;
+  if (!force && Date.now() - daysAt < (stale ? 5 : 30) * 60e3) return;
   daysAt = Date.now();
-  try { days = parseDays(await (await api(`/api/daily?since=${tNow() - 6 * 366 * 86400}`)).arrayBuffer()); } catch (e) { daysAt = 0; }
+  try {
+    const add = parseDays(await (await api(`/api/daily?since=${newest ? newest + 1 : tNow() - 6 * 366 * 86400}`)).arrayBuffer());
+    days = days.concat(add.filter(d => d.t > newest));
+  } catch (e) { daysAt = 0; }
 }
 
 async function loadJournal() {
@@ -841,6 +898,7 @@ function scrub(el, clientX) {
       + `${s.agg && p[1] !== p[3] ? ` <span class="mm num">${n1(p[1])}–${n1(p[3])}</span>` : ''}</div>`;
   }
   if (x === null) return unscrub(el);
+  scrubbing = true;
   el.querySelector('.cg').innerHTML = `<line class="cur" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${g.T}" y2="${g.T + g.ph}"/>` + dots;
   const label = whenStep >= 86400 ? day(when) : whenStep > 60 ? `${day(when)}, ${hhmm(when)}–${hhmm(when + whenStep)}` : `${day(when)}, ${hhmm(when)}`;
   const tip = el.querySelector('.tip');
@@ -849,6 +907,7 @@ function scrub(el, clientX) {
   tip.style.left = clamp(x - tip.offsetWidth / 2, 0, g.W - tip.offsetWidth) + 'px';
 }
 function unscrub(el) {
+  scrubbing = false;
   const cg = el.querySelector('.cg'), tip = el.querySelector('.tip');
   if (cg) cg.innerHTML = '';
   if (tip) tip.style.display = 'none';
@@ -916,6 +975,7 @@ function sparkline(pts, color) {
 
 function describe(s) {
   if (s.fault) return 'czujnik nie odpowiada';
+  if (s.temp === null) return s.alarm > 0 ? 'za gorąco' : 'za zimno';      // restored after a restart, no reading yet
   if (s.alarm > 0) return `za gorąco: ${n1(s.temp)}° (próg ${n1(s.high)}°)`;
   return `za zimno: ${n1(s.temp)}° (próg ${n1(s.low)}°)`;
 }
@@ -929,7 +989,7 @@ function warningText(w) {
   }
   if (w === 1) {
     const cold = s.filter(x => x.water && x.temp !== null).sort((a, b) => a.temp - b.temp)[0];
-    return cold ? `${cold.name}: ${n1(cold.temp)}°` : 'woda bliska zamarznięcia';
+    return cold ? `${esc(cold.name)}: ${n1(cold.temp)}°` : 'woda bliska zamarznięcia';
   }
   if (w === 4) return `po zaniku prądu piec dalej stygnie${s[FURNACE].trend !== null ? ` (${n1(s[FURNACE].trend)}° na godzinę)` : ''} – sprawdź sterownik`;
   if (w === 5) {
@@ -955,7 +1015,7 @@ function seasonNotice() {
       + `<br><button class="bbtn" id="tosummer">Włącz tryb lato</button></div><button class="x" id="seasonno" aria-label="Zamknij">×</button></div>`;
   }
   if (burnSeconds(midnight(tNow()), tNow()) < 30 * 60) return '';
-  return `<div class="banner orange">${SVG(I_FLAME)}<div><b>Piec pali w trybie lato.</b> Sezon grzewczy włączy się sam po 2 godzinach palenia.`
+  return `<div class="banner orange">${SVG(I_FLAME)}<div><b>Piec pali w trybie lato.</b> Sezon grzewczy włączy się sam po 6 godzinach palenia.`
     + `<br><button class="bbtn" id="toheating">Włącz sezon teraz</button></div></div>`;
 }
 
@@ -973,10 +1033,11 @@ function updateNotice() {
 function missedEvents() {
   const seen = +recall('furnace-seen') || 0;
   if (!seen) { store('furnace-seen', tNow()); return []; }
-  const out = [];
+  const out = [], blips = [];
   journal.forEach((e, k) => {
     const [t, type, i] = e;
     if (t <= seen) return;
+    if (type === EV_POWER_CUT && cutSeconds(e) < 60) { blips.push(e); return; }
     if (type === EV_POWER_CUT) { out.push({ e, start: t - cutSeconds(e), end: t }); return; }
     if (!PROBLEM_END[type]) return;
     // An alarm ends with the probe's next alarm change (cleared, or straight from too cold to too hot).
@@ -984,7 +1045,10 @@ function missedEvents() {
     const end = journal.slice(k + 1).find(x => ends.includes(x[1]) && x[2] === i);
     out.push({ e, start: t, end: end ? end[0] : null });
   });
-  return out;
+  // Blips of a few seconds are frequent: one line for all of them.
+  if (blips.length === 1) out.push({ e: blips[0], start: blips[0][0] - cutSeconds(blips[0]), end: blips[0][0] });
+  if (blips.length > 1) out.push({ e: blips[0], start: blips[0][0], end: blips[blips.length - 1][0], blips: blips.length });
+  return out.sort((a, b) => a.start - b.start);
 }
 
 function when(t) {
@@ -1004,8 +1068,10 @@ function missedNotice() {
   if (!list.length) return '';
   return `<div class="banner missed">${SVG(I_INFO)}<div class="mh">Co się działo<small> · od ${when(+recall('furnace-seen'))}</small></div>`
     + `<button class="x" id="missedseen" aria-label="Zamknij">×</button><div class="mlist">${list.map((m, k) => {
-      const [cls, icon, title] = eventView(m.e), [t, type, i] = m.e, sec = m.end - m.start;
-      const range = type === EV_POWER_CUT ? (sec < 60 ? `${when(t)} · ${durCut(sec)}` : `${when(m.start)}–${hhmm(m.end)} · ${dur(sec)}`)
+      const [cls, icon, title0] = eventView(m.e), [t, type, i] = m.e, sec = m.end - m.start;
+      const title = m.blips ? `Chwilowe zaniki prądu: ${m.blips}` : title0;
+      const range = m.blips ? `${when(m.start)} – ${when(m.end)}`
+        : type === EV_POWER_CUT ? (sec < 60 ? `${when(t)} · ${durCut(sec)}` : `${when(m.start)}–${hhmm(m.end)} · ${dur(sec)}`)
         : m.end ? `${when(t)}–${hhmm(m.end)}` : `${when(t)}, trwa nadal`;
       const ext = type === 3 || type === 4 ? extreme(i, t, m.end || tNow(), type === 4) : '';
       return `<button class="mitem" data-k="${k}"><span class="badge ${cls}">${SVG(icon)}</span>`
@@ -1034,11 +1100,14 @@ function renderBadge() {
 function renderHome() {
   const alarms = now ? now.sensors.filter(s => s.alarm || s.fault) : [];
   const warns = now ? now.warnings.map((on, w) => on ? w : -1).filter(w => w >= 0) : [];
-  const count = alarms.length + warns.length;
-  $('#dot').className = 'dot' + (!online ? ' warn' : alarms.length ? ' bad' : warns.length ? ' warn' : '');
-  $('#status').textContent = !online ? 'Brak połączenia – ponawiam' : !now ? 'Łączenie…'
-    : (count ? `${count} ${plural(count, 'alarm', 'alarmy', 'alarmów')}` : 'Wszystko w normie') + (now.settings.heating ? '' : ' · tryb lato');
-  $('#updated').textContent = lastOk ? hhmm(lastOk / 1000) : '';
+  const problems = warns.filter(w => w !== 5), count = alarms.length + problems.length;       // the ash pan is a reminder
+  $('#dot').className = 'dot' + (online !== true ? ' warn' : alarms.length ? ' bad' : problems.length ? ' warn' : '');
+  $('#status').textContent = online === false ? 'Brak połączenia – ponawiam' : !now || online === null ? 'Łączenie…'
+    : (count ? `${count} ${plural(count, 'alarm', 'alarmy', 'alarmów')}` : 'Wszystko w normie')
+      + (warns.includes(5) ? ' · popielnik' : '') + (now.settings.heating ? '' : ' · tryb lato');
+  // When the data is not from this moment, say from when (a date when it is not today).
+  $('#updated').textContent = !lastOk ? '' : online === true ? hhmm(lastOk / 1000) : `dane z ${when(lastOk / 1000)}`;
+  $$('#cards, #overview').forEach(el => el.classList.toggle('stale', online !== true));
   if (!now) return;
 
   let notices = updateNotice();
@@ -1078,15 +1147,15 @@ function renderHome() {
 
 function renderToday() {
   const s = now.sensors, m = midnight(tNow()), rows = [];
-  if (outdoor.current !== null) rows.push(['Na zewnątrz', esc(now.settings.place), `${n1(outdoor.current)}°`, '']);
+  if (outdoorNow() !== null) rows.push(['Na zewnątrz', esc(now.settings.place), `${n1(outdoorNow())}°`, '']);
   if (s[FURNACE] && s[RETURN] && s[FURNACE].temp !== null && s[RETURN].temp !== null)
     rows.push(['Piec → powrót', 'ciepło oddawane do domu', `${n1(s[FURNACE].temp - s[RETURN].temp)}°`, '']);
   rows.push(['Piec pracuje', `dziś powyżej ${n1(burnThreshold())}°`, dur(burnSeconds(m, tNow())), '']);
-  const cuts = outages().filter(c => c.t1 >= tNow() - 7 * 86400);
-  rows.push(['Zaniki prądu', 'ostatnie 7 dni', cuts.length ? `${cuts.length} · ${durShort(cuts.reduce((a, c) => a + c.sec, 0))}` : 'brak', cuts.length ? '' : 'good']);
+  const cuts = outages().filter(c => c.t1 >= m);
+  rows.push(['Zaniki prądu', 'dziś', cuts.length ? `${cuts.length} · ${durShort(cuts.reduce((a, c) => a + c.sec, 0))}` : 'brak', cuts.length ? '' : 'good']);
   const b = s[BOILER];
   if (b && b.temp !== null) {
-    const ready = b.temp >= now.settings.hotWater;
+    const ready = now.hotWater;                        // the same contact Home shows, hysteresis included
     rows.push(['Ciepła woda', `gotowa od ${n1(now.settings.hotWater)}°`, ready ? `gotowa · ${n1(b.temp)}°` : `za zimna · ${n1(b.temp)}°`, ready ? 'good' : 'cold']);
   }
   for (const i of [BOILER, COAL]) {
@@ -1146,6 +1215,9 @@ function lastDays(n) {
   return list;
 }
 
+// The outdoor temperature now - none when Open-Meteo has not answered for 2 hours (no stale value as current).
+const outdoorNow = () => (outdoor.current !== null && Date.now() - outdoor.at < 2 * 3600e3 ? outdoor.current : null);
+
 // Mean outdoor temperature of the day starting at ds (Open-Meteo hourly data: last 31 days, or the forecast).
 function outdoorMean(ds, src = outdoor.hourly) {
   const p = src.filter(q => q[0] >= ds && q[0] < ds + 86400);
@@ -1180,8 +1252,8 @@ function whenAhead(t) {
 // "na ok. 1 dzień 6 godz. · do jutro 14:20" from hours left at the current pace.
 function leftText(h) {
   if (h > 14 * 24) return 'na ponad 2 tygodnie';
-  const d = Math.floor(h / 24), r = Math.round(h % 24);
-  const span = h < 1 ? 'mniej niż godzinę' : d ? `${d} ${plural(d, 'dzień', 'dni', 'dni')}${r ? ` ${r} godz.` : ''}` : `${Math.round(h)} godz.`;
+  const hr = Math.round(h), d = Math.floor(hr / 24), r = hr % 24;
+  const span = h < 1 ? 'mniej niż godzinę' : d ? `${d} ${plural(d, 'dzień', 'dni', 'dni')}${r ? ` ${r} godz.` : ''}` : `${hr} godz.`;
   return `na ok. ${span} · do ${whenAhead(tNow() + h * 3600)}`;
 }
 
@@ -1232,7 +1304,9 @@ function renderWeek() {
   const have = a => a.filter(x => x.burn !== null).length;
   if (!have(cur)) { el.style.display = 'none'; return; }
   el.style.display = '';
+  // Totals are shown; the change compares daily averages, so a week with a missing day is not "14% less".
   const sum = (a, f) => a.reduce((s, x) => s + (f(x) || 0), 0), compare = have(prev) >= 5;
+  const avg = (a, f) => (have(a) ? sum(a, f) / have(a) : 0);
   const delta = (a, b, judge) => {
     if (!compare || !b) return '';
     const p = Math.round((a - b) / b * 100);
@@ -1241,10 +1315,10 @@ function renderWeek() {
   };
   const rows = [];
   const bh = sum(cur, x => x.burn) / 60, pbh = sum(prev, x => x.burn) / 60;
-  rows.push(row('Piec pracował', `${Math.round(bh)} godz.${delta(bh, pbh, false)}`));
+  rows.push(row('Piec pracował', `${Math.round(bh)} godz.${delta(avg(cur, x => x.burn), avg(prev, x => x.burn), false)}`));
   if (coalOn() && now.coal.k !== null) {
     const b = coalBk(sum(cur, x => x.heat)), pb = coalBk(sum(prev, x => x.heat));
-    rows.push(row('Węgiel', `${coalText(b)}${delta(b, pb, true)}`, `≈${kgText(bkKg(b))} · średnio ${bkText(b / have(cur))} dziennie`));
+    rows.push(row('Węgiel', `${coalText(b)}${delta(avg(cur, x => x.heat), avg(prev, x => x.heat), true)}`, `≈${kgText(bkKg(b))} · średnio ${bkText(b / have(cur))} dziennie`));
   }
   const outs = cur.map(x => outdoorMean(x.t)).filter(v => v !== null), pouts = prev.map(x => outdoorMean(x.t)).filter(v => v !== null);
   if (outs.length) {
@@ -1316,7 +1390,7 @@ function refillTime() {
   if (!isFinite(h) || !isFinite(m)) return tNow();
   const d = new Date();
   d.setHours(h, m, 0, 0);
-  if (d / 1000 > tNow() + 60) d.setDate(d.getDate() - 1);
+  if (d / 1000 > tNow() + 15 * 60) d.setDate(d.getDate() - 1);      // a few minutes ahead is a rounded "now"
   return Math.floor(d / 1000);
 }
 
@@ -1347,15 +1421,20 @@ function openRefill() {
   $('#rmodal').classList.add('on');
 }
 
+// The ESP needs a few seconds (it recounts the coal model) - the button stays off so a second tap adds nothing.
 async function saveRefill() {
-  const b = refillAmount(), t = refillTime();
+  const b = refillAmount(), t = Math.min(refillTime(), tNow());
   if (!(b > 0)) return toast('Wpisz, ile wiader dosypałeś');
+  const btn = $('#ryes');
+  if (btn.disabled) return;
+  btn.disabled = true;
   try {
     now = await (await api('/api/refill', { method: 'POST', body: new URLSearchParams({ buckets: b, full: $('#rfull').checked ? 1 : 0, time: t }) })).json();
     $('#rmodal').classList.remove('on');
     refillsAt = 0;
     toast(`Zapisano: ${bkText(b)}, ${when(t)}`);
   } catch (e) { toast('Nie udało się zapisać – brak połączenia z piecem?'); }
+  btn.disabled = false;
   render();
 }
 
@@ -1439,7 +1518,7 @@ function paintDetail() {
   const hi = pts.length ? Math.max(...pts.map(p => first.agg ? p[3] : p[1])) : null;
   const avg = pts.length ? pts.reduce((a, p) => a + (first.agg ? p[2] : p[1]), 0) / pts.length : null;
   const cell = (k, v) => `<div><span>${k}</span><b class="num">${v === null ? '–' : n1(v) + '°'}</b></div>`;
-  const current = shown[0] === OUT ? outdoor.current : s0 ? s0.temp : null;
+  const current = shown[0] === OUT ? outdoorNow() : s0 ? s0.temp : null;
   $('#rstats').innerHTML = cell('MIN', lo) + cell('ŚR.', avg) + cell('MAKS', hi) + cell('TERAZ', current);
 
   const from = Math.max(view.t0, now.oldest || 0), to = Math.min(view.t1, tNow());
@@ -1459,6 +1538,16 @@ function renderBurn() {
     $$('#burn .bars button').forEach(q => q.classList.toggle('sel', q === b));
     $('#burncap').textContent = `${day(x.t)}: ${x.min === null ? 'brak danych' : dur(x.min * 60)}${x.today ? ' (do teraz)' : ''}`;
   };
+}
+
+// Periodic refresh of the charts tab: the line follows the present when it is not zoomed, the readings are new,
+// and nothing is redrawn while a finger reads the chart. The bar charts keep the day that was tapped.
+let scrubbing = false;
+function refreshCharts() {
+  if (!now || !view || scrubbing) return;
+  const span = view.t1 - view.t0, zoomed = Math.abs(span - RANGES[ui.range]) > 60 || view.t1 < tNow() - 600;
+  if (!zoomed) view = { t0: tNow() - span, t1: tNow() };
+  paintDetail();
 }
 
 function renderCharts() {
@@ -1596,12 +1685,12 @@ function renderSettings() {
       + `<div class="warn-desc">Przycisk „Dosypałem” na ekranie głównym, zużycie i koszty, stan zasobnika i ostrzeżenie „Mało węgla”. Wyłączone – wszystko to znika.</div>`
       + fieldRows([['Zasobnik mieści', 'hopperBuckets', st.hopperBuckets || null, 'wiader', true], ['Wiadro waży', 'bucketKg', st.bucketKg, 'kg'], ['Cena węgla', 'coalPrice', st.coalPrice || null, 'zł/t', true]])
       + `<div class="warn-desc">Wagę wiadra najprościej sprawdzić raz na wadze łazienkowej (z wiadrem i bez) – od niej zależą tylko kilogramy i koszty.</div>`
-      + `<div class="warn-desc">${c.k !== null ? `Zużycie wyliczone z ${c.samples} ${plural(c.samples, 'dosypania', 'dosypań', 'dosypań')} do pełna – z każdym kolejnym dokładniej.`
+      + `<div class="warn-desc">${c.k !== null ? `Zużycie wyliczone z ${c.samples + 1} dosypań do pełna – z każdym kolejnym dokładniej.`
         : 'Zużycie liczę z dosypań do pełna – potrzebne są dwa, potem z każdym kolejnym dokładniej.'}</div></div>`;
   }
 
   $('#place').innerHTML = st.lat !== null
-    ? row(esc(st.place || 'Wybrane miejsce'), outdoor.current !== null ? `${n1(outdoor.current)}°` : '–', `<a href="#" id="unplace">Usuń lokalizację</a>`)
+    ? row(esc(st.place || 'Wybrane miejsce'), outdoorNow() !== null ? `${n1(outdoorNow())}°` : '–', `<a href="#" id="unplace">Usuń lokalizację</a>`)
     : row('Nie ustawiono', '', 'Wyszukaj miejscowość, aby widzieć temperaturę na zewnątrz');
 
   const bars = now.rssi > -55 ? 4 : now.rssi > -65 ? 3 : now.rssi > -75 ? 2 : 1;
@@ -1613,18 +1702,24 @@ function renderSettings() {
     + row('Historia co minutę', `${oldest} z 31 dni`, 'starsze dane zastępowane najnowszymi')
     + row('Pamięć na historię', `${Math.round(fs * 100)} %<div class="bar"><i style="width:${Math.round(fs * 100)}%"></i></div>`, `${Math.round(now.fsUsed / 1024)} z ${Math.round(now.fsTotal / 1024)} KB`)
     + row('Wolna pamięć RAM', `${Math.round(now.heap / 1024)} KB`);
-  $('#fwinfo').innerHTML = row('Wersja', `v${now.fw}`, esc(updateText(now.update)));
+  $('#fwinfo').innerHTML = row('Wersja', `v${now.fw}`, esc(updateText(now.update)))
+    + (now.ota ? '' : '<p class="note">Instalacja z pliku jest wyłączona – nie ustawiono hasła OTA (polecenie „O” przez USB). Aktualizacje z internetu działają.</p>');
+  $('#fwup').disabled = !now.ota;
 }
 
 // Saved when a field is left (or Done is tapped) - never half-typed. A comma works as the decimal point.
 async function saveLimits(i) {
   const field = k => $(`#limits input[data-i="${i}"][data-k="${k}"]`).value.trim().replace(',', '.');
   const lo = field('low'), hi = field('high');
-  if ([lo, hi].some(v => v !== '' && !isFinite(+v))) return toast('Wpisz liczbę albo zostaw pole puste');
+  // A typo must not switch the alarm off - the ESP refuses it too.
+  const fail = msg => { toast(msg); render(); };
+  if ([lo, hi].some(v => v !== '' && !isFinite(+v))) return fail('Wpisz liczbę albo zostaw pole puste');
+  if ([lo, hi].some(v => v !== '' && (+v < -55 || +v > 125))) return fail('Próg musi być między −55 a 125°');
+  if (lo !== '' && hi !== '' && +lo >= +hi) return fail('MIN musi być niższy niż MAKS');
   try {
     now = await (await api('/api/limits', { method: 'POST', body: new URLSearchParams({ s: i, low: lo, high: hi }) })).json();
     toast(`${now.sensors[i].name}: zapisano progi`);
-  } catch (e) { toast('Nie udało się zapisać – brak połączenia z piecem?'); }
+  } catch (e) { toast(/out of range/.test(e.message) ? 'Nieprawidłowy próg – nie zapisano' : 'Nie udało się zapisać – brak połączenia z piecem?'); }
   if (!editing($('#limits'))) render();
 }
 
@@ -1632,9 +1727,15 @@ async function saveSetting(fields, message) {
   try {
     now = await (await api('/api/settings', { method: 'POST', body: new URLSearchParams(fields) })).json();
     toast(message || 'Zapisano');
-  } catch (e) { toast('Nie udało się zapisać – brak połączenia z piecem?'); }
+  } catch (e) { toast(/out of range/.test(e.message) ? 'Wartość poza dozwolonym zakresem – nie zapisano' : 'Nie udało się zapisać – brak połączenia z piecem?'); }
   render();
 }
+
+// What the ESP accepts for each number (handleSettings) - checked here first, with the range in the message.
+const SETTING_RANGES = {
+  goOutRate: [1, 60], goOutHorizon: [5, 240], freezeTemp: [-20, 20], burnbackRate: [1, 60], hotWater: [20, 90],
+  hopperBuckets: [0, 500], bucketKg: [1, 50], coalPrice: [0, 20000], lowCoalHours: [1, 96], ashLimit: [1, 200], ashDays: [1, 60],
+};
 
 function onWarnChange(e) {
   const k = e.target.dataset.k;
@@ -1646,6 +1747,8 @@ function onWarnChange(e) {
   }
   const v = e.target.value.trim().replace(',', '.') || (e.target.dataset.empty ? '0' : '');
   if (!v || !isFinite(+v)) { toast('Wpisz liczbę'); return render(); }
+  const r = SETTING_RANGES[k];
+  if (r && (+v < r[0] || +v > r[1])) { toast(`Dozwolone od ${fmtNum(r[0])} do ${fmtNum(r[1])}`); return render(); }
   saveSetting({ [k]: v });
 }
 
@@ -1674,14 +1777,18 @@ function onPlaceInput() {
 function uploadFirmware() {
   const file = $('#fwfile').files[0];
   if (!file) return toast('Najpierw wybierz plik .bin');
-  const xhr = new XMLHttpRequest(), bar = $('#fwprog');
+  const xhr = new XMLHttpRequest(), bar = $('#fwprog'), btn = $('#fwup');
+  if (btn.disabled) return;
+  btn.disabled = true;
   bar.style.display = 'block';
   xhr.upload.onprogress = e => { if (e.lengthComputable) bar.firstElementChild.style.width = (e.loaded / e.total * 100) + '%'; };
   xhr.onload = () => {
-    if (xhr.status === 200) { toast('Zainstalowano – trwa restart…'); setTimeout(() => location.reload(), 25000); }
-    else { toast(xhr.status === 403 ? 'Błędne hasło' : 'Aktualizacja nieudana: ' + xhr.responseText); bar.style.display = 'none'; }
+    if (xhr.status === 200) { toast('Zainstalowano – trwa restart…'); reloadWhenBack(10000); return; }
+    toast(xhr.status === 403 ? 'Błędne hasło' : 'Aktualizacja nieudana: ' + xhr.responseText);
+    bar.style.display = 'none';
+    btn.disabled = false;
   };
-  xhr.onerror = () => { toast('Wysyłanie nieudane'); bar.style.display = 'none'; };
+  xhr.onerror = () => { toast('Wysyłanie nieudane'); bar.style.display = 'none'; btn.disabled = false; };
   const form = new FormData();
   form.append('firmware', file);
   xhr.open('POST', '/api/firmware?pwd=' + encodeURIComponent($('#fwpwd').value));
@@ -1693,18 +1800,19 @@ async function clearHistory() {
   if (!ok) return;
   try {
     await api('/api/clear-history', { method: 'POST' });
-    live = []; series = null; days = []; journal = [];
+    dropCache();
     toast('Historia usunięta – trwa restart…');
-    setTimeout(() => location.reload(), 20000);
+    reloadWhenBack(8000);
   } catch (e) { toast('Nie udało się usunąć historii'); }
 }
 
 // ---------------------------------------------------------------- shell
 
-function render() {
+// periodic: the 15 s / 1 min refreshes - on the charts tab they must not redraw what a finger is reading.
+function render(periodic) {
   renderBadge();
   if (ui.tab === 'home') renderHome();
-  else if (ui.tab === 'charts') renderCharts();
+  else if (ui.tab === 'charts') periodic ? refreshCharts() : renderCharts();
   else if (ui.tab === 'journal') renderJournal();
   else renderSettings();
 }
@@ -1796,14 +1904,16 @@ function setup() {
     refillAmountLabel();
   };
   $('#events').onclick = async e => {
-    if (e.target.id !== 'undorefill') return;
+    if (e.target.id !== 'undorefill' || e.target.disabled) return;
     const r = refills[refills.length - 1];
     if (!r || !await confirmDialog('Cofnąć dosypanie?', `${bkText(r[1] / 10)}, ${when(r[0])} – wpis zniknie z dziennika i z wyliczeń.`)) return;
+    e.target.disabled = true;
     try {
-      now = await (await api('/api/refill-undo', { method: 'POST' })).json();
-      refillsAt = 0;
+      // With its time: the ESP removes only this one, never an older refill on a second tap.
+      now = await (await api('/api/refill-undo', { method: 'POST', body: new URLSearchParams({ time: r[0] }) })).json();
       toast('Cofnięto dosypanie');
-    } catch (err) { toast('Nie udało się – brak połączenia z piecem?'); }
+    } catch (err) { toast(/not the last/.test(err.message) ? 'To dosypanie jest już cofnięte' : 'Nie udało się – brak połączenia z piecem?'); }
+    refillsAt = 0;
     render();
   };
   $('#placeq').addEventListener('input', onPlaceInput);
@@ -1827,7 +1937,7 @@ function setup() {
   document.addEventListener('gesturestart', e => e.preventDefault());
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) saveCache();
-    else refreshNow().then(loadLive).then(render);
+    else refreshNow().then(loadLive).then(() => render(true));
   });
   let rt;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
@@ -1843,7 +1953,7 @@ function setup() {
   saveCache();
   loadOutdoor().then(render);
   setInterval(refreshNow, 15000);
-  setInterval(() => loadLive().then(loadJournal).then(() => { saveCache(); if (ui.tab === 'home') render(); }), 60000);
+  setInterval(() => loadLive().then(loadJournal).then(() => { saveCache(); render(true); }), 60000);
   setInterval(() => loadOutdoor().then(() => { if (ui.tab === 'home') render(); }), 20 * 60e3);
 })();
 </script>

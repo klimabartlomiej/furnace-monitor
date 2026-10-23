@@ -50,7 +50,12 @@ Probe addresses are pinned in `SENSORS` in `PiecTemp.ino`; `diagnostics/PiecTemp
 3. Turn on notifications for the "Alarm ..." accessories.
 
 BOOT button: hold ~5 s and release = new WiFi; hold ~15 s and release = full reset (WiFi, HomeKit pairing and
-history) before moving the device to another home. After 5 minutes without WiFi the hotspot also opens by itself.
+history; the OTA password stays) before moving the device to another home. A router that is down does not open
+the hotspot - the ESP keeps recording and reconnects by itself.
+
+Network OTA and "install from file" in the web app need the OTA password (serial command `O`, typed within 5
+minutes of a boot - serial input is switched off after that); without one they stay off. Updates from GitHub
+need no password.
 
 ## Building and releasing
 

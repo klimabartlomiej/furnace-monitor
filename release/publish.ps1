@@ -30,6 +30,8 @@ if ($LASTEXITCODE) { throw 'compile failed' }
 $bin = "$build\PiecTemp.ino.bin"
 $size = (Get-Item $bin).Length
 if ($size -gt $appSlot) { throw "firmware is $size bytes, the app slot holds $appSlot" }
+# The partition table can only change over USB - warn while there is still room to slim down.
+if ($size -gt $appSlot * 0.97) { Write-Warning ("firmware uses {0:P1} of the app slot - {1:N0} bytes left" -f ($size / $appSlot), ($appSlot - $size)) }
 
 Get-ChildItem $PSScriptRoot -Filter 'firmware-v*.bin' | Remove-Item
 $name = "firmware-v$version.bin"

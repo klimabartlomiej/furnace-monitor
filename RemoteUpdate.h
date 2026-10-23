@@ -4,13 +4,17 @@
 //   manifest: {"version":3,"size":1515752,"sha256":"<64 hex>","url":"https://.../firmware-v3.bin"}
 //
 // The image is accepted only when its SHA-256 matches the manifest. A freshly installed image runs on probation:
-// it is confirmed after CONFIRM_AFTER_MS on the network; if it is not online within ROLLBACK_AFTER_MS, or crashes
-// before that, the bootloader goes back to the previous version (needs #include "SpanRollback.h" in the sketch).
+// it is confirmed after CONFIRM_AFTER_MS on the network; if it never gets online within ROLLBACK_AFTER_MS, or
+// crashes before that, the bootloader goes back to the previous version (needs #include "SpanRollback.h" in the
+// sketch). A version that went back is remembered and not installed again - only a newer one is.
+// After crash restarts in a row the first check comes within seconds, so a fixed release can still get in.
 
 #pragma once
 
+#include <HomeSpan.h>
 #include <HTTPClient.h>
 #include <NetworkClientSecure.h>
+#include <Preferences.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <mbedtls/sha256.h>
@@ -18,18 +22,39 @@
 class RemoteUpdate {
 public:
   static constexpr uint32_t FIRST_CHECK_MS    = 2 * 60 * 1000;    // first check after boot
+  static constexpr uint32_t CRASH_CHECK_MS    = 20 * 1000;        // ... after a crash restart
   static constexpr uint32_t CHECK_INTERVAL_MS = 60 * 60 * 1000;   // then every hour
   static constexpr uint32_t CONFIRM_AFTER_MS  = 60 * 1000;        // online this long -> the new version is good
-  static constexpr uint32_t ROLLBACK_AFTER_MS = 4 * 60 * 1000;    // not online by then -> back to the old version
+  static constexpr uint32_t ROLLBACK_AFTER_MS = 10 * 60 * 1000;   // never online by then -> back to the old version
+  static constexpr uint32_t CRASH_FREE_MS     = 10 * 60 * 1000;   // running this long ends a crash streak
 
   RemoteUpdate(const char* manifestUrl, uint32_t version) : manifestUrl(manifestUrl), version(version) {}
 
   void begin() {
+    store.begin("update", false);
     esp_ota_img_states_t s;
     probation = esp_ota_get_state_partition(esp_ota_get_running_partition(), &s) == ESP_OK && s == ESP_OTA_IMG_PENDING_VERIFY;
     if (probation) Serial.printf("Update: v%u is on probation\n", (unsigned)version);
     else esp_ota_mark_app_valid_cancel_rollback();   // flashed over USB: nothing to verify
+
+    // "trying" is the version installed last; running another one means it went back.
+    uint32_t trying = store.getUInt("trying", 0);
+    if (trying && trying != version) {
+      store.putUInt("bad", trying);
+      Serial.printf("Update: v%u did not work - not installing it again\n", (unsigned)trying);
+    }
+    if (trying && (trying != version || !probation)) store.remove("trying");
+    bad = store.getUInt("bad", 0);
+
+    esp_reset_reason_t r = esp_reset_reason();
+    bool crash = r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT || r == ESP_RST_WDT;
+    crashes = crash ? store.getUChar("crashes", 0) + 1 : 0;
+    if (crashes != store.getUChar("crashes", 0)) store.putUChar("crashes", crashes);
+    if (crashes) Serial.printf("Update: crash restart #%u - checking for a fix soon\n", crashes);
   }
+
+  // Two crash restarts in a row: the sketch skips its heavy start-up work until a fix arrives or it settles.
+  bool crashLoop() const { return crashes >= 2; }
 
   void networkUp() {
     if (!networkUpMs) networkUpMs = millis();
@@ -47,14 +72,19 @@ public:
   }
 
   void loop() {
+    if (crashes && millis() >= CRASH_FREE_MS) {
+      crashes = 0;
+      store.putUChar("crashes", 0);
+    }
     if (probation) {
       if (networkUpMs && millis() - networkUpMs >= CONFIRM_AFTER_MS) {
         esp_ota_mark_app_valid_cancel_rollback();
         probation = false;
         justConfirmed = true;
+        store.remove("trying");
         lastStatus = "v" + String(version) + " installed and confirmed";
         Serial.println("Update: " + lastStatus);
-      } else if (millis() >= ROLLBACK_AFTER_MS) {
+      } else if (!networkUpMs && millis() >= ROLLBACK_AFTER_MS) {
         Serial.println("Update: the new version never got online - rolling back");
         delay(200);
         esp_ota_mark_app_invalid_rollback_and_reboot();
@@ -63,7 +93,8 @@ public:
     }
 
     if (WiFi.status() != WL_CONNECTED) return;
-    bool due = lastCheckMs ? millis() - lastCheckMs >= CHECK_INTERVAL_MS : millis() >= FIRST_CHECK_MS;
+    bool due = lastCheckMs ? millis() - lastCheckMs >= CHECK_INTERVAL_MS
+                           : millis() >= (crashes ? CRASH_CHECK_MS : FIRST_CHECK_MS);
     if (!due && !checkRequested) return;
     checkRequested = false;
     lastCheckMs = millis();
@@ -78,6 +109,9 @@ private:
   bool        checkRequested = false;
   uint32_t    networkUpMs    = 0;
   uint32_t    lastCheckMs    = 0;
+  uint32_t    bad            = 0;    // a version that went back here - skipped
+  uint8_t     crashes        = 0;    // crash restarts in a row
+  Preferences store;
   String      lastStatus     = "not checked yet";
 
   void fail(const String& why) {
@@ -100,6 +134,7 @@ private:
   // manifest, so a corrupted or truncated download can never be flashed.
   static bool open(HTTPClient& http, NetworkClientSecure& client, const String& url) {
     client.setInsecure();
+    client.setHandshakeTimeout(10);   // seconds; the default of 120 would stall the loop past the watchdog
     http.setTimeout(15000);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     return http.begin(client, url);
@@ -120,6 +155,11 @@ private:
     uint32_t available = field(manifest, "version").toInt();
     if (available <= version) {
       lastStatus = "up to date (v" + String(version) + ")";
+      Serial.println("Update: " + lastStatus);
+      return;
+    }
+    if (available == bad) {
+      lastStatus = "v" + String(available) + " did not work here - waiting for a newer one";
       Serial.println("Update: " + lastStatus);
       return;
     }
@@ -153,6 +193,7 @@ private:
     size_t done = 0;
     uint32_t lastData = millis();
     while (done < size && millis() - lastData < 15000) {
+      homeSpan.resetWatchdog();
       size_t avail = stream->available();
       if (!avail) {
         delay(2);
@@ -183,6 +224,7 @@ private:
     }
     if (!Update.end(true)) return fail(String("flash: ") + Update.errorString());
 
+    store.putUInt("trying", available);
     Serial.printf("Update: v%u written, restarting\n", (unsigned)available);
     delay(300);
     ESP.restart();

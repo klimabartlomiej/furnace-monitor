@@ -17,25 +17,29 @@
 //
 // Web app http://furnace.local:8080 (home WiFi only): live cards, charts from 6 hours to years, warnings and
 // limits, event journal. Source in web/index.html, packed into WebApp.h by web/build.ps1.
-// History (HistoryLog.h): every minute for 31 days in its own flash partition; daily summaries for 5 years, the
-// event journal and 14 days of Eve entries on LittleFS. All of them are rings - the newest overwrites the
-// oldest, nothing ever fills up.
+// History (HistoryLog.h): every minute for 31 days in its own flash partition; daily summaries for 2.5-5 years,
+// the event journal and coal refills appended to segment files and 14 days of Eve entries on LittleFS. The
+// newest data always replaces the oldest, nothing ever fills up.
 //
 // WiFi: no credentials in the code. Without stored WiFi the ESP opens the open hotspot AP_SSID; join it with
 // the phone, pick the network and type its password - it is kept in the ESP's flash.
 // To give it a new network:
 //   - hold the BOOT button ~5 s and release it: the stored WiFi is forgotten and the hotspot opens,
 //   - hold it ~15 s and release: FULL reset before moving to another home - WiFi, HomeKit pairing and all
-//     history are erased (limits and warning settings stay),
-//   - or just wait: after WIFI_FALLBACK_MS without WiFi the hotspot opens by itself (old network kept),
+//     history are erased (limits, warning settings and the OTA password stay),
 //   - or Serial "X" (forget WiFi) / "A" (open the hotspot).
+// A router that is down does not open the hotspot: the ESP keeps measuring and recording and reconnects by itself
+// (a hotspot blocks everything for its whole timeout).
+// Serial commands work for SERIAL_WINDOW_MS after a boot (opening the Serial Monitor resets the board); then the
+// input is switched off - a stray byte would otherwise make HomeSpan wait for a newline forever.
 // The blue LED (if the board has one on GPIO2) shows the HomeSpan status.
 //
 // Updates:
 //   - over the internet (any home): bump FW_VERSION, run release/publish.ps1; the ESP checks UPDATE_MANIFEST_URL
 //     every hour (or "@u" / the web app), installs the new version and rolls back if it does not come online,
 //   - on the same WiFi: web app -> Ustawienia -> Oprogramowanie -> install a .bin file, or Arduino IDE -> Tools ->
-//     Port -> "furnace at ..." (both use the OTA password set with the serial command "O").
+//     Port -> "furnace at ..." (both use the OTA password set with the serial command "O"; without a password
+//     set both stay off - HomeSpan would otherwise accept its public default).
 //
 // Arduino IDE: board "ESP32 Dev Module"; the partition table comes from partitions.csv in this folder
 // (2 x 1.69 MB app slots for OTA, 352 KB minute ring, 16 KB alive marks, 208 KB LittleFS). A partition change
@@ -61,7 +65,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 9;                    // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 10;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -71,21 +75,24 @@ const char* AP_PASSWORD  = "";                              // empty = open hots
 const char* TIME_ZONE    = "CET-1CEST,M3.5.0,M10.5.0/3";    // Poland; decides where a day starts
 
 constexpr uint16_t AP_TIMEOUT_S       = 15 * 60;         // hotspot gives up (and restarts) after this long
-constexpr uint32_t WIFI_FALLBACK_MS   = 5 * 60 * 1000;   // no WiFi for this long -> open the hotspot
 constexpr uint32_t WIFI_RESET_HOLD_MS = 5000;            // hold BOOT this long to forget the WiFi
 constexpr uint32_t FULL_RESET_HOLD_MS = 15000;           // ... this long to also forget HomeKit and the history
+constexpr uint32_t SERIAL_WINDOW_MS   = 5 * 60 * 1000;   // serial commands accepted this long after a boot
+constexpr uint16_t WATCHDOG_S         = 60;              // a loop stuck this long restarts the ESP
 constexpr uint32_t HISTORY_INTERVAL_S = 600;             // one Eve entry per 10 min, like Eve's own sensors
-constexpr uint32_t DAILY_CAPACITY     = 5 * 366;         // daily summaries (5 years)
-constexpr uint32_t EVENT_CAPACITY     = 1024;            // event journal entries
-constexpr uint32_t REFILL_CAPACITY    = 512;             // coal refills kept
+constexpr uint32_t DAILY_CAPACITY     = 5 * 366;         // daily summaries kept at most (5 years; at least half)
+constexpr uint32_t EVENT_CAPACITY     = 1024;            // event journal entries (at most; at least half)
+constexpr uint32_t REFILL_CAPACITY    = 512;             // coal refills kept (at most; at least half)
 constexpr uint8_t  COAL_INTERVALS     = 10;              // latest refill-to-refill intervals the kg factor averages
 constexpr float    COAL_MIN_HEAT      = 600;             // degree-minutes an interval needs to count (10 degrees, 1 h)
 constexpr float    HOT_WATER_HYSTERESIS = 3;             // degrees below "ready" before the hot-water contact closes
-constexpr uint16_t SEASON_AUTO_MIN    = 120;             // minutes of burning that end summer mode by themselves
+constexpr uint16_t SEASON_AUTO_MIN    = 6 * 60;          // minutes of burning that end summer mode by themselves -
+                                                         // longer than firing it up for hot water in summer
 constexpr uint32_t STALL_WATCH_MS     = 3 * 3600 * 1000; // after a power cut, how long a cooling furnace is watched
-constexpr float    STALL_DROP         = 5;               // ... it counts as stalled once this much cooler
-constexpr float    STALL_SLOPE        = -3;              // ... and still falling this fast (degrees/hour)
-constexpr uint8_t  FS_LAYOUT          = 5;               // bump when the history files change shape (wipes them once)
+constexpr float    STALL_DROP         = 10;              // ... it counts as stalled once this much cooler (an idling
+constexpr float    STALL_SLOPE        = -4;              // ... controller drops a few degrees) and still falling this
+                                                         // fast (degrees/hour)
+constexpr uint8_t  FS_LAYOUT          = 6;               // bump when the history files change shape (wipes them once)
 constexpr uint32_t ALIVE_INTERVAL_S   = 2;               // "still alive" mark - how exactly a power cut is timed
 constexpr uint8_t  TREND_MINUTES      = 30;              // window of the trend the warnings look at
 constexpr uint8_t  BOOT_BUTTON_PIN    = 0;               // the BOOT button on the board
@@ -227,9 +234,9 @@ Preferences             prefs;
 RemoteUpdate            updater(UPDATE_MANIFEST_URL, FW_VERSION);
 MinuteLog<SENSOR_COUNT> minutes("minutes");                 // partition label in partitions.csv (31 days)
 AliveLog                alive("alive");
-RingFile<DayRecord>     daily("/daily.bin", DAILY_CAPACITY);
-RingFile<EventRecord>   events("/events.bin", EVENT_CAPACITY);
-RingFile<RefillRecord>  refills("/refills.bin", REFILL_CAPACITY);
+SegmentLog<DayRecord>   daily("/day", DAILY_CAPACITY / 2);
+SegmentLog<EventRecord> events("/ev", EVENT_CAPACITY / 2);
+SegmentLog<RefillRecord> refills("/fill", REFILL_CAPACITY / 2);
 Settings                settings;
 SensorState             state[SENSOR_COUNT];
 WarningState            warnings[WARN_COUNT];
@@ -266,13 +273,13 @@ float    stallFrom         = NAN;               // furnace temperature at the fi
 
 uint32_t lastRequestMs     = 0;
 uint32_t lastRequestMinute = 0;
-uint32_t lastWifiOkMs      = 0;
 uint32_t bootPressedMs     = 0;
 uint8_t  resetLevel        = 0;   // 1 = forget WiFi, 2 = full reset; acted on when BOOT is released
 uint32_t lastHistorySlot   = 0;
 uint32_t currentDay        = 0;   // local midnight (Unix time) of the day being summarized
 bool     conversionPending = false;
 bool     webStarted        = false;
+bool     serialClosed      = false;   // serial input switched off after SERIAL_WINDOW_MS
 
 bool clockSet(time_t t) { return t >= 1700000000; }
 
@@ -593,16 +600,18 @@ float trendPerHour(size_t i) {
   return (n < 10 || d == 0) ? NAN : (n * sxy - sx * sy) / d * 60;
 }
 
-// A warning switches on after its condition held for holdOn minutes and off after it was gone for holdOff minutes;
-// a warning switched off in the settings clears at once. While the condition cannot be judged (`known` false - too
-// few readings for a trend in the first minutes after a restart) the warning keeps its state.
-void setWarning(WarningId w, bool condition, bool known, uint8_t holdOn, uint8_t holdOff, bool enabled, float value) {
+// A warning switches on after its condition held for holdOn minutes and off after it was gone for holdOff minutes
+// (counted only on the minute's reading, `tick`); a warning switched off in the settings clears at once. While the
+// condition cannot be judged (`known` false - too few readings for a trend after a restart, no clock yet) the
+// warning keeps its state.
+void setWarning(WarningId w, bool condition, bool known, uint8_t holdOn, uint8_t holdOff, bool enabled, float value,
+                bool tick) {
   WarningState& s = warnings[w];
   bool before = s.active;
   if (!enabled) {
     s.active = false;
     s.pending = s.calm = 0;
-  } else if (!known) {
+  } else if (!known || !tick) {
     return;
   } else if (condition) {
     s.calm = 0;
@@ -627,8 +636,10 @@ float upTo320(float v) {
   return isnan(v) ? NAN : fminf(v, 320);
 }
 
-void evaluateWarnings() {
-  // Summer mode: the warnings about burning stay quiet, the freeze warning and hot water keep working.
+// tick = the minute's reading (advances the hold timers); other callers (settings, refills) only apply what was
+// switched off.
+void evaluateWarnings(bool tick = false) {
+  // Summer mode: the warnings about burning stay quiet; freezing, embers in the hopper and hot water keep working.
   const bool heating = settings.heating;
 
   // Furnace dying out: only while it still burns (above its min limit, or 30 degrees without one).
@@ -647,7 +658,7 @@ void evaluateWarnings() {
       }
     }
   }
-  setWarning(WARN_GOING_OUT, dying, !burning || !isnan(slope), 5, 10, heating && settings.goOutOn, f.lastGood);
+  setWarning(WARN_GOING_OUT, dying, !burning || !isnan(slope), 5, 10, heating && settings.goOutOn, f.lastGood, tick);
 
   // Freezing: the coldest water probe, with one degree of hysteresis.
   float coldest = NAN;
@@ -655,31 +666,37 @@ void evaluateWarnings() {
     if (SENSORS[i].water && !state[i].faulty && !isnan(state[i].lastGood))
       coldest = isnan(coldest) ? state[i].lastGood : fminf(coldest, state[i].lastGood);
   bool freezing = !isnan(coldest) && coldest < settings.freezeTemp + (warnings[WARN_FREEZE].active ? 1 : 0);
-  setWarning(WARN_FREEZE, freezing, !isnan(coldest), 2, 2, settings.freezeOn, coldest);
+  setWarning(WARN_FREEZE, freezing, !isnan(coldest), 2, 2, settings.freezeOn, coldest, tick);
 
-  // Embers creeping into the coal hopper: its temperature climbing fast.
+  // Embers creeping into the coal hopper: its temperature climbing fast. Also in summer mode (a fire for hot
+  // water), and a probe that dies - embers may have destroyed it - keeps the warning as it was.
   float hopper = trendPerHour(COAL_HOPPER);
   bool burnback = !isnan(hopper) && hopper >= settings.burnbackRate;
-  setWarning(WARN_BURNBACK, burnback, !isnan(hopper) || state[COAL_HOPPER].faulty, 3, 10, heating && settings.burnbackOn,
-             state[COAL_HOPPER].lastGood);
+  setWarning(WARN_BURNBACK, burnback, !isnan(hopper) && !state[COAL_HOPPER].faulty, 3, 10, settings.burnbackOn,
+             state[COAL_HOPPER].lastGood, tick);
 
   // Low coal: at the current pace the hopper estimate runs out within lowCoalHours, or is nearly empty
   // (half again as long before it clears, so a wobbling pace does not flap it). Logged with the buckets left.
   float lowHours = settings.lowCoalHours * (warnings[WARN_LOW_COAL].active ? 1.5f : 1);
+  // Unknown while there is a model but no estimate yet (after a power cut, before the clock).
   bool lowCoal = !isnan(coalLevel) && (coalHoursLeft < lowHours || coalLevel < settings.hopperBuckets * 0.05f);
-  setWarning(WARN_LOW_COAL, lowCoal, true, 2, 5, heating && settings.coalOn && settings.lowCoalOn, upTo320(coalLevel));
+  bool coalKnown = !isnan(coalLevel) || isnan(coalK) || settings.hopperBuckets <= 0;
+  setWarning(WARN_LOW_COAL, lowCoal, coalKnown, 2, 5, heating && settings.coalOn && settings.lowCoalOn, upTo320(coalLevel),
+             tick);
 
   // Stalled after a power cut: it burned when the power came back and keeps cooling - many furnace controllers
-  // need a hand after a cut. Clears once the furnace warms up again.
+  // need a hand after a cut. Clears once the furnace warms up again; the watch ends after STALL_WATCH_MS.
+  if (stallWatch && millis() >= STALL_WATCH_MS && !warnings[WARN_STALLED].active) stallWatch = false;
   bool stalled;
   if (warnings[WARN_STALLED].active) stalled = !(slope >= 2) && !(f.lastGood >= stallFrom - 1);
   else stalled = stallWatch && millis() < STALL_WATCH_MS && f.lastGood <= stallFrom - STALL_DROP && slope <= STALL_SLOPE;
-  setWarning(WARN_STALLED, stalled, !isnan(slope) || !stallWatch, 3, 10, heating && settings.stalledOn, f.lastGood);
+  setWarning(WARN_STALLED, stalled, !isnan(slope) || !stallWatch, 3, 10, heating && settings.stalledOn, f.lastGood, tick);
 
   // Ash pan: due after ashLimit buckets of coal (once the coal use is learnt) or ashDays since it was emptied.
+  // Unknown without a clock (right after a power cut), so it does not close and reopen.
   time_t now = time(nullptr);
   bool ashDue = ashAt && clockSet(now) && ((now - ashAt) / 86400.0f >= settings.ashDays || ashBuckets >= settings.ashLimit);
-  setWarning(WARN_ASH, ashDue, true, 1, 1, heating && settings.coalOn && settings.ashOn, upTo320(ashBuckets));
+  setWarning(WARN_ASH, ashDue, clockSet(now), 1, 1, heating && settings.coalOn && settings.ashOn, upTo320(ashBuckets), tick);
 
   // Hot water ready: not a problem, just a contact for a push when the boiler is warm enough.
   const SensorState& b = state[BOILER];
@@ -713,6 +730,23 @@ float heatBetween(uint32_t from, uint32_t to, uint32_t* covered = nullptr) {
     heat += heatOf(r);
   });
   if (covered) *covered = n;
+  return heat;
+}
+
+// Degree-minutes from `from` to the newest minute: the minute log where it reaches (from logStart), the daily
+// summaries before that - a share of a day by the hours it overlaps. A hopper last filled more than 31 days ago
+// still has a level.
+float heatSince(uint32_t from, uint32_t logStart) {
+  float heat = 0;
+  if (from < logStart) {
+    daily.forEach(0, [&](const DayRecord& d) {
+      uint32_t dayStart = d.time, dayEnd = nextMidnight(dayStart);   // copies: a packed field binds to no reference
+      uint32_t a = max(dayStart, from), b = min(dayEnd, logStart);
+      if (b > a) heat += d.heat * (float)(b - a) / (dayEnd - dayStart);
+    });
+    from = logStart;
+  }
+  if (minutes.newest()) heat += heatBetween(from, (minutes.newest() + 1) * 60);
   return heat;
 }
 
@@ -766,8 +800,8 @@ void recomputeCoal() {
   }
   lastFullAt = prevFull;
   addedSinceFull = added;
-  heatSinceFull = prevFull && prevFull >= logStart ? heatBetween(prevFull, (minutes.newest() + 1) * 60) : NAN;
-  heatSinceAsh = ashAt && ashAt >= logStart ? heatBetween(ashAt, (minutes.newest() + 1) * 60) : ashAt ? NAN : 0;
+  heatSinceFull = prevFull ? heatSince(prevFull, logStart) : NAN;
+  heatSinceAsh = ashAt ? heatSince(ashAt, logStart) : 0;
 }
 
 // Hopper level, burning pace (last 24 h of readings) and time left - every 10 minutes, after a refill and after
@@ -828,7 +862,7 @@ void readAll() {
   burningMinutes = !isnan(furnace) && furnace >= burnThreshold() ? min(burningMinutes + 1, 60000) : 0;
   if (!settings.heating && burningMinutes >= SEASON_AUTO_MIN) setHeating(true, true);
   pushRecent(values);
-  evaluateWarnings();
+  evaluateWarnings(true);
 }
 
 // ------------------------------------------------------------------ history
@@ -837,6 +871,7 @@ uint32_t localMidnight(time_t t) {
   struct tm lt;
   localtime_r(&t, &lt);
   lt.tm_hour = lt.tm_min = lt.tm_sec = 0;
+  lt.tm_isdst = -1;                       // midnight may be on the other side of a clock change than `t`
   return mktime(&lt);
 }
 
@@ -911,10 +946,13 @@ void logHistory() {
   if (today == currentDay) return;
   if (!currentDay) {
     // First time after boot: summarize the days missed while the device was off (as far as the minute log goes).
+    // Skipped after crash restarts in a row - this is the first heavy work after boot.
     uint32_t last = daily.newestTime();
     uint32_t d = last ? nextMidnight(last) : localMidnight((time_t)minutes.oldest() * 60);
-    for (uint8_t guard = 0; minutes.newest() && d < today && guard < 32; guard++, d = nextMidnight(d))
+    for (uint8_t guard = 0; minutes.newest() && d < today && guard < 32 && !updater.crashLoop(); guard++, d = nextMidnight(d)) {
+      homeSpan.resetWatchdog();
       summarizeDay(d, nextMidnight(d));
+    }
   } else {
     summarizeDay(currentDay, today);
   }
@@ -1012,9 +1050,18 @@ float parseNumber(String v) {
   return v.length() ? v.toFloat() : NAN;
 }
 
-float parseLimit(const String& v) {
+// A limit from the web app: empty = off (NAN). False for anything a probe cannot show - a typo must never switch
+// an alarm off.
+bool parseLimit(String v, float& out) {
+  v.trim();
+  if (!v.length()) {
+    out = NAN;
+    return true;
+  }
   float f = parseNumber(v);
-  return (f < -55 || f > 125) ? NAN : f;
+  if (isnan(f) || f < -55 || f > 125) return false;
+  out = f;
+  return true;
 }
 
 // ------------------------------------------------------------------ web app + API
@@ -1045,8 +1092,14 @@ void handleManifest() {
   server.send_P(200, "application/manifest+json", WEBAPP_MANIFEST);
 }
 
-// Current readings, trends, limits, warnings, settings and device health.
+// Current readings, trends, limits, warnings, settings and device health. GET t = the phone's Unix time: used
+// only while NTP has not set the clock (WiFi up but no internet) - so the history keeps recording.
 void handleNow() {
+  if (!clockSet(time(nullptr)) && clockSet(argOr("t", 0))) {
+    timeval tv = {(time_t)argOr("t", 0), 0};
+    settimeofday(&tv, nullptr);
+    Serial.println("Clock set from the web app - no NTP");
+  }
   String j;
   j.reserve(2600);
   j += "{\"time\":";     j += (uint32_t)time(nullptr);
@@ -1058,6 +1111,7 @@ void handleNow() {
   j += ",\"fsTotal\":";  j += (uint32_t)LittleFS.totalBytes();
   j += ",\"oldest\":";   j += minutes.oldest() * 60;
   j += ",\"fw\":";       j += FW_VERSION;
+  j += ",\"ota\":";      j += otaHashStored().length() ? "true" : "false";
   j += ",\"update\":\""; j += updater.status();
   j += "\",\"sensors\":[";
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
@@ -1265,25 +1319,35 @@ void handleLimits() {
     return;
   }
   SensorState& s = state[i];
-  s.low  = parseLimit(server.arg("low"));
-  s.high = parseLimit(server.arg("high"));
+  float low, high;
+  if (!parseLimit(server.arg("low"), low) || !parseLimit(server.arg("high"), high) || low >= high) {
+    server.send(400, "text/plain", "out of range");
+    return;
+  }
+  s.low  = low;
+  s.high = high;
   prefs.putFloat(prefKey("lo", i).c_str(), s.low);
   prefs.putFloat(prefKey("hi", i).c_str(), s.high);
   rejudgeAlarm(i);
   handleNow();
 }
 
-// POST any of the Settings fields (booleans as 1/0). Answers with the same JSON as /api/now.
+// POST any of the Settings fields (booleans as 1/0). Answers with the same JSON as /api/now, or 400 "out of range:
+// <field>" with nothing changed when a number is outside what the field allows.
 void handleSettings() {
+  String bad;
   auto flag = [](const char* k, bool& v) { if (server.hasArg(k)) v = server.arg(k) == "1"; };
-  auto number = [](const char* k, float& v, float lo, float hi) {
+  auto number = [&bad](const char* k, float& v, float lo, float hi) {
     if (!server.hasArg(k)) return;
     float f = parseNumber(server.arg(k));
     if (!isnan(f) && f >= lo && f <= hi) v = f;
+    else bad = k;
   };
   flag("goOutOn", settings.goOutOn);
   number("goOutRate", settings.goOutRate, 1, 60);
-  if (server.hasArg("goOutHorizon")) settings.goOutHorizon = constrain(server.arg("goOutHorizon").toInt(), 5, 240);
+  float horizon = settings.goOutHorizon;
+  number("goOutHorizon", horizon, 5, 240);
+  settings.goOutHorizon = lroundf(horizon);
   flag("freezeOn", settings.freezeOn);
   number("freezeTemp", settings.freezeTemp, -20, 20);
   flag("burnbackOn", settings.burnbackOn);
@@ -1299,15 +1363,22 @@ void handleSettings() {
   flag("ashOn", settings.ashOn);
   number("ashLimit", settings.ashLimit, 1, 200);
   number("ashDays", settings.ashDays, 1, 60);
-  if (server.hasArg("heating")) setHeating(server.arg("heating") == "1", false);
   if (server.hasArg("lat") && server.hasArg("lon")) {
-    settings.lat = parseNumber(server.arg("lat"));
-    settings.lon = parseNumber(server.arg("lon"));
+    float lat = parseNumber(server.arg("lat")), lon = parseNumber(server.arg("lon"));   // both empty = no location
+    if (isnan(lat) != isnan(lon) || fabsf(lat) > 90 || fabsf(lon) > 180) bad = "lat";
+    settings.lat = lat;
+    settings.lon = lon;
     String place = server.arg("place");
     place.replace("\"", "");
     place.replace("\\", "");
     strlcpy(settings.place, place.c_str(), sizeof(settings.place));
   }
+  if (bad.length()) {
+    loadSettings();                                        // back to what is in flash - nothing half-applied
+    server.send(400, "text/plain", "out of range: " + bad);
+    return;
+  }
+  if (server.hasArg("heating")) setHeating(server.arg("heating") == "1", false);
   saveSettings();
   if (clockSet(time(nullptr))) updateCoal(time(nullptr));
   evaluateWarnings();
@@ -1350,9 +1421,13 @@ void handleRefill() {
   coalChanged();
 }
 
-// POST: takes back the refill entered last. Answers /api/now.
+// POST time: takes back the refill entered last - only if it is the one with that time (a second tap must not
+// remove an older one). Answers /api/now, or 409.
 void handleRefillUndo() {
-  refills.removeLast();
+  if (!refills.removeLast(argOr("time", 0))) {
+    server.send(409, "text/plain", "not the last refill");
+    return;
+  }
   coalChanged();
 }
 
@@ -1393,23 +1468,43 @@ void handleClearHistory() {
   ESP.restart();
 }
 
-// The web app's "install from file" uses the network-OTA password: HomeSpan keeps its SHA-256 in NVS OTA/OTADATA.
-bool otaPasswordMatches(const String& password) {
+// The network-OTA password: HomeSpan keeps its hash in NVS "OTA"/"OTADATA" (serial command "O") and its factory
+// reset erases it - after which HomeSpan would accept its public default. The hash is mirrored in the sketch's own
+// namespace, which the factory reset keeps, and put back before HomeSpan starts.
+String otaHashStored() {
   char stored[65] = "";
   size_t len = sizeof(stored);
   nvs_handle_t nvs;
-  bool found = false;
-  if (nvs_open("OTA", NVS_READONLY, &nvs) == ESP_OK) {
-    found = nvs_get_str(nvs, "OTADATA", stored, &len) == ESP_OK;
-    nvs_close(nvs);
-  }
-  if (!found) return password == DEFAULT_OTA_PASSWORD;
+  if (nvs_open("OTA", NVS_READONLY, &nvs) != ESP_OK) return "";
+  if (nvs_get_str(nvs, "OTADATA", stored, &len) != ESP_OK) stored[0] = 0;
+  nvs_close(nvs);
+  return stored;
+}
 
+void keepOtaPassword() {
+  String hash = otaHashStored();
+  if (hash.length()) {
+    if (prefs.getString("otaHash", "") != hash) prefs.putString("otaHash", hash);
+    return;
+  }
+  hash = prefs.getString("otaHash", "");
+  nvs_handle_t nvs;
+  if (!hash.length() || nvs_open("OTA", NVS_READWRITE, &nvs) != ESP_OK) return;
+  nvs_set_str(nvs, "OTADATA", hash.c_str());
+  nvs_commit(nvs);
+  nvs_close(nvs);
+  Serial.println("OTA password restored after a factory reset");
+}
+
+// The web app's "install from file" uses the network-OTA password; without one set, nothing is accepted.
+bool otaPasswordMatches(const String& password) {
+  String stored = otaHashStored();
+  if (!stored.length()) return false;
   uint8_t digest[32];
   mbedtls_sha256((const uint8_t*)password.c_str(), password.length(), digest, 0);
   char hex[65];
   for (int i = 0; i < 32; i++) sprintf(hex + 2 * i, "%02x", digest[i]);
-  return String(stored).equalsIgnoreCase(hex);
+  return stored.equalsIgnoreCase(hex);
 }
 
 String firmwareUploadError;
@@ -1452,6 +1547,9 @@ void onNetworkUp(int count) {
   WiFi.setSleep(false);
   updater.networkUp();
   if (webStarted) return;
+  // From the first connection on, a loop stuck for WATCHDOG_S restarts the ESP. Not earlier: the setup hotspot
+  // (no WiFi stored) legitimately blocks for its whole timeout.
+  homeSpan.enableWatchdog(WATCHDOG_S);
   static const char* headers[] = {"If-None-Match"};
   server.collectHeaders(headers, 1);
   server.on("/", HTTP_GET, handleApp);
@@ -1509,22 +1607,12 @@ void checkBootButton() {
   }
 }
 
-// The stored network is gone (new router, new password): open the hotspot instead of retrying forever.
-// If nobody uses it, HomeSpan reboots after AP_TIMEOUT_S and tries the old network again.
-void checkWifiFallback() {
-  if (WiFi.status() == WL_CONNECTED) {
-    lastWifiOkMs = millis();
-  } else if (millis() - lastWifiOkMs >= WIFI_FALLBACK_MS) {
-    Serial.println("No WiFi for too long - opening the setup hotspot");
-    lastWifiOkMs = millis();
-    homeSpan.processSerialCommand("A");   // blocks until the hotspot is used or times out
-  }
-}
-
 // ------------------------------------------------------------------ setup / loop
 
 void setup() {
   Serial.begin(115200);
+  setenv("TZ", TIME_ZONE, 1);     // local days from the first second - after a soft restart the clock is already set
+  tzset();
   snprintf(firmwareRevision, sizeof(firmwareRevision), "%u", (unsigned)FW_VERSION);
   updater.begin();
 
@@ -1540,7 +1628,8 @@ void setup() {
   coalK = prefs.getFloat("coalK", NAN);
   coalSamples = prefs.getUShort("coalN", 0);
   ashAt = prefs.getUInt("ashAt", 0);
-  recomputeCoal();
+  if (!updater.crashLoop()) recomputeCoal();      // after crash restarts: no heavy work until a fix gets in
+  keepOtaPassword();
   bootReason = readBootReason();
   // The power went within ALIVE_INTERVAL_S after the last mark (without marks: within the minute after the last
   // stored one). A power cut is journaled as the cut itself, other starts as EV_BOOT.
@@ -1561,7 +1650,8 @@ void setup() {
   homeSpan.setApTimeout(AP_TIMEOUT_S);
   homeSpan.enableAutoStartAP();              // no stored WiFi -> open the setup hotspot
   homeSpan.setHostNameSuffix("");            // host name is exactly DEVICE_NAME
-  homeSpan.enableOTA();                      // password lives in flash (CLI "O"), not in this public code
+  if (otaHashStored().length()) homeSpan.enableOTA();   // password lives in flash (CLI "O"), not in this public code
+  else Serial.println("No OTA password set (serial \"O\") - network OTA and the web upload stay off");
   homeSpan.setConnectionCallback(onNetworkUp);
   homeSpan.begin(Category::Bridges, "Czujniki pieca", DEVICE_NAME);
   createAccessories();
@@ -1569,15 +1659,18 @@ void setup() {
   new SpanUserCommand('a', "- list DS18B20 probes on the bus", [](const char*) { Serial.print(busReport()); });
   new SpanUserCommand('u', "- check for a firmware update now", [](const char*) { updater.requestCheck(); });
 
-  lastWifiOkMs  = millis();
   lastRequestMs = millis() - READ_INTERVAL_MS;   // first reading right away
 }
 
 void loop() {
+  homeSpan.resetWatchdog();
   homeSpan.poll();
   if (webStarted) server.handleClient();
   checkBootButton();
-  checkWifiFallback();
+  if (!serialClosed && millis() >= SERIAL_WINDOW_MS) {
+    homeSpan.setSerialInputDisable(true);
+    serialClosed = true;
+  }
   logHistory();
   updater.loop();
   if (updater.takeJustConfirmed()) logEvent(EV_UPDATED, 0, FW_VERSION);

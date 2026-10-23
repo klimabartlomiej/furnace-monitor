@@ -1,14 +1,15 @@
 // History for the web app:
 //   MinuteLog - one record per minute for all probes, a month of it, in its own flash partition
 //   AliveLog  - a "still alive" mark every few seconds, in its own flash partition, to time power cuts
-//   RingFile  - fixed-size records in a ring file on LittleFS (daily summaries for 5 years, the event journal)
-// Everything is a ring: when full, the newest record overwrites the oldest, so the space never runs out.
+//   SegmentLog - fixed-size records appended to two files on LittleFS (daily summaries, journal, coal refills)
+// Nothing grows without bound: the newest data replaces the oldest, so the space never runs out.
 
 #pragma once
 
 #include <LittleFS.h>
 #include <esp_partition.h>
 #include <math.h>
+#include <vector>
 
 constexpr int16_t NO_VALUE = INT16_MIN;     // a probe without a reading in that minute / day
 
@@ -36,23 +37,23 @@ public:
     sectors = part->size / SECTOR;
     capacity = sectors * SLOTS;
 
-    int32_t top = -1;
+    int32_t top = -1, prev = -1;
+    uint32_t prevBase = 0;
     for (uint32_t s = 0; s < sectors; s++) {
       Header h;
       esp_partition_read(part, s * SECTOR, &h, sizeof(h));
       if (h.magic != MAGIC) continue;
       if (!first || h.base < first) first = h.base;
-      if (top < 0 || h.base > topBase) { top = s; topBase = h.base; }
-    }
-    if (top >= 0) {
-      Raw buf[32];
-      for (uint32_t k = 0; k < SLOTS; k += 32) {
-        uint32_t n = min((uint32_t)32, SLOTS - k);
-        esp_partition_read(part, top * SECTOR + sizeof(Header) + k * sizeof(Raw), buf, n * sizeof(Raw));
-        for (uint32_t i = 0; i < n; i++)
-          if (written(buf[i])) last = topBase + k + i;
+      if (top < 0 || h.base > topBase) {
+        prev = top; prevBase = topBase;
+        top = s; topBase = h.base;
+      } else if (prev < 0 || h.base > prevBase) {
+        prev = s; prevBase = h.base;
       }
     }
+    if (top >= 0) last = lastWritten(top, topBase);
+    // Power gone right after a sector was started, before its first record: the newest data is in the one before.
+    if (!last && prev >= 0) last = lastWritten(prev, prevBase);
     return true;
   }
 
@@ -137,6 +138,19 @@ private:
     return false;
   }
 
+  // Minute of the last written slot of a sector, 0 when it has none.
+  uint32_t lastWritten(uint32_t sector, uint32_t base) const {
+    uint32_t found = 0;
+    Raw buf[32];
+    for (uint32_t k = 0; k < SLOTS; k += 32) {
+      uint32_t n = min((uint32_t)32, SLOTS - k);
+      esp_partition_read(part, sector * SECTOR + sizeof(Header) + k * sizeof(Raw), buf, n * sizeof(Raw));
+      for (uint32_t i = 0; i < n; i++)
+        if (written(buf[i])) found = base + k + i;
+    }
+    return found;
+  }
+
   const char*            label;
   const esp_partition_t* part     = nullptr;
   uint32_t               sectors  = 0;
@@ -195,91 +209,105 @@ private:
   uint32_t               next  = 0;
 };
 
-// Fixed-size records whose first field is a uint32 `time`, in a ring file [Header][capacity x T].
-template <typename T> class RingFile {
+// Fixed-size records whose first field is a uint32 `time`, appended to two segment files <base>0.bin and
+// <base>1.bin. LittleFS rewrites a file from the point of a write to its end (copy on write), so the old ring
+// with its header at the front copied the whole file twice per record and ran out of room on the 62 KB daily
+// file. An append touches only the last block. When the segment being written is full, the other one is emptied
+// and writing goes on there - between perSegment and 2 x perSegment records are kept.
+template <typename T> class SegmentLog {
 public:
-  RingFile(const char* path, uint32_t capacity) : path(path), capacity(capacity) {}
+  SegmentLog(const char* base, uint32_t perSegment) : base(base), per(perSegment) {}
 
   void begin() {
-    File f = LittleFS.open(path, "r");
-    bool ok = f && f.size() == sizeof(Header) + (size_t)capacity * sizeof(T)
-              && f.read((uint8_t*)&h, sizeof(h)) == sizeof(h) && h.magic == MAGIC && h.capacity == capacity && h.recordSize == sizeof(T);
-    if (f) f.close();
-    if (ok) return;
-    h = {MAGIC, (uint32_t)sizeof(T), capacity, 0};
-    f = LittleFS.open(path, "w");
-    if (!f) return;
-    f.write((const uint8_t*)&h, sizeof(h));
-    uint8_t zeros[256] = {};
-    for (size_t left = (size_t)capacity * sizeof(T); left;) {
-      size_t n = min(left, sizeof(zeros));
-      f.write(zeros, n);
-      left -= n;
+    for (uint8_t s = 0; s < 2; s++) {
+      File f = LittleFS.open(path(s), "r");
+      size_t size = f ? f.size() : 0;
+      if (f) f.close();
+      count[s] = size / sizeof(T);
+      if (size % sizeof(T)) rewrite(s, count[s]);         // a record cut short (no room) - drop it
+      last[s] = count[s] ? at(s, count[s] - 1).time : 0;
     }
-    f.close();
+    cur = last[1] > last[0] ? 1 : 0;
   }
 
   void add(const T& r) {
-    File f = LittleFS.open(path, "r+");
+    if (count[cur] >= per) {                              // full: the older segment makes room
+      cur ^= 1;
+      LittleFS.remove(path(cur));
+      count[cur] = last[cur] = 0;
+    }
+    File f = LittleFS.open(path(cur), "a");
     if (!f) return;
-    f.seek(sizeof(Header) + (h.count % capacity) * sizeof(T));
-    f.write((const uint8_t*)&r, sizeof(r));
-    h.count++;
-    f.seek(0);
-    f.write((const uint8_t*)&h, sizeof(h));
+    size_t n = f.write((const uint8_t*)&r, sizeof(T));
     f.close();
+    if (n != sizeof(T)) {
+      if (n) rewrite(cur, count[cur]);
+      return;
+    }
+    count[cur]++;
+    last[cur] = r.time;
   }
 
-  // Drops the record added last (one entered by mistake). False when empty.
-  bool removeLast() {
-    if (!h.count) return false;
-    File f = LittleFS.open(path, "r+");
-    if (!f) return false;
-    h.count--;
-    f.write((const uint8_t*)&h, sizeof(h));
-    f.close();
+  // Drops the record added last when its time is `time` (0 = whichever it is) - one entered by mistake.
+  bool removeLast(uint32_t time = 0) {
+    uint8_t s = count[cur] ? cur : cur ^ 1;
+    if (!count[s] || (time && at(s, count[s] - 1).time != time)) return false;
+    rewrite(s, count[s] - 1);
+    last[s] = count[s] ? at(s, count[s] - 1).time : 0;
     return true;
   }
 
-  // Time of the newest record, 0 when empty.
-  uint32_t newestTime() const {
-    if (!h.count) return 0;
-    T r = {};
-    File f = LittleFS.open(path, "r");
-    if (f && f.seek(sizeof(Header) + ((h.count - 1) % capacity) * sizeof(T))) f.read((uint8_t*)&r, sizeof(r));
-    if (f) f.close();
-    return r.time;
-  }
+  // Time of the record added last, 0 when empty.
+  uint32_t newestTime() const { return count[cur] ? last[cur] : last[cur ^ 1]; }
 
-  // f(record) for every record with time >= since, oldest first.
+  // f(record) for every record with time >= since, in the order they were added.
   template <typename F> void forEach(uint32_t since, F f) const {
-    File file = LittleFS.open(path, "r");
-    if (!file) return;
-    uint32_t stored = min(h.count, capacity);
-    T buf[16];
-    for (uint32_t k = h.count - stored; k < h.count;) {
-      uint32_t slot = k % capacity;
-      uint32_t n = min({(uint32_t)16, h.count - k, capacity - slot});
-      file.seek(sizeof(Header) + slot * sizeof(T));
-      file.read((uint8_t*)buf, n * sizeof(T));
-      for (uint32_t i = 0; i < n; i++)
-        if (buf[i].time >= since) f(buf[i]);
-      k += n;
+    for (uint8_t s : {(uint8_t)(cur ^ 1), cur}) {
+      if (!count[s]) continue;
+      File file = LittleFS.open(path(s), "r");
+      if (!file) continue;
+      T buf[16];
+      for (uint32_t k = 0; k < count[s];) {
+        uint32_t n = min((uint32_t)16, count[s] - k);
+        if (file.read((uint8_t*)buf, n * sizeof(T)) != n * sizeof(T)) break;
+        for (uint32_t i = 0; i < n; i++)
+          if (buf[i].time >= since) f(buf[i]);
+        k += n;
+      }
+      file.close();
     }
-    file.close();
   }
 
 private:
-  static constexpr uint32_t MAGIC = 0x52494E47;   // "RING"
+  const char* base;
+  uint32_t    per;
+  uint32_t    count[2] = {};
+  uint32_t    last[2]  = {};
+  uint8_t     cur      = 0;
 
-  struct Header {
-    uint32_t magic;
-    uint32_t recordSize;
-    uint32_t capacity;
-    uint32_t count;       // records ever written
-  };
+  String path(uint8_t s) const { return String(base) + s + ".bin"; }
 
-  const char* path;
-  uint32_t    capacity;
-  Header      h = {};
+  T at(uint8_t s, uint32_t k) const {
+    T r = {};
+    File f = LittleFS.open(path(s), "r");
+    if (f && f.seek(k * sizeof(T))) f.read((uint8_t*)&r, sizeof(T));
+    if (f) f.close();
+    return r;
+  }
+
+  // Keeps the first n records of segment s (a small file - the refills - or a rare repair).
+  void rewrite(uint8_t s, uint32_t n) {
+    std::vector<T> keep(n);
+    File f = LittleFS.open(path(s), "r");
+    if (f) {
+      f.read((uint8_t*)keep.data(), n * sizeof(T));
+      f.close();
+    }
+    f = LittleFS.open(path(s), "w");
+    if (f) {
+      f.write((const uint8_t*)keep.data(), n * sizeof(T));
+      f.close();
+    }
+    count[s] = n;
+  }
 };
