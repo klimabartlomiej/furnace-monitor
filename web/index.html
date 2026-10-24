@@ -9,7 +9,17 @@
 <meta name="apple-mobile-web-app-title" content="Piec">
 <meta name="theme-color" content="#0b0d10">
 <link rel="apple-touch-icon" href="icon.png">
-<link rel="manifest" href="manifest.webmanifest">
+<script>
+// An iPhone reads the manifest as the page loads and starts the home-screen icon at its start_url - which cannot
+// carry this phone's pairing (#p=...). Without a manifest it keeps the address as it is and uses the meta tags
+// above, so the icon opens already paired. Everything else gets the manifest (Android's "install").
+if (!/iPhone|iPad|iPod/.test(navigator.userAgent) && !(navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))) {
+  const m = document.createElement('link');
+  m.rel = 'manifest';
+  m.href = 'manifest.webmanifest';
+  document.head.appendChild(m);
+}
+</script>
 <title>Piec</title>
 <style>
 :root{
@@ -1770,8 +1780,6 @@ function takePairingFromLink() {
   if (p) store('furnace-pair', `${p.host}/${p.secret}`);
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   if (standalone || !/iPhone|iPad/.test(navigator.userAgent)) history.replaceState(null, '', location.pathname + location.search);
-  // ... and iOS would take the manifest's start_url, which has no pairing: without it the address is saved as it is.
-  else document.querySelectorAll('link[rel=manifest]').forEach(l => l.remove());
 }
 
 function showPairing() {
