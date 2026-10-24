@@ -196,9 +196,9 @@ private:
 
   void needMemory() {
     if (freed || !onNeedMemory) return;
-    onNeedMemory(true);
+    onNeedMemory(true);                         // returns once the relay's connection is closed
     freed = true;
-    delay(1500);                                // the relay's task closes its connection
+    delay(300);
   }
 
   void releaseMemory() {
@@ -228,10 +228,11 @@ private:
     return http.begin(client, url);
   }
 
-  // The manifest; a second try with all the memory when the first fails.
+  // The manifest; more tries with all the memory when the first fails.
   bool fetchManifest(String& manifest, String& why) {
-    for (uint8_t attempt = 0; attempt < 2; attempt++) {
+    for (uint8_t attempt = 0; attempt < 3; attempt++) {
       if (attempt) needMemory();
+      if (attempt == 2) delay(3000);
       NetworkClientSecure client;
       HTTPClient http;
       if (!open(http, client, manifestUrl)) {
@@ -251,6 +252,12 @@ private:
   }
 
   void check() {
+    // Someone tapped "Zainstaluj": let the relay take the answer to the phone, then give the download all the
+    // memory from the start (measured: the manifest failed twice while the busy app kept the relay working).
+    if (installWanted) {
+      delay(1500);
+      needMemory();
+    }
     String manifest, why;
     if (!fetchManifest(manifest, why)) return fail(why);
 
@@ -282,6 +289,7 @@ private:
     total = size;
     done = 0;
     phase = DOWNLOADING;
+    setStatus("installing v" + String(available));
     mbedtls_sha256_context ctx;
     mbedtls_sha256_init(&ctx);
     mbedtls_sha256_starts(&ctx, 0);

@@ -61,8 +61,13 @@ public:
     portEXIT_CRITICAL(&mux);
   }
 
-  // A firmware download needs the memory of a second TLS connection: the relay steps aside meanwhile.
-  void pause(bool p) { paused = p; }
+  // A firmware download needs the memory of a second TLS connection: the relay steps aside meanwhile. Called
+  // from the update task, pause(true) waits until the connection is really closed - an answer being passed on
+  // to a phone finishes first (measured: a fixed 1.5 s was not enough while the app was busy) - at most 20 s.
+  void pause(bool p) {
+    paused = p;
+    for (int i = 0; p && connectedSince && i < 200; i++) vTaskDelay(pdMS_TO_TICKS(100));
+  }
 
   // A notification for the paired phones (a JSON the phone words, web/sw.js). Kept until the relay is reached -
   // a power cut's alert goes out after the restart; when too many wait, the oldest goes.

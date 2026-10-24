@@ -500,6 +500,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  16: 'Pewniejsza aktualizacja z telefonu: piec najpierw odpowiada aplikacji, potem na czas pobierania zwalnia pamięć. Na iPhonie aplikacja dodana do ekranu początkowego nie prosi już o kod parowania.',
   15: 'Drobiazg: Ustawienia → Urządzenie pokazują też największy wolny blok pamięci – pomaga, gdy aktualizacja się nie uda.',
   14: 'Piec z każdego miejsca: ta sama aplikacja na klimabartlomiej.github.io/furnace-monitor, przez szyfrowany przekaźnik (Ustawienia → Dostęp zdalny). Nowe wersje nie instalują się już same – aplikacja pokazuje, co zmieniają, i instaluje po stuknięciu „Zainstaluj”, z paskiem postępu. Powiadomienia na telefon w tej aplikacji: alarmy, ostrzeżenia, brak prądu i „piec offline” (Ustawienia → Dostęp zdalny). Kopia zapasowa całego urządzenia (Ustawienia) – do przeniesienia na nową płytkę. Telegram usunięty.',
   12: 'Korekta wskazań w Ustawieniach: stała poprawka plus lub minus dla każdego czujnika.',
@@ -602,6 +603,7 @@ function updateText(s) {
     .replace(/^v(\d+) installed and confirmed$/, 'v$1 zainstalowana i potwierdzona')
     .replace(/^not checked yet$/, 'jeszcze nie sprawdzano')
     .replace(/^v(\d+) available$/, 'dostępna v$1')
+    .replace(/^installing v(\d+)$/, 'instaluję v$1')
     .replace(/^v(\d+) written, restarting$/, 'v$1 zapisana – restart')
     .replace(/^v(\d+) did not work here - waiting for a newer one$/, 'v$1 nie działała tutaj – czekam na nowszą')
     .replace(/^check failed: (.*)$/, 'nie udało się sprawdzić ($1)');
@@ -1768,6 +1770,8 @@ function takePairingFromLink() {
   if (p) store('furnace-pair', `${p.host}/${p.secret}`);
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   if (standalone || !/iPhone|iPad/.test(navigator.userAgent)) history.replaceState(null, '', location.pathname + location.search);
+  // ... and iOS would take the manifest's start_url, which has no pairing: without it the address is saved as it is.
+  else document.querySelectorAll('link[rel=manifest]').forEach(l => l.remove());
 }
 
 function showPairing() {
@@ -2095,7 +2099,7 @@ async function onRemoteClick(e) {
 // installs it on "Zainstaluj" - the progress comes with /api/now. A forced release installs by itself and the
 // dialog has no "later". Notes from this page (on GitHub Pages it may be newer than the device) or the manifest.
 const MANIFEST_URL = 'https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json';
-let manifestNotes = null, watchUntil = 0, watchTimer = null, updateOpen = false, updateTarget = 0;
+let manifestNotes = null, watchUntil = 0, watchTimer = null, updateOpen = false, updateTarget = 0, installAsked = 0;
 
 async function loadNotes() {
   if (!manifestNotes) {
@@ -2161,13 +2165,16 @@ function closeUpdate() {
 }
 
 function renderUpdate() {
-  const u = now.upd || { phase: 0 }, busy = u.phase > 0 || (updateTarget && now.fw < updateTarget);
+  const u = now.upd || { phase: 0 }, busy = u.phase > 0 || (updateTarget && now.fw < updateTarget && !(installAsked && Date.now() - installAsked > 240e3));
   const to = u.phase ? u.to : Math.max(now.avail, updateTarget);
   $('#utitle').textContent = busy ? `Aktualizacja do wersji ${to}` : now.forced ? `Wymagana aktualizacja do wersji ${to}` : `Dostępna wersja ${to}`;
-  const failed = !busy && /^check failed/.test(now.update) && Date.now() < watchUntil;
+  // Waited for the new version too long (4 min) - or the ESP said why it stopped.
+  const late = updateTarget && installAsked && Date.now() - installAsked > 240e3 && now.fw < updateTarget;
+  const failed = late || (!busy && /^check failed/.test(now.update) && Date.now() < watchUntil);
   const st = $('#ustate');
   st.className = 'ustate' + (failed ? ' bad' : '');
-  st.textContent = u.phase ? updatePhaseText() : busy ? (online ? 'Uruchamiam…' : 'Trwa instalacja – piec na chwilę zniknie i wróci sam…')
+  st.textContent = late ? 'Nowa wersja się nie pojawiła – spróbuj ponownie.' : u.phase ? updatePhaseText()
+    : busy ? (online ? 'Uruchamiam…' : 'Trwa instalacja – piec na chwilę zniknie i wróci sam…')
     : failed ? 'Nie udało się: ' + updateText(now.update) : now.forced ? 'Ta wersja jest wymagana – zainstaluje się sama.' : '';
   $('#uprog').className = 'progress' + (u.phase ? ' on' : '');
   $('#uprog').firstElementChild.style.width = updatePercent() + '%';
@@ -2177,15 +2184,20 @@ function renderUpdate() {
   $('#uno').textContent = busy ? 'Ukryj' : 'Później';
 }
 
+// The ESP may drop the relay right after the tap (the download needs its memory): no answer is not a failure -
+// the dialog waits for the new version, and says so if it never comes.
 async function installUpdate() {
   const to = now.avail;
   try {
     now = await (await api('/api/update', { method: 'POST', body: new URLSearchParams({ install: to }) })).json();
-    updateTarget = to;
-    watchUntil = Date.now() + 60e3;
-    renderUpdate();
-    updateUi();
-  } catch (e) { toast('Brak połączenia z piecem'); }
+  } catch (e) {
+    if (!REMOTE) return toast('Brak połączenia z piecem');
+  }
+  updateTarget = to;
+  installAsked = Date.now();
+  watchUntil = Date.now() + 240e3;
+  renderUpdate();
+  updateUi();
 }
 
 function renderSettings() {
