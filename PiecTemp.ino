@@ -67,7 +67,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 20;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 21;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -1192,6 +1192,7 @@ void handleNow() {
   j += ",\"size\":";    j += up.size;
   j += "},\"avail\":";  j += updater.available();
   j += ",\"forced\":";    j += updater.forced() ? "true" : "false";
+  j += ",\"sig\":";       j += (int)updater.signatures();   // int8_t would go in as a character
   j += ",\"sensors\":[";
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
     const SensorState& s = state[i];

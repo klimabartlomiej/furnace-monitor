@@ -6,9 +6,13 @@
 // Releases are made with release/publish.ps1.
 //
 //   manifest: {"version":3,"size":1515752,"sha256":"<64 hex>","url":"https://.../firmware-v3.bin",
-//              "mirror":"https://cdn.jsdelivr.net/.../firmware-v3.bin","min":0,"notes":{...}}
+//              "mirror":"https://cdn.jsdelivr.net/.../firmware-v3.bin","min":0,"sig":"<128 hex>","notes":{...}}
 //
-// The image is accepted only when its SHA-256 matches the manifest. A freshly installed image runs on probation:
+// The manifest counts only when it is signed with a release key (release/sign.ps1, ReleaseKeys.h - ECDSA P-256 over
+// "furnace-fw|version|size|sha256|min"), and the image only when its SHA-256 matches the manifest: nobody on the way
+// can slip in another firmware - the relay leg is plain HTTP and TLS here pins no certificate. The verifier first
+// proves itself on a signed manifest and a forged copy; a build whose check fails that does not demand signatures,
+// so a broken verifier can never shut the ESP out of updates. A freshly installed image runs on probation:
 // it is confirmed after CONFIRM_AFTER_MS on the network; if it never gets online within ROLLBACK_AFTER_MS, or
 // crashes before that, the bootloader goes back to the previous version (needs #include "SpanRollback.h" in the
 // sketch). A version that went back is remembered and not installed again - only a newer one is.
@@ -19,7 +23,7 @@
 //   - a download that breaks off resumes where it stopped (an HTTP Range request),
 //   - first through the relay's /fw over plain HTTP (proxyHost): no second TLS connection, so no RAM for one,
 //     and the relay stays connected - the phones watch the progress from anywhere. Plain HTTP is safe for the
-//     file: what gets installed is decided by the manifest's SHA-256,
+//     file: what gets installed is decided by the signed manifest's SHA-256,
 //   - then straight from GitHub and the manifest's "mirror" (jsDelivr - another CDN, the same file) over TLS;
 //     a TLS connection needs ~40 KB of RAM, so the relay (onNeedMemory) lets its own go for those tries.
 // The restart into the new version happens in the loop, never in the middle of its work.
@@ -35,6 +39,8 @@
 #include <functional>
 #include <vector>
 #include <mbedtls/sha256.h>
+#include <mbedtls/ecdsa.h>
+#include "ReleaseKeys.h"
 
 class RemoteUpdate {
 public:
@@ -103,6 +109,8 @@ public:
 
   uint32_t available() const { return offered; }   // a newer version waiting to be installed, 0 = none
   bool forced() const { return mustUpdate; }         // ... that this version may not refuse (installs by itself)
+  // 1 = signatures demanded, 0 = the verifier failed its self-test (SHA-256 only), -1 = not checked yet.
+  int8_t signatures() const { return sigCheck; }
 
   String status() const {
     portENTER_CRITICAL(&mux);
@@ -166,6 +174,7 @@ private:
   uint32_t    lastCheckMs    = 0;
   uint32_t    bad            = 0;    // a version that went back here - skipped
   uint8_t     crashes        = 0;    // crash restarts in a row
+  int8_t      sigCheck       = -1;   // see signatures()
   Preferences store;
   mutable portMUX_TYPE mux   = portMUX_INITIALIZER_UNLOCKED;
   char        statusText[120] = "not checked yet";
@@ -223,6 +232,51 @@ private:
     return json.substring(p, end);
   }
 
+  // Exactly 2 x len hex digits into out.
+  static bool fromHex(const String& hex, uint8_t* out, size_t len) {
+    if (hex.length() != 2 * len) return false;
+    for (size_t i = 0; i < 2 * len; i++) {
+      char c = hex[i];
+      int v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+      if (v < 0) return false;
+      out[i / 2] = i % 2 ? out[i / 2] | v : v << 4;
+    }
+    return true;
+  }
+
+  // The manifest's "sig" signs "furnace-fw|version|size|sha256|min" - the values check() acts on, read the same
+  // way - with one of RELEASE_KEYS: ECDSA P-256 over SHA-256, r||s in 128 hex digits (release/sign.ps1).
+  static bool signedByUs(const String& manifest) {
+    uint8_t sig[64], key[65], hash[32];
+    if (!fromHex(field(manifest, "sig"), sig, sizeof(sig))) return false;
+    String sha = field(manifest, "sha256");
+    sha.toLowerCase();
+    String msg = "furnace-fw|" + String(field(manifest, "version").toInt()) + "|" + String(field(manifest, "size").toInt())
+               + "|" + sha + "|" + String(field(manifest, "min").toInt());
+    if (mbedtls_sha256((const uint8_t*)msg.c_str(), msg.length(), hash, 0)) return false;
+    mbedtls_ecp_group grp;
+    mbedtls_ecp_point q;
+    mbedtls_mpi r, s;
+    mbedtls_ecp_group_init(&grp);
+    mbedtls_ecp_point_init(&q);
+    mbedtls_mpi_init(&r);
+    mbedtls_mpi_init(&s);
+    bool ok = false;
+    if (!mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1) && !mbedtls_mpi_read_binary(&r, sig, 32)
+        && !mbedtls_mpi_read_binary(&s, sig + 32, 32))
+      for (const char* k : RELEASE_KEYS)
+        if (fromHex(k, key, sizeof(key)) && !mbedtls_ecp_point_read_binary(&grp, &q, key, sizeof(key))
+            && !mbedtls_ecdsa_verify(&grp, hash, sizeof(hash), &q, &r, &s)) {
+          ok = true;
+          break;
+        }
+    mbedtls_mpi_free(&s);
+    mbedtls_mpi_free(&r);
+    mbedtls_ecp_point_free(&q);
+    mbedtls_ecp_group_free(&grp);
+    return ok;
+  }
+
   // A plain HTTP URL through the relay for a GitHub/jsDelivr one, empty without a relay.
   String viaRelay(const String& url) const {
     String host = proxyHost ? proxyHost() : String();
@@ -246,7 +300,8 @@ private:
   }
 
   // Plain HTTP (the relay) or TLS (GitHub, no CA pinned: what gets installed is decided by the SHA-256 from the
-  // manifest, so a corrupted or truncated download can never be flashed). A TLS try gets all the memory first.
+  // signed manifest, so a corrupted, truncated or swapped download can never be flashed). A TLS try gets all the
+  // memory first.
   bool open(HTTPClient& http, NetworkClient& plain, NetworkClientSecure& tls, const String& url) {
     http.setTimeout(15000);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
@@ -287,6 +342,17 @@ private:
   void check() {
     String manifest, why;
     if (!fetchManifest(manifest, why)) return fail(why);
+    if (sigCheck < 0) {
+      String forged = RELEASE_SELFTEST;
+      forged.replace("\"version\":1,", "\"version\":2,");
+      sigCheck = signedByUs(RELEASE_SELFTEST) && !signedByUs(forged);
+      Serial.printf("Update: signature check %s\n", sigCheck ? "passed its self-test" : "FAILED its self-test - SHA-256 only");
+    }
+    if (sigCheck && !signedByUs(manifest)) {
+      offered = 0;
+      mustUpdate = false;
+      return fail("manifest not signed");
+    }
 
     uint32_t available = field(manifest, "version").toInt();
     mustUpdate = (uint32_t)field(manifest, "min").toInt() > version;

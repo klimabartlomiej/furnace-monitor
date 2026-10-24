@@ -10,7 +10,9 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   min limit), freezing water, embers creeping into the coal hopper.
 - **Web app** `http://furnace.local:8080` on the home WiFi (in Polish): live cards, charts from 6 hours to years
   with pinch-zoom, alarm limits and warnings, event journal, furnace burning hours, outdoor temperature
-  (Open-Meteo), CSV export, firmware updates.
+  (Open-Meteo), CSV export, firmware updates. The "Miesiące" tab goes back season by season (September to
+  August): a bar per month (coal or burning hours, the biggest labelled), and per month its days, coal and cost,
+  refills, temperatures, power cuts and alarms against the same month a year before.
 - **Notifications** (`web/sw.js`): in the remote app, Ustawienia -> Dostęp zdalny -> "Włącz powiadomienia":
   alarms and their end, dead probes, warnings, power cuts of a minute or more, hot water ready, a new version to
   install and a finished update - each phone picks which kinds it gets (the relay filters by kind) - sealed by the
@@ -48,7 +50,9 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
 - **Updates over the internet**: the ESP checks `release/manifest.json` every hour. A newer version is only
   offered: the web app shows what it brings and installs it on "Zainstaluj", with a progress bar (the download
   runs in its own task, resumes after a break-off and goes in turn to GitHub and a jsDelivr mirror). A release published with `-Forced` installs by itself on
-  every older ESP. Automatic rollback if the new version does not come online.
+  every older ESP. Automatic rollback if the new version does not come online. Releases are signed (ECDSA P-256,
+  `ReleaseKeys.h`): the ESP installs only a manifest signed with a release key, so nobody on the way can slip in
+  another firmware - its verifier first proves itself on a signed sample, so a broken check never locks it out.
 
 ## Hardware
 
@@ -64,7 +68,7 @@ Probe addresses are pinned in `SENSORS` in `PiecTemp.ino`; `diagnostics/PiecTemp
 1. Without stored WiFi the ESP opens the open hotspot **Furnace-Setup** - join it with a phone, pick the network,
    type its password, leave the setup code empty.
 2. Home app -> Add Accessory -> More options -> **Czujniki pieca**, setup code **466-37-726**.
-3. Turn on notifications for the "Alarm ..." accessories.
+3. Notifications come from the web app (Ustawienia -> Powiadomienia), not from the Home app.
 
 BOOT button: hold ~5 s and release = new WiFi; hold ~15 s and release = full reset (WiFi, HomeKit pairing and
 history; the OTA password stays) before moving the device to another home. A router that is down does not open
@@ -81,7 +85,10 @@ need no password.
   LittleFS (changing it needs a USB upload).
 - Web app source: `web/index.html` -> `web/build.ps1` -> `WebApp.h`.
 - Release: bump `FW_VERSION`, add its note to `CHANGES` in `web/index.html`, run `release/publish.ps1 [-Forced]`
-  (builds, writes `release/firmware-vN.bin` and `manifest.json` with the notes, pushes). On the same network the
+  (builds, writes `release/firmware-vN.bin` and `manifest.json` with the notes, signs it, pushes).
+- Release keys: made once by `release/keygen.ps1` into `%USERPROFILE%\.furnace-monitor` (never the repo):
+  `release-key.bin` signs every release, `release-key-backup.bin` is the spare (`publish.ps1 -KeyFile ...`) - keep
+  copies of both off this PC. Without them the ESPs take updates only over USB or from a file on the home WiFi. On the same network the
   IDE's network port "furnace" works too (OTA password set with the serial command `O`).
 - Remote web app: every push that changes `web/` is published to GitHub Pages (`.github/workflows/pages.yml`).
 - Relay: `cd relay`, `npx wrangler login` once, `npx wrangler deploy`; the printed `*.workers.dev` host goes into

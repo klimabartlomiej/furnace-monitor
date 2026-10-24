@@ -237,6 +237,19 @@ body.unpaired .pair{display:block}
 .frost b{color:var(--text);font-weight:600;text-align:right}
 .bars-x{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;margin-top:6px}
 .caption{color:var(--muted);font-size:13px;margin-top:8px;min-height:18px}
+.mnav{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.mnav h2{flex:1;margin:0;text-align:center;font-size:17px;font-weight:600}
+.mnav h2 small{display:block;color:var(--muted);font-size:12px;font-weight:500;margin-top:2px}
+.mnav button{flex:none;width:38px;height:38px;border:0;border-radius:12px;background:var(--card2);color:var(--text);font-size:24px;line-height:1;padding:0 0 3px}
+.mnav button:disabled{opacity:.25}
+.mseg{margin:2px 0 10px}
+.mbars{height:140px;padding-top:18px}
+.mbars button{position:relative}
+.mbars button.peak::after{content:attr(data-v);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:4px;font-size:11px;font-weight:600;color:var(--text);white-space:nowrap}
+.mlab{display:flex;gap:3px;margin-top:6px}
+.mlab span{flex:1;text-align:center;color:var(--faint);font-size:10.5px;font-weight:600}
+.mlab span.on{color:var(--text)}
+.bars.mdays{height:90px}
 
 .journal .day{color:var(--faint);font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin:16px 4px 8px}
 .journal .day:first-child{margin-top:0}
@@ -395,6 +408,12 @@ nav.tabs button.on{color:var(--text)}
   <a class="btn" id="csv" download target="_blank" rel="noopener">Eksportuj widoczny zakres do CSV</a>
 </section>
 
+<section class="view" id="v-months">
+  <header class="top"><h1>Miesiące</h1><div class="sub">Sezony grzewcze miesiąc po miesiącu</div></header>
+  <div class="card" id="seasoncard"><div class="sk"></div></div>
+  <div class="card" id="monthcard" style="display:none"></div>
+</section>
+
 <section class="view journal" id="v-journal">
   <header class="top"><h1>Dziennik</h1><div class="sub">Alarmy, ostrzeżenia i zdarzenia urządzenia</div></header>
   <div id="events"></div>
@@ -461,6 +480,7 @@ nav.tabs button.on{color:var(--text)}
 <nav class="tabs">
   <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.9 3.2 4.9 5.6 4.9 10.1a4.9 4.9 0 0 1-9.8 0c0-2.2 1-3.7 2-4.6.1 1.7 1 2.8 2 3C10.6 8.9 11.6 5.8 12 3z"/></svg>Przegląd</button>
   <button data-tab="charts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M4 16l5-6 4 3 7-8"/></svg>Wykresy</button>
+  <button data-tab="months"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8.5 17v-2M12 17v-4M15.5 17v-3"/></svg>Miesiące</button>
   <button data-tab="journal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h11a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M8 8h6M8 12h6M8 16h4"/></svg>Dziennik</button>
   <button data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Ustawienia</button>
 </nav>
@@ -543,6 +563,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  21: 'Nowa zakładka Miesiące: każdy sezon grzewczy (od września) miesiąc po miesiącu – słupki pokazują, kiedy szło najwięcej węgla albo godzin palenia; stuknięty miesiąc ma swoje dni, węgiel i koszt, dosypania, temperatury, zaniki prądu i alarmy, z porównaniem do roku wcześniej. Strzałkami wstecz do poprzednich miesięcy i sezonów. Aktualizacje są podpisane – piec instaluje tylko wersje wydane przez nas (Ustawienia → Oprogramowanie).',
   20: 'Wykresy: legenda pasków i kresek (brak prądu, alarm, ostrzeżenie, koniec), a przytrzymanie na nich mówi, co to było. Przycisk pełnego ekranu – obrócony telefon pokazuje wykres szeroko. Poranne podsumowanie o 7:00: wczorajszy węgiel i koszt, godziny palenia, temperatury pieca i zaniki prądu (Ustawienia → Powiadomienia → Podsumowanie dnia).',
   19: 'Ustawienia jako menu: każda sprawa na osobnej stronie. Alarmy, ostrzeżenia i „Ciepła woda gotowa” tylko jako powiadomienia w tej aplikacji – w aplikacji Dom zostały same termometry (z historią w Eve). W Powiadomieniach wybierasz, co ma przychodzić na ten telefon; przychodzi też „Dostępna nowa wersja”.',
   18: 'Okno aktualizacji: gdy piec na chwilę znika (restart po instalacji), ruchomy pasek pokazuje, że instalacja trwa.',
@@ -615,13 +636,20 @@ const durShort = s => { if (s < 60) return `${s} s`; const m = Math.round(s / 60
 const durCut = s => (s < 60 ? `${s} s` : dur(s));
 // EV_POWER_CUT: time = power back, seconds without power in 23 bits (sensor & 0x7F : value), sensor bit 7 = brownout.
 const cutSeconds = e => (e[2] & 0x7F) * 65536 + (e[3] & 0xFFFF);
-const outages = () => journal.filter(e => e[1] === EV_POWER_CUT).map(e => {
+const outages = (list = journal) => list.filter(e => e[1] === EV_POWER_CUT).map(e => {
   const t0 = e[0] - cutSeconds(e), sec = cutSeconds(e);
   return { t0, t1: e[0], sec, label: `Brak prądu ${hhmm(t0)}–${hhmm(e[0])} · ${durCut(sec)}` };
 });
 const midnight = t => { const d = new Date(t * 1000); d.setHours(0, 0, 0, 0); return d / 1000; };
 // 1 alarm, 2 alarmy, 5 alarmów
 const plural = (n, one, few, many) => n === 1 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
+// "↑ 12%" against an earlier value; judge: more is worse (red) and less better (green), otherwise gray.
+function deltaChip(a, b, judge) {
+  if (!b) return '';
+  const p = Math.round((a - b) / b * 100);
+  if (Math.abs(p) < 3) return '<span class="dchip flat">bez zmian</span>';
+  return `<span class="dchip ${judge ? (p > 0 ? 'bad' : 'good') : 'flat'}">${p > 0 ? '↑' : '↓'} ${Math.abs(p)}%</span>`;
+}
 const pickStep = span => span > 31 * 86400 ? 86400 : STEPS.find(s => span / s <= 400) || 43200;
 const colorOf = k => k === OUT ? OUT_COLOR : COLORS[k];
 const nameOf = k => k === OUT ? 'Na zewnątrz' : now.sensors[k].name;
@@ -656,6 +684,7 @@ function updateText(s) {
     .replace(/^installing v(\d+)$/, 'instaluję v$1')
     .replace(/^v(\d+) written, restarting$/, 'v$1 zapisana – restart')
     .replace(/^v(\d+) did not work here - waiting for a newer one$/, 'v$1 nie działała tutaj – czekam na nowszą')
+    .replace(/^check failed: manifest not signed$/, 'odrzucona – wersja bez ważnego podpisu')
     .replace(/^check failed: (.*)$/, 'nie udało się sprawdzić ($1)');
 }
 
@@ -1499,12 +1528,7 @@ function renderWeek() {
   // Totals are shown; the change compares daily averages, so a week with a missing day is not "14% less".
   const sum = (a, f) => a.reduce((s, x) => s + (f(x) || 0), 0), compare = have(prev) >= 5;
   const avg = (a, f) => (have(a) ? sum(a, f) / have(a) : 0);
-  const delta = (a, b, judge) => {
-    if (!compare || !b) return '';
-    const p = Math.round((a - b) / b * 100);
-    if (Math.abs(p) < 3) return '<span class="dchip flat">bez zmian</span>';
-    return `<span class="dchip ${judge ? (p > 0 ? 'bad' : 'good') : 'flat'}">${p > 0 ? '↑' : '↓'} ${Math.abs(p)}%</span>`;
-  };
+  const delta = (a, b, judge) => (compare ? deltaChip(a, b, judge) : '');
   const rows = [];
   const bh = sum(cur, x => x.burn) / 60, pbh = sum(prev, x => x.burn) / 60;
   rows.push(row('Piec pracował', `${Math.round(bh)} godz.${delta(avg(cur, x => x.burn), avg(prev, x => x.burn), false)}`));
@@ -1780,6 +1804,229 @@ function renderPower() {
     $$('#power .bars button').forEach(q => q.classList.toggle('sel', +q.dataset.k === k));
     $('#powercap').textContent = `${day(x.t)}: ${x.n ? `${x.n} ${plural(x.n, 'zanik', 'zaniki', 'zaników')}, bez prądu ${durCut(x.sec)}` : 'bez zaników'}`;
   };
+}
+
+// ---------------------------------------------------------------- months
+
+// Heating seasons run from 1 September to 31 August. The season card shows its twelve months as bars - coal, or
+// burning hours without the coal count - with its totals against the same stretch a year before; tapping a month
+// (or the arrows) opens it below: its totals, its days as bars and what happened. The arrows go back as far as the
+// daily records (5 years).
+const MONTH_NAMES = ['Styczeń', 'Luty', 'Marzec', 'Kwiecień', 'Maj', 'Czerwiec', 'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień'];
+const MONTH_SHORT = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
+let monthSel = null, monthDays = [], allJournal = null, allJournalAt = 0;
+const seasonOut = {};                 // season -> {at, done, map: day -> [min, mean]} from Open-Meteo's archive
+
+// Months as year * 12 + month; a season by the month it starts with (September).
+const monthOf = t => { const d = new Date((t + 6 * 3600) * 1000); return d.getFullYear() * 12 + d.getMonth(); };
+const monthStart = m => new Date(Math.floor(m / 12), m % 12, 1) / 1000;
+const seasonOf = m => m - (m % 12 + 4) % 12;
+const dayKey = t => midnight(t + 6 * 3600);
+
+// The whole journal (512 to 1024 events): power cuts and alarms of past months.
+async function loadAllJournal() {
+  if (!now || Date.now() - allJournalAt < 10 * 60e3) return;
+  allJournalAt = Date.now();
+  try { allJournal = await (await api('/api/events?since=1')).json(); } catch (e) { allJournalAt = 0; }
+}
+
+// Outdoor days of a season from Open-Meteo's archive (it lags a few days - the last ones come from the hourly
+// data). True when something new came.
+async function loadSeasonOutdoor(s0) {
+  const st = now.settings, have = seasonOut[s0], end = monthStart(s0 + 12) - 86400, to = Math.min(end, tNow() - 3 * 86400);
+  if (st.lat === null || st.lon === null || to < monthStart(s0) || (have && (have.done || Date.now() - have.at < 6 * 3600e3))) return false;
+  seasonOut[s0] = { at: Date.now(), done: false, map: have ? have.map : new Map() };
+  const ymd = t => { const d = new Date(t * 1000); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+  try {
+    const j = await (await fetch(`https://archive-api.open-meteo.com/v1/archive?latitude=${st.lat}&longitude=${st.lon}&timeformat=unixtime&timezone=auto`
+      + `&start_date=${ymd(monthStart(s0))}&end_date=${ymd(to)}&daily=temperature_2m_min,temperature_2m_mean`)).json();
+    const map = new Map();
+    j.daily.time.forEach((t, k) => { if (j.daily.temperature_2m_mean[k] !== null) map.set(dayKey(t), [j.daily.temperature_2m_min[k], j.daily.temperature_2m_mean[k]]); });
+    seasonOut[s0] = { at: Date.now(), done: to === end, map };
+    return true;
+  } catch (e) {
+    seasonOut[s0].at = Date.now() - 6 * 3600e3 + 10 * 60e3;   // another try in 10 minutes
+    return false;
+  }
+}
+
+// [coldest, mean] outdoor temperature of the day starting at t, or null.
+function outDay(t) {
+  const s = seasonOut[seasonOf(monthOf(t))], p = s && s.map.get(dayKey(t));
+  if (p) return p;
+  const h = outdoor.hourly.filter(q => q[0] >= t && q[0] < t + 86400).map(q => q[1]);
+  return h.length >= 12 ? [Math.min(...h), h.reduce((a, v) => a + v, 0) / h.length] : null;
+}
+
+// Today's [min, avg, max] per probe from the minute data - the shape of a daily record.
+function todayValues(t0) {
+  return now.sensors.map((s, i) => {
+    const v = live.filter(b => b.t >= t0 && b.v[i]).map(b => b.v[i][1]);
+    return v.length ? [Math.min(...v), v.reduce((a, x) => a + x, 0) / v.length, Math.max(...v)] : null;
+  });
+}
+
+// Every day with a daily record, then today so far: {t, m, burn (minutes), heat, v}.
+function dayList() {
+  const list = days.map(d => ({ t: d.t, m: monthOf(d.t), burn: d.burn, heat: d.heat, v: d.v }));
+  const t = tNow(), today = midnight(t);
+  if (!list.length || list[list.length - 1].t < today - 3 * 3600)
+    list.push({ t: today, m: monthOf(today), burn: burnSeconds(today, t) / 60, heat: heatSince(today, t), v: todayValues(today), today: true });
+  return list;
+}
+
+// Totals of some days: coal in buckets (null without the coal count), burning minutes, days with an hour or more of
+// burning, the day with the most coal, the furnace at its hottest.
+function totals(list) {
+  const s = { n: list.length, heat: 0, burn: 0, burnDays: 0, top: null, hot: null };
+  for (const d of list) {
+    s.heat += d.heat || 0;
+    s.burn += d.burn || 0;
+    if (d.burn >= 60) s.burnDays++;
+    if (d.heat && (!s.top || d.heat > s.top.heat)) s.top = d;
+    const f = d.v && d.v[FURNACE];
+    if (f && (!s.hot || f[2] > s.hot.v)) s.hot = { v: f[2], t: d.t };
+  }
+  s.coal = coalOn() ? coalBk(s.heat) : null;
+  return s;
+}
+
+// Mean and coldest outdoor day of some days, or null.
+function outdoorOf(list) {
+  const pts = list.map(d => [d.t, outDay(d.t)]).filter(p => p[1]);
+  if (!pts.length || pts.length < list.length / 2) return null;
+  const cold = pts.reduce((a, p) => (p[1][0] < a[1][0] ? p : a));
+  return { mean: pts.reduce((a, p) => a + p[1][1], 0) / pts.length, min: cold[1][0], t: cold[0] };
+}
+
+// Power cuts, alarms and warnings in [t0, t1); null when the journal has nothing from then. from: the journal starts
+// inside the stretch (below 512 events it never dropped any).
+function happened(t0, t1) {
+  if (!allJournal) return null;
+  const from = allJournal.length >= 512 ? allJournal[0][0] : 0;
+  if (from >= t1) return null;
+  const ev = allJournal.filter(e => e[0] >= t0 && e[0] < t1);
+  return { from: from > t0 ? from : 0, cuts: outages(allJournal).filter(c => c.t0 >= t0 && c.t0 < t1),
+    alarms: ev.filter(e => e[1] === 3 || e[1] === 4 || e[1] === 6).length, warns: ev.filter(e => e[1] === 8).length };
+}
+
+function renderMonths() {
+  if (!now) return;
+  paintMonths();
+  Promise.all([loadDays(), loadAllJournal(), loadRefills()]).then(paintMonths);
+  loadMonthsOutdoor();
+}
+
+function loadMonthsOutdoor() {
+  const s0 = seasonOf(monthSel !== null ? monthSel : monthOf(tNow()));
+  Promise.all([loadSeasonOutdoor(s0), loadSeasonOutdoor(s0 - 12)]).then(r => { if (r.some(Boolean)) paintMonths(); });
+}
+
+function goMonth(m) {
+  monthSel = m;
+  paintMonths();
+  loadMonthsOutdoor();
+}
+
+function paintMonths() {
+  if (!now || ui.tab !== 'months') return;
+  const list = dayList(), cur = monthOf(tNow()), first = list[0].m;
+  monthSel = clamp(monthSel === null ? cur : monthSel, first, cur);
+  const s0 = seasonOf(monthSel), y = Math.floor(s0 / 12), coal = coalOn() && now.coal.k !== null;
+  const metric = coal && ui.mMetric !== 'burn' ? 'coal' : 'burn';
+  const val = s => (metric === 'coal' ? s.coal || 0 : s.burn / 60);
+  const valText = v => (metric === 'coal' ? `~${bkText(v)}` : `${Math.round(v)} godz.`);
+  const months = [];
+  for (let m = s0; m < s0 + 12; m++) {
+    const own = list.filter(d => d.m === m);
+    months.push({ m, own, s: totals(own) });
+  }
+  const sDays = months.flatMap(x => x.own), st = totals(sDays);
+
+  // The season: totals, a bar per month (the biggest labelled), the same stretch a year before.
+  const peak = months.reduce((a, x) => (val(x.s) > (a ? val(a.s) : 0) ? x : a), null), max = peak ? val(peak.s) : 0;
+  const stat = (k, v) => `<div><span>${k}</span><b class="num">${v}</b></div>`;
+  let html = `<div class="mnav"><button data-go="${monthSel - 12}" ${s0 <= seasonOf(first) ? 'disabled' : ''} aria-label="Poprzedni sezon">‹</button>`
+    + `<h2>Sezon ${y}/${String(y + 1).slice(2)}<small>${cur < s0 + 12 ? 'od 1 września do dziś' : `wrzesień ${y} – sierpień ${y + 1}`}</small></h2>`
+    + `<button data-go="${monthSel + 12}" ${s0 + 12 > cur ? 'disabled' : ''} aria-label="Następny sezon">›</button></div>`
+    + `<div class="stats three">${coal ? stat('WĘGIEL', massText(bkKg(st.coal))) + stat('KOSZT', coalCost(st.coal) !== null ? zlText(coalCost(st.coal)) : '–')
+      : stat('DNI PALENIA', st.burnDays)}${stat('PALENIE', `${Math.round(st.burn / 60)} h`)}${coal ? '' : stat('DNI Z DANYMI', st.n)}</div>`
+    + (coal ? `<div class="seg small mseg"><button data-metric="coal" class="${metric === 'coal' ? 'on' : ''}">Węgiel</button><button data-metric="burn" class="${metric === 'burn' ? 'on' : ''}">Godziny palenia</button></div>` : '')
+    + `<div class="bars mbars ${metric === 'coal' ? 'coalb' : ''}">${months.map(x => {
+      const v = val(x.s), top = x === peak && v > 0;
+      return `<button data-go="${x.m}" class="${x.m === monthSel ? 'sel' : ''}${top ? ' peak' : ''}" data-v="${top ? (metric === 'coal' ? massText(bkKg(v)) : `${Math.round(v)} h`) : ''}"`
+        + ` style="height:${v ? Math.max(2, v / max * 100) : 0}%" aria-label="${MONTH_NAMES[x.m % 12]}"></button>`;
+    }).join('')}</div>`
+    + `<div class="mlab">${months.map(x => `<span class="${x.m === monthSel ? 'on' : ''}">${MONTH_SHORT[x.m % 12]}</span>`).join('')}</div>`
+    + `<div class="caption">${months.filter(x => val(x.s) > 0).length >= 2 ? `Najwięcej: ${MONTH_NAMES[peak.m % 12].toLowerCase()} – ${valText(max)}` : 'Stuknij miesiąc, aby zobaczyć szczegóły'}</div>`;
+  const span = (cur < s0 + 12 ? tNow() : monthStart(s0 + 12)) - monthStart(s0);
+  const before = list.filter(d => d.t >= monthStart(s0 - 12) && d.t < monthStart(s0 - 12) + span), bt = totals(before);
+  if (before.length >= Math.max(7, .8 * st.n))
+    html += `<div class="rows" style="margin-top:12px">${row(cur < s0 + 12 ? 'Rok wcześniej w tym czasie' : 'Sezon wcześniej', valText(val(bt)),
+      `ten sezon ${deltaChip(val(st) / st.n, val(bt) / bt.n, metric === 'coal')}`)}</div>`;
+  $('#seasoncard').innerHTML = html;
+
+  // The month: its days as bars (tap = that day), totals, what happened, against the same month a year before.
+  const mm = months.find(x => x.m === monthSel), own = mm.own, ms = mm.s, t0 = monthStart(monthSel), t1 = monthStart(monthSel + 1);
+  const dim = Math.round((t1 - t0) / 86400);
+  let mh = `<div class="mnav"><button data-go="${monthSel - 1}" ${monthSel <= first ? 'disabled' : ''} aria-label="Poprzedni miesiąc">‹</button>`
+    + `<h2>${MONTH_NAMES[monthSel % 12]} ${Math.floor(monthSel / 12)}<small>${monthSel === cur ? 'do dziś' : own.length < dim ? `${own.length} z ${dim} dni z danymi` : 'cały miesiąc'}</small></h2>`
+    + `<button data-go="${monthSel + 1}" ${monthSel >= cur ? 'disabled' : ''} aria-label="Następny miesiąc">›</button></div>`;
+  if (!own.length) {
+    $('#monthcard').innerHTML = mh + '<div class="empty">Brak danych z tego miesiąca</div>';
+    $('#monthcard').style.display = '';
+    return;
+  }
+  monthDays = [];
+  for (let k = 0; k < dim; k++) {
+    const d = new Date(t0 * 1000);
+    d.setDate(k + 1);
+    const ds = d / 1000;
+    monthDays.push(own.find(x => Math.abs(x.t - ds) < 3 * 3600) || { t: ds, none: true });
+  }
+  const dv = d => (d.none ? 0 : metric === 'coal' ? coalBk(d.heat) || 0 : (d.burn || 0) / 60);
+  const dmax = Math.max(metric === 'coal' ? .5 : 1, ...monthDays.map(dv));
+  mh += `<div class="bars mdays ${metric === 'coal' ? 'coalb' : ''}">${monthDays.map((d, k) => `<button data-k="${k}" class="${d.today ? 'today' : ''}" style="height:${dv(d) ? Math.max(2, dv(d) / dmax * 100) : 0}%"></button>`).join('')}</div>`
+    + `<div class="bars-x"><span>1</span><span>${dim}</span></div><div class="caption" id="mdaycap">Stuknij słupek, aby zobaczyć dzień</div>`;
+
+  const yb = list.filter(d => d.m === monthSel - 12), ys = totals(yb), cmp = yb.length >= Math.max(7, .8 * own.length);
+  const yearAgo = (a, b, judge) => (cmp ? deltaChip(a / ms.n, b / ys.n, judge) : '');
+  const rows = [];
+  if (coal) {
+    rows.push(row('Węgiel', `~${bkText(ms.coal)}${yearAgo(ms.coal, ys.coal, true)}`, `≈${massText(bkKg(ms.coal))} · średnio ${bkText(ms.coal / ms.n)} dziennie`));
+    if (coalCost(ms.coal) !== null) rows.push(row('Koszt', zlText(coalCost(ms.coal)), `średnio ${zlText(coalCost(ms.coal) / ms.n)} dziennie`));
+    if (ms.top) {
+      const o = outDay(ms.top.t);
+      rows.push(row('Najwięcej w jeden dzień', `~${bkText(coalBk(ms.top.heat))}`, `${day(ms.top.t)}${o ? ` · na zewnątrz ${n1(o[1])}°` : ''}`));
+    }
+    const fills = refills.filter(r => r[0] >= t0 && r[0] < t1);
+    if (fills.length) rows.push(row('Dosypano', `${fills.length} ${plural(fills.length, 'raz', 'razy', 'razy')}`, `razem ${bkText(fills.reduce((a, r) => a + r[1] / 10, 0))}`));
+  }
+  rows.push(row('Piec pracował', `${Math.round(ms.burn / 60)} godz.${coal ? '' : yearAgo(ms.burn, ys.burn, false)}`, `palił ${ms.burnDays} z ${ms.n} ${plural(ms.n, 'dnia', 'dni', 'dni')}`));
+  if (ms.hot) rows.push(row('Piec najwyżej', `${n1(ms.hot.v)}°`, day(ms.hot.t)));
+  const o = outdoorOf(own);
+  if (o) rows.push(row('Na zewnątrz', `śr. ${n1(o.mean)}°`, `najzimniej ${n1(o.min)}° · ${day(o.t)}`));
+  const h = happened(t0, t1);
+  if (h) {
+    const note = h.from ? ` · dziennik od ${day(h.from)}` : '';
+    const sec = h.cuts.reduce((a, c) => a + c.sec, 0), longest = h.cuts.reduce((a, c) => (!a || c.sec > a.sec ? c : a), null);
+    rows.push(row('Zaniki prądu', h.cuts.length ? `${h.cuts.length} · ${durShort(sec)}` : 'brak', `${longest ? `najdłuższy ${durCut(longest.sec)}, ${day(longest.t0)}` : ''}${note}`));
+    rows.push(row('Alarmy', h.alarms || 'brak', `${h.warns ? `ostrzeżenia: ${h.warns}` : 'bez ostrzeżeń'}${note}`));
+  }
+  mh += `<div class="rows" style="margin-top:12px">${rows.join('')}</div>`;
+  if (cmp) mh += `<p class="note">Strzałki: średnio na dzień względem miesiąca ${MONTH_NAMES[monthSel % 12].toLowerCase()} ${Math.floor(monthSel / 12) - 1}.</p>`;
+  $('#monthcard').innerHTML = mh;
+  $('#monthcard').style.display = '';
+}
+
+// A tapped day of the month's bars.
+function showMonthDay(k) {
+  const d = monthDays[k];
+  if (!d) return;
+  $$('#monthcard .mdays button').forEach(q => q.classList.toggle('sel', +q.dataset.k === k));
+  const o = d.none ? null : outDay(d.t), coal = coalOn() && now.coal.k !== null;
+  $('#mdaycap').textContent = d.none ? `${day(d.t)}: brak danych`
+    : `${day(d.t)}: ${coal ? `${coalText(coalBk(d.heat))} · ` : ''}palenie ${dur((d.burn || 0) * 60)}${o ? ` · na zewnątrz ${n1(o[1])}°` : ''}${d.today ? ' (do teraz)' : ''}`;
 }
 
 // ---------------------------------------------------------------- journal
@@ -2519,6 +2766,8 @@ function renderSettings() {
     + row('Pamięć na historię', `${Math.round(fs * 100)} %<div class="bar"><i style="width:${Math.round(fs * 100)}%"></i></div>`, `${Math.round(now.fsUsed / 1024)} z ${Math.round(now.fsTotal / 1024)} KB`)
     + row('Wolna pamięć RAM', `${Math.round(now.heap / 1024)} KB`, now.heapBlock ? `największy blok ${Math.round(now.heapBlock / 1024)} KB` : '');
   $('#fwinfo').innerHTML = row('Wersja', `v${now.fw}`, esc(updateText(now.update)))
+    + (now.sig === undefined || now.sig < 0 ? '' : row('Podpis wersji', now.sig ? '<span style="color:var(--green)">✓ sprawdzany</span>' : 'nie działa',
+      now.sig ? 'instaluję tylko wersje podpisane naszym kluczem' : 'sprawdzanie podpisu zawiodło – instaluję po samej sumie kontrolnej'))
     + (now.ota || REMOTE ? '' : '<p class="note">Instalacja z pliku jest wyłączona – nie ustawiono hasła OTA (polecenie „O” przez USB). Aktualizacje z internetu działają.</p>');
   const u = now.upd || { phase: 0 };
   $('#fwupd').innerHTML = u.phase ? `<div class="ustate">${esc(updatePhaseText())}</div><div class="progress on"><i style="width:${updatePercent()}%"></i></div>`
@@ -2715,6 +2964,7 @@ function render(periodic) {
   if (ui.tab === 'home') renderHome();
   else if (ui.tab === 'charts') periodic ? refreshCharts() : renderCharts();
   else if (ui.tab === 'journal') renderJournal();
+  else if (ui.tab === 'months') { if (!periodic) renderMonths(); }   // a tapped day stays as it is
   else renderSettings();
 }
 
@@ -2731,6 +2981,12 @@ function showTab(tab) {
 
 function setup() {
   $$('nav.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  $('#v-months').onclick = e => {
+    const go = e.target.closest('[data-go]'), metric = e.target.closest('[data-metric]'), dayBar = e.target.closest('.mdays button');
+    if (go && !go.disabled) goMonth(+go.dataset.go);
+    else if (metric) { ui.mMetric = metric.dataset.metric; saveUi(); paintMonths(); }
+    else if (dayBar) showMonthDay(+dayBar.dataset.k);
+  };
   $('#notices').onclick = e => {
     if (e.target.id === 'fwseen') { store('furnace-fw', now.fw); renderHome(); }
     if (e.target.id === 'a2hs') { store('furnace-a2hs', '1'); renderHome(); }
