@@ -144,6 +144,8 @@ body.unpaired .pair{display:block}
 .ustate{margin-top:12px;font-size:14px;color:var(--text)}
 .ustate.bad{color:var(--red)}
 .progress.on{display:block}
+.progress.wait i{width:35%!important;transition:none;animation:wait 1.3s ease-in-out infinite}
+@keyframes wait{0%{transform:translateX(-110%)}100%{transform:translateX(320%)}}
 .banner .progress{margin-top:8px;background:rgba(255,255,255,.14)}
 .big-now{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}
 .big-now .v{font:600 34px/1 -apple-system,"SF Pro Display",system-ui;letter-spacing:-.02em}
@@ -512,6 +514,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  18: 'Okno aktualizacji: gdy piec na chwilę znika (restart po instalacji), ruchomy pasek pokazuje, że instalacja trwa.',
   17: 'Aktualizacja pobiera się przez przekaźnik – piec cały czas jest połączony i pasek postępu widać także spoza domu. Wykresy: kropki na pomiarach, delikatna siatka; palcem przewijasz w lewo i prawo, przytrzymanie pokazuje wartość.',
   16: 'Pewniejsza aktualizacja z telefonu: piec najpierw odpowiada aplikacji, potem na czas pobierania zwalnia pamięć. Na iPhonie aplikacja dodana do ekranu początkowego nie prosi już o kod parowania.',
   15: 'Drobiazg: Ustawienia → Urządzenie pokazują też największy wolny blok pamięci – pomaga, gdy aktualizacja się nie uda.',
@@ -2213,6 +2216,7 @@ function updatePhaseText() {
 
 function updateBanner() {
   const u = now.upd || { phase: 0 };
+  if (u.phase && online === false) return `<div class="banner blue">${SVG(I_INFO)}<div style="flex:1"><b>Aktualizacja</b> – trwa instalacja, piec na chwilę zniknie i wróci sam<div class="progress on wait"><i></i></div></div></div>`;
   if (u.phase) return `<div class="banner blue">${SVG(I_INFO)}<div style="flex:1"><b>Aktualizacja</b> – ${esc(updatePhaseText())}<div class="progress on"><i style="width:${updatePercent()}%"></i></div></div></div>`;
   if (now.avail > now.fw) return `<div class="banner blue">${SVG(I_INFO)}<div><b>Dostępna wersja ${now.avail}</b>${now.forced ? ' – wymagana, zainstaluje się sama' : ''}<br><button class="bbtn" id="updshow">Co nowego / zainstaluj</button></div></div>`;
   return '';
@@ -2267,10 +2271,12 @@ function renderUpdate() {
   const failed = late || (!busy && /^check failed/.test(now.update) && Date.now() < watchUntil);
   const st = $('#ustate');
   st.className = 'ustate' + (failed ? ' bad' : '');
-  st.textContent = late ? 'Nowa wersja się nie pojawiła – spróbuj ponownie.' : u.phase ? updatePhaseText()
+  // Out of reach during an update (the restart, or an older firmware dropping the relay): the progress is unknown.
+  const away = busy && online === false;
+  st.textContent = late ? 'Nowa wersja się nie pojawiła – spróbuj ponownie.' : away ? 'Trwa instalacja – piec na chwilę zniknie i wróci sam…' : u.phase ? updatePhaseText()
     : busy ? (online ? 'Uruchamiam…' : 'Trwa instalacja – piec na chwilę zniknie i wróci sam…')
     : failed ? 'Nie udało się: ' + updateText(now.update) : now.forced ? 'Ta wersja jest wymagana – zainstaluje się sama.' : '';
-  $('#uprog').className = 'progress' + (u.phase ? ' on' : '');
+  $('#uprog').className = 'progress' + (away ? ' on wait' : u.phase ? ' on' : '');
   $('#uprog').firstElementChild.style.width = updatePercent() + '%';
   $('#uyes').style.display = busy ? 'none' : '';
   $('#uyes').textContent = failed ? 'Spróbuj ponownie' : 'Zainstaluj';
