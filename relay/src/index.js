@@ -6,7 +6,8 @@
 //   GET  /ws?role=device&room=<32 hex>      the ESP (one per room; a new connection replaces the old one)
 //   GET  /ws?role=app&room=<32 hex>         a phone
 //   GET  /push/key?room=                    the room's VAPID public key (applicationServerKey)
-//   POST /push/subscribe?room=              a phone's PushSubscription (JSON) and the kinds it wants ("cats")
+//   POST /push/subscribe?room=              a phone's PushSubscription (JSON) and the kinds it does not want
+//                                           ("off" - a kind added later reaches everybody)
 //   POST /push/unsubscribe?room=            {endpoint}
 //   POST /push/test?room=                   {endpoint} - a test notification to that phone
 //   GET  /fw?u=<url>                        a release file of this repo (manifest, firmware) for the ESP, over
@@ -20,7 +21,8 @@
 // the runtime itself, without waking the room up. The phones get the ESP's state as text:
 //   {"t":"device","online":true|false,"since":<ms - online since / last seen>}
 // The ESP's alerts come as text {"t":"push","c":"<kind>","d":"<sealed, base64url>"} and go as Web Push to every
-// phone that wants that kind (alarm, warn, power, water, update); only the phone opens "d" (web/sw.js). The relay itself tells the phones when the ESP has been gone for
+// phone that has not switched that kind off (alarm, warn, power, summary, water, update); only the phone opens
+// "d" (web/sw.js). The relay itself tells the phones when the ESP has been gone for
 // OFFLINE_ALERT_MS (a power cut or no internet at the furnace) and when it is back.
 // A room is a Durable Object that hibernates between messages; while the ESP is connected, an alarm looks every
 // CHECK_MS whether it is still there.
@@ -32,7 +34,7 @@ const ROOM = /^[0-9a-f]{32}$/;
 const MAX_MESSAGE = 64 * 1024;          // a request is < 1 KB, an answer chunk ~2 KB
 const MAX_APPS = 10;                    // phones connected at once; the oldest goes when another comes
 const MAX_SUBSCRIPTIONS = 20;
-const KINDS = ['alarm', 'warn', 'power', 'water', 'update'];   // what a phone can choose to get
+const KINDS = ['alarm', 'warn', 'power', 'summary', 'water', 'update'];   // what a phone can switch off
 const SILENT_MS = 100 * 1000;           // the ESP pings every 30 s: silent this long = gone
 const CHECK_MS = 90 * 1000;             // how often a connected ESP is looked at (a dead TCP looks open)
 const OFFLINE_ALERT_MS = 5 * 60 * 1000; // gone this long -> "Piec offline" on the phones
@@ -233,14 +235,14 @@ export class Room extends DurableObject {
     return 'sub:' + Array.from(hash.slice(0, 12), b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  // To every subscribed phone that wants this kind (all, for a phone that never chose); the ones whose
-  // subscription has expired are forgotten.
+  // To every subscribed phone that has not switched this kind off; the ones whose subscription has expired are
+  // forgotten.
   async notify(message, only, kind) {
     const subs = only ? new Map([[await Room.subKey(only.endpoint), only]]) : await this.ctx.storage.list({ prefix: 'sub:' });
     if (!subs.size) return;
     const vapid = await this.vapid(), payload = JSON.stringify(message);
     await Promise.all([...subs].map(async ([key, sub]) => {
-      if (kind && Array.isArray(sub.cats) && !sub.cats.includes(kind)) return;
+      if (kind && Array.isArray(sub.off) && sub.off.includes(kind)) return;
       try {
         const status = await sendPush(sub, payload, vapid, SUBJECT);
         if (status === 404 || status === 410) await this.ctx.storage.delete(key);
@@ -269,8 +271,8 @@ export class Room extends DurableObject {
     if (path !== '/push/subscribe') return json({ error: 'not found' }, 404);
     if (!body.keys || typeof body.keys.p256dh !== 'string' || typeof body.keys.auth !== 'string') return json({ error: 'bad keys' }, 400);
     if (!stored && (await this.ctx.storage.list({ prefix: 'sub:' })).size >= MAX_SUBSCRIPTIONS) return json({ error: 'too many phones' }, 409);
-    const cats = Array.isArray(body.cats) ? KINDS.filter(k => body.cats.includes(k)) : (stored && stored.cats) || KINDS;
-    await this.ctx.storage.put(key, { endpoint: body.endpoint, keys: { p256dh: body.keys.p256dh, auth: body.keys.auth }, cats });
+    const off = Array.isArray(body.off) ? KINDS.filter(k => body.off.includes(k)) : (stored && stored.off) || [];
+    await this.ctx.storage.put(key, { endpoint: body.endpoint, keys: { p256dh: body.keys.p256dh, auth: body.keys.auth }, off });
     return json({ ok: true });
   }
 }

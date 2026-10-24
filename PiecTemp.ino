@@ -67,7 +67,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 19;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 20;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -99,6 +99,7 @@ constexpr float    STALL_SLOPE        = -4;              // ... controller drops
 constexpr uint8_t  FS_LAYOUT          = 6;               // bump when the history files change shape (wipes them once)
 constexpr uint32_t ALIVE_INTERVAL_S   = 2;               // "still alive" mark - how exactly a power cut is timed
 constexpr uint8_t  TREND_MINUTES      = 30;              // window of the trend the warnings look at
+constexpr uint8_t  MORNING_HOUR       = 7;               // the summary of the day before goes out from this hour
 constexpr uint8_t  BOOT_BUTTON_PIN    = 0;               // the BOOT button on the board
 constexpr uint8_t  STATUS_LED_PIN     = 2;               // blue on-board LED on most ESP32 dev boards
 constexpr uint16_t WEB_PORT           = 8080;            // port 80 belongs to HomeKit (HomeSpan)
@@ -282,6 +283,7 @@ bool     conversionPending = false;
 bool     webStarted        = false;
 bool     serialClosed      = false;   // serial input switched off after SERIAL_WINDOW_MS
 uint32_t offerTold         = 0;       // the newest version a notification has offered (flash "offerTold")
+uint32_t summaryDay        = 0;       // local midnight of the day whose morning summary went out (flash "sumDay")
 
 bool clockSet(time_t t) { return t >= 1700000000; }
 
@@ -971,6 +973,7 @@ void logHistory() {
     }
   }
 
+  morningSummary(now);
   uint32_t today = localMidnight(now);
   if (today == currentDay) return;
   if (!currentDay) {
@@ -986,6 +989,41 @@ void logHistory() {
     summarizeDay(currentDay, today);
   }
   currentDay = today;
+}
+
+// The morning summary: yesterday's coal (buckets and cost, once the coal use is learnt), burning hours, the
+// furnace's low and high and the power cuts, as one notification from MORNING_HOUR - once a day, across restarts
+// too. From the daily summary written at midnight; the phone words it (web/sw.js).
+void morningSummary(time_t now) {
+  static time_t lastLook = 0;                            // once a minute is plenty
+  if (now - lastLook < 60) return;
+  lastLook = now;
+  struct tm lt;
+  localtime_r(&now, &lt);
+  uint32_t today = localMidnight(now);
+  if (lt.tm_hour < MORNING_HOUR || summaryDay == today) return;
+  summaryDay = today;
+  prefs.putUInt("sumDay", today);
+  uint32_t yesterday = localMidnight(today - 12 * 3600);
+  DayRecord d = {};
+  daily.forEach(yesterday, [&](const DayRecord& r) { if (r.time == yesterday) d = r; });
+  if (!d.time) return;                                   // the device was off all day - nothing to tell
+  uint16_t cuts = 0;
+  uint32_t cutSeconds = 0;
+  events.forEach(yesterday, [&](const EventRecord& e) {
+    if (e.type != EV_POWER_CUT || e.time >= today) return;
+    cuts++;
+    cutSeconds += (uint32_t)(e.sensor & 0x7F) << 16 | (uint16_t)e.value;
+  });
+  String j = String("{\"t\":") + (uint32_t)now + ",\"e\":101,\"d\":" + yesterday + ",\"m\":" + (unsigned)d.burnMinutes;
+  if (settings.coalOn && !isnan(coalK)) {
+    float buckets = coalK * d.heat;
+    j += ",\"b\":" + String(lroundf(buckets * 10));
+    if (settings.coalPrice > 0) j += ",\"z\":" + String(lroundf(buckets * settings.bucketKg * settings.coalPrice / 1000));
+  }
+  int16_t lo = d.min[FURNACE], hi = d.max[FURNACE];
+  if (lo != NO_VALUE) j += ",\"lo\":" + String(lo) + ",\"hi\":" + String(hi);
+  relay.alert(j + ",\"pc\":" + cuts + ",\"ps\":" + cutSeconds + "}", "summary");
 }
 
 // wipe: the first start after a full reset - everything goes.
@@ -1834,6 +1872,7 @@ void setup() {
   updater.onNeedMemory = [](bool on) { relay.pause(on); };
   updater.proxyHost = [] { return relay.host(); };
   offerTold = prefs.getUInt("offerTold", 0);
+  summaryDay = prefs.getUInt("sumDay", 0);
   bootReason = readBootReason();
   // The power went within ALIVE_INTERVAL_S after the last mark (without marks: within the minute after the last
   // stored one). A power cut is journaled as the cut itself, other starts as EV_BOOT.

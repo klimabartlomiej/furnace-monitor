@@ -94,6 +94,15 @@ nav.tabs button{position:relative}
 .sensor.fault .pill{background:#4a4f5a}
 
 .chart{position:relative;height:210px;touch-action:pan-y}
+.card.fs{position:fixed;inset:0;z-index:50;margin:0;border:0;border-radius:0;display:flex;flex-direction:column;background:var(--bg);
+  padding:calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 12px) calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 12px)}
+.card.fs .chart.big{flex:1;height:auto;min-height:0}
+.card.fs .hint{display:none}
+.card.fs .seg{margin:0 0 8px}
+body.fsmode{overflow:hidden}
+body.fsmode nav.tabs{display:none}
+.fsbtn{margin-left:auto;flex:none;width:34px;height:34px;border:0;border-radius:10px;background:var(--card2);color:var(--text);display:grid;place-items:center}
+.fsbtn svg{width:18px;height:18px}
 .chart.big{height:300px;touch-action:pan-y;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .chart svg{display:block}
 .gl{stroke:rgba(255,255,255,.1)}
@@ -187,6 +196,14 @@ body.unpaired .pair{display:block}
 .stats.three{grid-template-columns:repeat(3,1fr);margin-bottom:4px}
 .stats.three b{font-size:17px}
 .outage{fill:rgba(255,159,10,.13)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 4px 0;color:var(--muted);font-size:12px}
+.legend:empty{display:none}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:3px;height:12px;border-radius:2px}
+.legend i.band{width:12px;background:rgba(255,159,10,.35);border-radius:3px}
+.legend .lg-hint{color:var(--faint)}
+.tip .tev{display:flex;align-items:flex-start;gap:6px;margin-top:5px;font-size:12px;white-space:normal;max-width:230px}
+.tip .tev i{width:3px;height:13px;border-radius:2px;flex:none;margin-top:1px}
 .outlab{fill:#ff9f0a;font-size:10px;font-weight:600}
 .bars.coalb button{background:rgba(163,168,179,.5)}
 .bars.coalb button.today{background:rgba(163,168,179,.25);outline-color:rgba(163,168,179,.8)}
@@ -336,6 +353,7 @@ nav.tabs button.on{color:var(--text)}
     <div class="card-h"><span>Wykres</span><div class="seg small" id="ovRange"><button data-h="6">6 godz.</button><button data-h="24">24 godz.</button></div></div>
     <div class="legend" id="legend"></div>
     <div class="chart" id="overview"></div>
+    <div class="legend" id="overviewlegend"></div>
   </div>
   <div class="card">
     <div class="card-h">Dzisiaj</div>
@@ -353,9 +371,11 @@ nav.tabs button.on{color:var(--text)}
   <div class="seg" id="ranges">
     <button data-r="6h">6 godz.</button><button data-r="24h">24 godz.</button><button data-r="7d">7 dni</button><button data-r="30d">30 dni</button><button data-r="1y">Rok</button>
   </div>
-  <div class="card">
-    <div class="big-now"><span class="v num" id="dnow">–</span><span class="l" id="dname"></span><button class="zoom" id="zoomreset">Pełny widok</button></div>
+  <div class="card" id="detailcard">
+    <div class="big-now"><span class="v num" id="dnow">–</span><span class="l" id="dname"></span><button class="zoom" id="zoomreset">Pełny widok</button>
+      <button class="fsbtn" id="fsbtn" aria-label="Pełny ekran"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button></div>
     <div class="chart big" id="detail"></div>
+    <div class="legend" id="detaillegend"></div>
     <div class="hint">Przesuń palcem, aby przewinąć · przytrzymaj, aby odczytać · rozsuń dwoma palcami, aby powiększyć · stuknij dwa razy, aby wrócić</div>
   </div>
   <div class="card stats" id="rstats"></div>
@@ -522,6 +542,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  20: 'Wykresy: legenda pasków i kresek (brak prądu, alarm, ostrzeżenie, koniec), a przytrzymanie na nich mówi, co to było. Przycisk pełnego ekranu – obrócony telefon pokazuje wykres szeroko. Poranne podsumowanie o 7:00: wczorajszy węgiel i koszt, godziny palenia, temperatury pieca i zaniki prądu (Ustawienia → Powiadomienia → Podsumowanie dnia).',
   19: 'Ustawienia jako menu: każda sprawa na osobnej stronie. Alarmy, ostrzeżenia i „Ciepła woda gotowa” tylko jako powiadomienia w tej aplikacji – w aplikacji Dom zostały same termometry (z historią w Eve). W Powiadomieniach wybierasz, co ma przychodzić na ten telefon; przychodzi też „Dostępna nowa wersja”.',
   18: 'Okno aktualizacji: gdy piec na chwilę znika (restart po instalacji), ruchomy pasek pokazuje, że instalacja trwa.',
   17: 'Aktualizacja pobiera się przez przekaźnik – piec cały czas jest połączony i pasek postępu widać także spoza domu. Wykresy: kropki na pomiarach, delikatna siatka; palcem przewijasz w lewo i prawo, przytrzymanie pokazuje wartość.',
@@ -593,7 +614,10 @@ const durShort = s => { if (s < 60) return `${s} s`; const m = Math.round(s / 60
 const durCut = s => (s < 60 ? `${s} s` : dur(s));
 // EV_POWER_CUT: time = power back, seconds without power in 23 bits (sensor & 0x7F : value), sensor bit 7 = brownout.
 const cutSeconds = e => (e[2] & 0x7F) * 65536 + (e[3] & 0xFFFF);
-const outages = () => journal.filter(e => e[1] === EV_POWER_CUT).map(e => ({ t0: e[0] - cutSeconds(e), t1: e[0], sec: cutSeconds(e) }));
+const outages = () => journal.filter(e => e[1] === EV_POWER_CUT).map(e => {
+  const t0 = e[0] - cutSeconds(e), sec = cutSeconds(e);
+  return { t0, t1: e[0], sec, label: `Brak prądu ${hhmm(t0)}–${hhmm(e[0])} · ${durCut(sec)}` };
+});
 const midnight = t => { const d = new Date(t * 1000); d.setHours(0, 0, 0, 0); return d / 1000; };
 // 1 alarm, 2 alarmy, 5 alarmów
 const plural = (n, one, few, many) => n === 1 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
@@ -925,6 +949,8 @@ function chart(el, o) {
     if (a < lo) lo = a;
     if (b > hi) hi = b;
   }
+  const legend = document.getElementById(el.id + 'legend');
+  if (legend) legend.innerHTML = '';
   if (!isFinite(lo)) {
     el.geom = null;
     el.innerHTML = `<div class="empty">${o.empty || 'Brak danych z tego okresu'}</div>`;
@@ -994,6 +1020,16 @@ function chart(el, o) {
         : `<circle cx="${f1(X(seg[0][0]))}" cy="${f1(Y(s.agg ? seg[0][2] : seg[0][1]))}" r="2.5" fill="${s.color}"/>`;
     }
   });
+  // What the bands and marks in view mean - only the ones that are there.
+  if (legend) {
+    const colors = new Set((o.marks || []).filter(m => m.t >= o.t0 && m.t <= o.t1).map(m => m.color));
+    const band = (o.bands || []).some(b => b.t1 >= o.t0 && b.t0 <= o.t1);
+    const item = (color, text) => `<span><i style="background:${color}"></i>${text}</span>`;
+    legend.innerHTML = (band ? '<span><i class="band"></i>brak prądu</span>' : '')
+      + (colors.has('#ff453a') ? item('#ff453a', 'alarm') : '') + (colors.has('#ff9f0a') ? item('#ff9f0a', 'ostrzeżenie') : '')
+      + (colors.has('#30d158') ? item('#30d158', 'koniec – wróciło do normy') : '')
+      + (band || colors.size ? `<span class="lg-hint">${el.id === 'detail' ? 'przytrzymaj na nim palec' : 'dotknij go'} – zobaczysz, co to</span>` : '');
+  }
   el.innerHTML = `<svg width="${W}" height="${H}"><defs>${defs}<clipPath id="${el.id}-c"><rect x="${L}" y="0" width="${pw}" height="${H}"/></clipPath></defs>`
     + `${axes}<g clip-path="url(#${el.id}-c)">${plot}</g><g class="cg"></g></svg><div class="tip"></div>`;
   el.geom = { o, X, Y, L, T, pw, ph, W };
@@ -1015,6 +1051,11 @@ function scrub(el, clientX) {
       + `${s.agg && p[1] !== p[3] ? ` <span class="mm num">${n1(p[1])}–${n1(p[3])}</span>` : ''}</div>`;
   }
   if (x === null) return unscrub(el);
+  // What happened here: a power cut's band under the finger, journal marks within ~10 px.
+  const tol = Math.max(whenStep, (g.o.t1 - g.o.t0) / g.pw * 10);
+  for (const b of g.o.bands || []) if (t >= b.t0 - tol && t <= b.t1 + tol) html += `<div class="tev"><i style="background:#ff9f0a"></i>${esc(b.label || 'Brak prądu')}</div>`;
+  for (const m of g.o.marks || []) if (Math.abs(m.t - t) <= tol)
+    html += `<div class="tev"><i style="background:${m.color}"></i><span>${hhmm(m.t)} ${esc(m.title || '')}${m.sub ? ` <span class="mm">${esc(m.sub)}</span>` : ''}</span></div>`;
   scrubbing = true;
   el.querySelector('.cg').innerHTML = `<line class="cur" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${g.T}" y2="${g.T + g.ph}"/>` + dots;
   const label = whenStep >= 86400 ? day(when) : whenStep > 60 ? `${day(when)}, ${hhmm(when)}–${hhmm(when + whenStep)}` : `${day(when)}, ${hhmm(when)}`;
@@ -1653,7 +1694,7 @@ function paintDetail() {
   const limits = single && s0 ? [s0.high !== null && { v: s0.high, label: `maks. ${n1(s0.high)}°` }, s0.low !== null && { v: s0.low, label: `min. ${n1(s0.low)}°` }].filter(Boolean) : [];
   const MARK = { 3: '#ff453a', 4: '#ff453a', 6: '#ff453a', 8: '#ff9f0a', 5: '#30d158', 7: '#30d158', 9: '#30d158' };
   const concerns = e => e[1] >= 8 ? (WARNING_PROBES[e[2]] || []).some(p => shown.includes(p)) : shown.includes(e[2]);
-  const marks = journal.filter(e => MARK[e[1]] && concerns(e)).map(e => ({ t: e[0], color: MARK[e[1]] }));
+  const marks = journal.filter(e => MARK[e[1]] && concerns(e)).map(e => { const v = eventView(e); return { t: e[0], color: MARK[e[1]], title: v[2], sub: v[3] }; });
   chart($('#detail'), { series: lines, t0: view.t0, t1: view.t1, step, limits, marks, bands: outages(), fill: single, band: single,
     smooth: step === 60 ? 2 : step <= 300 ? 1 : 0 });
 
@@ -2052,7 +2093,8 @@ async function enablePush() {
 // The subscription with the kinds this phone wants - the relay sends only those.
 async function sendSubscription(sub) {
   await relayKeys();
-  const r = await fetch(relayHttp('/push/subscribe'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign(sub.toJSON(), { cats: pushKinds() })) });
+  const off = PUSH_KINDS.map(k => k[0]).filter(k => !pushKinds().includes(k));
+  const r = await fetch(relayHttp('/push/subscribe'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign(sub.toJSON(), { off })) });
   if (!r.ok) throw new Error((await r.json()).error);
 }
 
@@ -2060,12 +2102,14 @@ const PUSH_KINDS = [
   ['alarm', 'Alarmy i czujniki', 'za gorąco, za zimno, czujnik nie odpowiada – i powrót do normy'],
   ['warn', 'Ostrzeżenia', 'piec wygasa, mało węgla, cofanie żaru, popielnik…'],
   ['power', 'Brak prądu', 'piec offline, zaniki prądu dłuższe niż minuta'],
+  ['summary', 'Podsumowanie dnia', 'o 7:00: wczorajszy węgiel i koszt, godziny palenia, zaniki prądu'],
   ['water', 'Ciepła woda gotowa', 'bojler nagrzany – można się kąpać'],
   ['update', 'Aktualizacje', 'nowa wersja do zainstalowania i zakończona aktualizacja'],
 ];
 function pushKinds() {
-  try { const k = JSON.parse(recall('furnace-push-kinds')); if (Array.isArray(k)) return k; } catch (e) {}
-  return PUSH_KINDS.map(k => k[0]);
+  let off = [];
+  try { off = JSON.parse(recall('furnace-push-off')) || []; } catch (e) {}
+  return PUSH_KINDS.map(k => k[0]).filter(k => !off.includes(k));
 }
 
 // Settings → Powiadomienia: on/off and test for this phone, then what it should get.
@@ -2087,7 +2131,7 @@ function renderPush() {
 
 async function onKindChange(e) {
   if (!e.target.dataset.kind) return;
-  store('furnace-push-kinds', JSON.stringify($$('#pushset [data-kind]').filter(x => x.checked).map(x => x.dataset.kind)));
+  store('furnace-push-off', JSON.stringify($$('#pushset [data-kind]').filter(x => !x.checked).map(x => x.dataset.kind)));
   try {
     const sub = await (await navigator.serviceWorker.getRegistration()).pushManager.getSubscription();
     await sendSubscription(sub);
@@ -2628,6 +2672,40 @@ async function clearHistory() {
   } catch (e) { toast('Nie udało się usunąć historii'); }
 }
 
+// ---------------------------------------------------------------- full-screen chart
+
+// The charts tab's chart alone on the whole screen (like Eve) - turned sideways it is drawn wide. The range
+// buttons come along; ✕ or the phone's back gesture returns.
+const FS_OPEN = '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>', FS_CLOSE = '<path d="M6 6l12 12M18 6 6 18"/>';
+let fullScreen = false;
+
+function setFullScreen(on, push = true) {
+  if (on === fullScreen) return;
+  fullScreen = on;
+  const card = $('#detailcard'), ranges = $('#ranges');
+  card.classList.toggle('fs', on);
+  document.body.classList.toggle('fsmode', on);
+  $('#fsbtn').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${on ? FS_CLOSE : FS_OPEN}</svg>`;
+  $('#fsbtn').setAttribute('aria-label', on ? 'Zamknij pełny ekran' : 'Pełny ekran');
+  // The card goes straight under <body> meanwhile: the tab's slide-in animation leaves a transform on the view,
+  // and position:fixed inside a transformed parent is not the screen (it came out taller than the screen).
+  if (on) {
+    card.fsSlot = document.createComment('detailcard');
+    card.parentNode.insertBefore(card.fsSlot, card);
+    document.body.appendChild(card);
+    card.insertBefore(ranges, card.firstChild);
+    if (push) history.pushState({ fullScreen: true }, '');
+    const el = document.documentElement;                    // Android: no system bars either (iOS has no such call)
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+  } else {
+    card.fsSlot.parentNode.insertBefore(card, card.fsSlot);
+    card.fsSlot.remove();
+    card.parentNode.insertBefore(ranges, card);
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  }
+  requestPaint();
+}
+
 // ---------------------------------------------------------------- shell
 
 // periodic: the 15 s / 1 min refreshes - on the charts tab they must not redraw what a finger is reading.
@@ -2643,6 +2721,7 @@ function showTab(tab) {
   ui.tab = tab;
   saveUi();
   if (setPage) showSetPage(null, false);                     // the settings tab always opens at its menu
+  if (fullScreen) setFullScreen(false, false);
   $$('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + tab));
   $$('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   window.scrollTo(0, 0);
@@ -2694,6 +2773,9 @@ function setup() {
     resetView();
   };
   $('#zoomreset').onclick = resetView;
+  $('#fsbtn').onclick = () => (fullScreen ? (history.state && history.state.fullScreen ? history.back() : setFullScreen(false, false)) : setFullScreen(true));
+  window.addEventListener('popstate', () => { if (fullScreen) setFullScreen(false, false); });
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && fullScreen) setFullScreen(false, false); });
   $('#limits').addEventListener('change', e => { if (e.target.dataset.i) saveLimits(+e.target.dataset.i); });
   $('#warnset').addEventListener('change', onWarnChange);
   $('#offsets').addEventListener('click', onOffsetStep);

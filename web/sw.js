@@ -34,6 +34,7 @@ const b64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')
 const n1 = v => v.toFixed(1).replace('.', ',');
 const hhmm = ms => new Date(ms).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
 const dur = s => { const m = Math.round(s / 60), h = Math.floor(m / 60); return h ? `${h} godz. ${m % 60} min` : `${m} min`; };
+const durCut = s => (s < 60 ? `${s} s` : dur(s));
 const plural = (n, one, few, many) => n === 1 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
 const buckets = b => { const r = b >= 20 ? Math.round(b) : Math.round(b * 2) / 2; return `${String(r).replace('.', ',')} ${r === 1 ? 'wiadro' : Number.isInteger(r) ? plural(r, 'wiadro', 'wiadra', 'wiader') : 'wiadra'}`; };
 
@@ -68,6 +69,14 @@ function describe(a) {
     case 8: return { title: warn, body: a.s === 3 ? (v !== null ? `Zostało ~${buckets(v)} węgla.` : '') : a.s === 5 ? (v !== null ? `Spalono ~${buckets(v)} od opróżnienia.` : '') : temp, tag: `warn-${a.s}` };
     case 9: return { title: `${warn} – koniec`, body: a.s === 3 ? '' : temp, tag: `warn-${a.s}` };
     case 14: return { title: 'Ciepła woda gotowa', body: `${name} ${temp} – można się kąpać.`, tag: 'water' };
+    case 101: {                                         // the morning summary of the day before
+      const parts = [];
+      if (a.b !== undefined) parts.push(`${buckets(a.b / 10)} węgla${a.z !== undefined ? ` (≈${a.z} zł)` : ''}`);
+      parts.push(`piec palił ${dur(a.m * 60)}`);
+      if (a.lo !== undefined) parts.push(`piec ${n1(a.lo / 100)}–${n1(a.hi / 100)}°`);
+      parts.push(a.pc ? `${a.pc} ${plural(a.pc, 'zanik', 'zaniki', 'zaników')} prądu (${durCut(a.ps)})` : 'bez zaników prądu');
+      return { title: 'Wczoraj przy piecu', body: parts.join(' · '), tag: 'summary' };
+    }
     case 100: return { title: 'Dostępna nowa wersja', body: `Wersja ${a.v} – otwórz aplikację i stuknij „Zainstaluj”.`, tag: 'update' };
     case 11: {
       const sec = (a.s & 0x7F) * 65536 + (a.v & 0xFFFF);
