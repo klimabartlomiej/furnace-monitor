@@ -9,6 +9,8 @@
 //   POST /push/subscribe?room=              a phone's PushSubscription (JSON) - its notifications
 //   POST /push/unsubscribe?room=            {endpoint}
 //   POST /push/test?room=                   {endpoint} - a test notification to that phone
+//   POST /handoff?id=<32 hex>               an iPhone's pairing on its way from Safari to the home-screen icon
+//   GET  /handoff?id=                       ... taken once by the icon (encrypted; gone after HANDOFF_MS)
 //
 // WebSocket binary messages: phone -> ESP, and ESP -> every phone of the room. Text "ping" is answered "pong" by
 // the runtime itself, without waking the room up. The phones get the ESP's state as text:
@@ -29,6 +31,7 @@ const MAX_SUBSCRIPTIONS = 20;
 const SILENT_MS = 100 * 1000;           // the ESP pings every 30 s: silent this long = gone
 const CHECK_MS = 90 * 1000;             // how often a connected ESP is looked at (a dead TCP looks open)
 const OFFLINE_ALERT_MS = 5 * 60 * 1000; // gone this long -> "Piec offline" on the phones
+const HANDOFF_MS = 30 * 60 * 1000;      // a pairing waits this long for the home-screen icon
 const SUBJECT = 'https://klimabartlomiej.github.io/furnace-monitor/';   // who sends, for the push services
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
 
@@ -36,6 +39,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
+    if (url.pathname === '/handoff') {
+      const id = url.searchParams.get('id') || '';
+      if (!ROOM.test(id)) return new Response('bad id\n', { status: 400, headers: CORS });
+      return env.ROOMS.get(env.ROOMS.idFromName('handoff:' + id)).fetch(request);
+    }
     const room = url.searchParams.get('room') || '';
     const isWs = url.pathname === '/ws', isPush = url.pathname.startsWith('/push/');
     if (!isWs && !isPush) return new Response('furnace relay\n', { status: 404 });
@@ -57,6 +65,7 @@ export class Room extends DurableObject {
 
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/handoff') return this.handoff(request);
     if (url.pathname !== '/ws') return this.push(url.pathname, request);
     const [client, server] = Object.values(new WebSocketPair());
     const at = Date.now();
@@ -113,7 +122,9 @@ export class Room extends DurableObject {
   }
 
   // Every CHECK_MS while the ESP is connected; once it is gone, at OFFLINE_ALERT_MS after it was last heard.
+  // In a handoff's object: its time is up.
   async alarm() {
+    if (await this.ctx.storage.get('handoff')) return this.ctx.storage.deleteAll();
     if (await this.device()) return this.ctx.storage.setAlarm(Date.now() + CHECK_MS);
     const seen = await this.ctx.storage.get('seen');
     if (!seen || (await this.ctx.storage.get('alerted'))) return;
@@ -163,6 +174,25 @@ export class Room extends DurableObject {
 
   close(ws, code, reason) {
     try { ws.close(code, reason); } catch (e) {}
+  }
+
+  // ---- pairing handoff
+
+  // An iPhone keeps Safari's and the home-screen icon's storage apart, and the icon starts without the link's
+  // #fragment. So Safari leaves the pairing here - encrypted with a key that travels only in the icon's address,
+  // which the relay never sees - and the icon takes it once.
+  async handoff(request) {
+    const headers = { ...CORS, 'Content-Type': 'text/plain' };
+    if (request.method === 'POST') {
+      const body = await request.text();
+      if (!body || body.length > 512) return new Response('bad\n', { status: 400, headers });
+      await this.ctx.storage.put('handoff', body);
+      await this.ctx.storage.setAlarm(Date.now() + HANDOFF_MS);
+      return new Response('ok\n', { headers });
+    }
+    const body = await this.ctx.storage.get('handoff');
+    if (body) await this.ctx.storage.deleteAll();
+    return new Response(body || '', { status: body ? 200 : 404, headers });
   }
 
   // ---- notifications

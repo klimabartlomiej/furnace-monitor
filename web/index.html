@@ -1200,7 +1200,7 @@ function renderHome() {
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   if (/iPhone|iPad/.test(navigator.userAgent) && !standalone && recall('furnace-a2hs') !== '1')
     notices += REMOTE
-      ? `<div class="banner blue">${SVG(I_INFO)}<div><b>Dodaj do ekranu początkowego:</b> Udostępnij → „Do ekranu początkowego”. Jeśli aplikacja z ikony poprosi o kod, skopiuj go tutaj i wklej tam.<br><button class="bbtn" id="copypair">Kopiuj kod</button></div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`
+      ? `<div class="banner blue">${SVG(I_INFO)}<div><b>Dodaj do ekranu początkowego:</b> Udostępnij → „Do ekranu początkowego”, w ciągu 30 minut otwórz aplikację z ikony – będzie już połączona z piecem.<br><button class="bbtn" id="copypair">Kopiuj kod (gdyby jednak prosiła)</button></div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`
       : `<div class="banner blue">${SVG(I_INFO)}<div><b>Wskazówka:</b> stuknij Udostępnij → „Do ekranu początkowego”, a strona otworzy się jak aplikacja.</div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`;
   notices += missedNotice() + seasonNotice();
   notices += warns.map(w => `<div class="banner orange">${SVG(WARNINGS[w].icon)}<div><b>${WARNINGS[w].name}</b> – ${warningText(w)}</div></div>`).join('');
@@ -1772,15 +1772,51 @@ function loadPairing() {
   return !!p;
 }
 
-// A link from the home app pairs this phone. On an iPhone, Safari and the icon on the home screen keep separate
-// data: there the link stays in the address, so "Do ekranu początkowego" takes it along.
+// A link from the home app (or the QR on the box) pairs this phone.
 function takePairingFromLink() {
   if (!/^#p=/.test(location.hash)) return;
   const p = parsePairing(location.hash);
-  if (p) store('furnace-pair', `${p.host}/${p.secret}`);
+  history.replaceState(null, '', location.pathname);
+  if (!p) return;
+  store('furnace-pair', `${p.host}/${p.secret}`);
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
-  if (standalone || !/iPhone|iPad/.test(navigator.userAgent)) history.replaceState(null, '', location.pathname + location.search);
+  if (!standalone && /iPhone|iPad/.test(navigator.userAgent)) handOff(p);
 }
+
+// iPhone: the icon added to the home screen starts with its own, empty storage and without the address's
+// #fragment (tested - it kept asking for the code). Safari leaves the pairing at the relay for a while, encrypted
+// with a key that only the icon's address carries (?h=), and the icon takes it once (takeHandoff).
+const b64uEncode = u => btoa(String.fromCharCode(...u)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function handOff(p) {
+  try {
+    const id = crypto.getRandomValues(new Uint8Array(16)), k = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await crypto.subtle.importKey('raw', k, 'AES-GCM', false, ['encrypt']);
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(`${p.host}/${p.secret}`)));
+    const sealed = new Uint8Array(12 + ct.length);
+    sealed.set(iv);
+    sealed.set(ct, 12);
+    const r = await fetch(`${relayHttpBase(p.host)}/handoff?id=${hexOf(id)}`, { method: 'POST', body: b64uEncode(sealed) });
+    if (r.ok) history.replaceState(null, '', `${location.pathname}?h=${hexOf(id)}${hexOf(k)}&r=${encodeURIComponent(p.host)}`);
+  } catch (e) {}
+}
+
+async function takeHandoff() {
+  const q = new URLSearchParams(location.search), h = q.get('h') || '', host = (q.get('r') || '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(h) || !/^[a-z0-9.-]+(:\d+)?$/.test(host)) return;
+  history.replaceState(null, '', location.pathname);
+  try {
+    const r = await fetch(`${relayHttpBase(host)}/handoff?id=${h.slice(0, 32)}`);
+    if (!r.ok) return;
+    const u = b64url(await r.text()), k = Uint8Array.from(h.slice(32).match(/../g), x => parseInt(x, 16));
+    const key = await crypto.subtle.importKey('raw', k, 'AES-GCM', false, ['decrypt']);
+    const code = new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: u.subarray(0, 12) }, key, u.subarray(12)));
+    if (parsePairing(code)) store('furnace-pair', code);
+  } catch (e) {}
+}
+
+const relayHttpBase = host => `${/^(localhost|127\.|10\.|192\.168\.)/.test(host) ? 'http' : 'https'}://${host}`;
 
 function showPairing() {
   document.body.classList.add('unpaired');
@@ -1905,7 +1941,7 @@ async function relayRequest(path, opt, ms) {
 
 // ---- notifications (remote app only: Web Push needs https and a service worker - web/sw.js)
 
-const relayHttp = path => `${/^(localhost|127\.|10\.|192\.168\.)/.test(relay.host) ? 'http' : 'https'}://${relay.host}${path}?room=${relay.room}`;
+const relayHttp = path => `${relayHttpBase(relay.host)}${path}?room=${relay.room}`;
 const standaloneApp = () => navigator.standalone || matchMedia('(display-mode: standalone)').matches;
 
 function idbSet(key, value) {
@@ -2594,6 +2630,7 @@ function setup() {
 (async function start() {
   if (REMOTE) {
     takePairingFromLink();
+    if (!loadPairing()) await takeHandoff();
     if (!loadPairing()) return showPairing();
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   }
