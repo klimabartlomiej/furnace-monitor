@@ -72,7 +72,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 14;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 15;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -1158,6 +1158,7 @@ void handleNow() {
   j += ",\"rssi\":";     j += (int)WiFi.RSSI();
   j += ",\"ip\":\"";     j += WiFi.localIP().toString();
   j += "\",\"heap\":";   j += (uint32_t)ESP.getFreeHeap();
+  j += ",\"heapBlock\":"; j += (uint32_t)ESP.getMaxAllocHeap();   // a TLS connection needs ~40 KB in one piece
   j += ",\"fsUsed\":";   j += (uint32_t)LittleFS.usedBytes();
   j += ",\"fsTotal\":";  j += (uint32_t)LittleFS.totalBytes();
   j += ",\"oldest\":";   j += minutes.oldest() * 60;

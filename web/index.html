@@ -500,6 +500,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  15: 'Drobiazg: Ustawienia → Urządzenie pokazują też największy wolny blok pamięci – pomaga, gdy aktualizacja się nie uda.',
   14: 'Piec z każdego miejsca: ta sama aplikacja na klimabartlomiej.github.io/furnace-monitor, przez szyfrowany przekaźnik (Ustawienia → Dostęp zdalny). Nowe wersje nie instalują się już same – aplikacja pokazuje, co zmieniają, i instaluje po stuknięciu „Zainstaluj”, z paskiem postępu. Powiadomienia na telefon w tej aplikacji: alarmy, ostrzeżenia, brak prądu i „piec offline” (Ustawienia → Dostęp zdalny). Kopia zapasowa całego urządzenia (Ustawienia) – do przeniesienia na nową płytkę. Telegram usunięty.',
   12: 'Korekta wskazań w Ustawieniach: stała poprawka plus lub minus dla każdego czujnika.',
   11: 'Przycisk BOOT: przytrzymanie 15 s zawsze robi pełny reset (także parowania z aplikacją Dom), nawet gdy urządzenie akurat łączy się z WiFi.',
@@ -2246,7 +2247,7 @@ function renderSettings() {
     + row('Działa od', upText)
     + row('Historia co minutę', `${oldest} z 31 dni`, 'starsze dane zastępowane najnowszymi')
     + row('Pamięć na historię', `${Math.round(fs * 100)} %<div class="bar"><i style="width:${Math.round(fs * 100)}%"></i></div>`, `${Math.round(now.fsUsed / 1024)} z ${Math.round(now.fsTotal / 1024)} KB`)
-    + row('Wolna pamięć RAM', `${Math.round(now.heap / 1024)} KB`);
+    + row('Wolna pamięć RAM', `${Math.round(now.heap / 1024)} KB`, now.heapBlock ? `największy blok ${Math.round(now.heapBlock / 1024)} KB` : '');
   $('#fwinfo').innerHTML = row('Wersja', `v${now.fw}`, esc(updateText(now.update)))
     + (now.ota || REMOTE ? '' : '<p class="note">Instalacja z pliku jest wyłączona – nie ustawiono hasła OTA (polecenie „O” przez USB). Aktualizacje z internetu działają.</p>');
   const u = now.upd || { phase: 0 };
