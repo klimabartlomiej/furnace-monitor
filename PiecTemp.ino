@@ -72,7 +72,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 16;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 17;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -1850,6 +1850,7 @@ void setup() {
   relaySecret(secret, false);
   relay.begin(WEB_PORT, prefs.getString("relayHost", RELAY_HOST), secret);
   updater.onNeedMemory = [](bool on) { relay.pause(on); };
+  updater.proxyHost = [] { return relay.host(); };
   bootReason = readBootReason();
   // The power went within ALIVE_INTERVAL_S after the last mark (without marks: within the minute after the last
   // stored one). A power cut is journaled as the cut itself, other starts as EV_BOOT.

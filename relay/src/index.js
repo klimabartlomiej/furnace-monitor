@@ -9,6 +9,10 @@
 //   POST /push/subscribe?room=              a phone's PushSubscription (JSON) - its notifications
 //   POST /push/unsubscribe?room=            {endpoint}
 //   POST /push/test?room=                   {endpoint} - a test notification to that phone
+//   GET  /fw?u=<url>                        a release file of this repo (manifest, firmware) for the ESP, over
+//                                           plain HTTP too: no second TLS connection on the ESP (no RAM for it),
+//                                           its relay connection stays up and the phones see the progress; the
+//                                           firmware is checked against the manifest's SHA-256 anyway
 //   POST /handoff?id=<32 hex>               an iPhone's pairing on its way from Safari to the home-screen icon
 //   GET  /handoff?id=                       ... taken once by the icon (encrypted; gone after HANDOFF_MS)
 //
@@ -32,6 +36,7 @@ const SILENT_MS = 100 * 1000;           // the ESP pings every 30 s: silent this
 const CHECK_MS = 90 * 1000;             // how often a connected ESP is looked at (a dead TCP looks open)
 const OFFLINE_ALERT_MS = 5 * 60 * 1000; // gone this long -> "Piec offline" on the phones
 const HANDOFF_MS = 30 * 60 * 1000;      // a pairing waits this long for the home-screen icon
+const FW_SOURCES = ['https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/', 'https://cdn.jsdelivr.net/gh/klimabartlomiej/furnace-monitor@'];
 const SUBJECT = 'https://klimabartlomiej.github.io/furnace-monitor/';   // who sends, for the push services
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
 
@@ -39,6 +44,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
+    if (url.pathname === '/fw') return firmware(request, url.searchParams.get('u') || '');
     if (url.pathname === '/handoff') {
       const id = url.searchParams.get('id') || '';
       if (!ROOM.test(id)) return new Response('bad id\n', { status: 400, headers: CORS });
@@ -56,6 +62,19 @@ export default {
     return env.ROOMS.get(env.ROOMS.idFromName(room)).fetch(request);
   },
 };
+
+// Only this repo's files - not an open proxy. Range passes through (a broken download resumes).
+async function firmware(request, source) {
+  if (!FW_SOURCES.some(p => source.startsWith(p)) || source.includes('..')) return new Response('not allowed\n', { status: 403 });
+  const range = request.headers.get('Range');
+  const res = await fetch(source, { headers: range ? { Range: range } : {} });
+  const headers = new Headers({ 'Cache-Control': 'no-store' });
+  for (const h of ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges']) {
+    const v = res.headers.get(h);
+    if (v) headers.set(h, v);
+  }
+  return new Response(res.body, { status: res.status, headers });
+}
 
 export class Room extends DurableObject {
   constructor(ctx, env) {

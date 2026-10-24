@@ -17,9 +17,11 @@
 // The check and the download run in a task of their own: the readings, HomeKit and the web app go on meanwhile,
 // and the web app shows the progress (progress()). Getting the file must not fail on one bad connection:
 //   - a download that breaks off resumes where it stopped (an HTTP Range request),
-//   - the tries go in turn to GitHub and to the manifest's "mirror" (jsDelivr - another CDN, the same file),
-//   - a second TLS connection needs ~40 KB of RAM: the relay (onNeedMemory) lets its own go right away when the
-//     heap is short, and after any failed try - the manifest fetch gets a second try the same way.
+//   - first through the relay's /fw over plain HTTP (proxyHost): no second TLS connection, so no RAM for one,
+//     and the relay stays connected - the phones watch the progress from anywhere. Plain HTTP is safe for the
+//     file: what gets installed is decided by the manifest's SHA-256,
+//   - then straight from GitHub and the manifest's "mirror" (jsDelivr - another CDN, the same file) over TLS;
+//     a TLS connection needs ~40 KB of RAM, so the relay (onNeedMemory) lets its own go for those tries.
 // The restart into the new version happens in the loop, never in the middle of its work.
 
 #pragma once
@@ -31,6 +33,7 @@
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <functional>
+#include <vector>
 #include <mbedtls/sha256.h>
 
 class RemoteUpdate {
@@ -55,6 +58,8 @@ public:
   // Called with true when the firmware connection could not be opened (maybe no memory for a second TLS
   // connection): whoever holds one lets it go until the call with false, after the download.
   std::function<void(bool)> onNeedMemory;
+  // The relay's host (Relay.h) for downloads over plain HTTP; empty = straight from GitHub only.
+  std::function<String()> proxyHost;
 
   RemoteUpdate(const char* manifestUrl, uint32_t version) : manifestUrl(manifestUrl), version(version) {}
 
@@ -218,46 +223,68 @@ private:
     return json.substring(p, end);
   }
 
-  // GitHub is reached over TLS without pinning a CA; what gets installed is decided by the SHA-256 from the
-  // manifest, so a corrupted or truncated download can never be flashed.
-  static bool open(HTTPClient& http, NetworkClientSecure& client, const String& url) {
-    client.setInsecure();
-    client.setHandshakeTimeout(10);   // seconds; the default of 120 would hold a dead check for minutes
-    http.setTimeout(15000);
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    return http.begin(client, url);
+  // A plain HTTP URL through the relay for a GitHub/jsDelivr one, empty without a relay.
+  String viaRelay(const String& url) const {
+    String host = proxyHost ? proxyHost() : String();
+    if (host.isEmpty()) return String();
+    String q;
+    for (char c : url) {
+      if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') q += c;
+      else q += String("%") + "0123456789ABCDEF"[(uint8_t)c >> 4] + "0123456789ABCDEF"[c & 15];
+    }
+    return "http://" + host + "/fw?u=" + q;
   }
 
-  // The manifest; more tries with all the memory when the first fails.
+  // The places to try in turn: the relay (plain HTTP) for each source first, then each source over TLS.
+  std::vector<String> sources(const String& url, const String& mirror) const {
+    std::vector<String> out;
+    for (const String* s : {&url, &mirror})
+      if (s->length() && viaRelay(*s).length()) out.push_back(viaRelay(*s));
+    for (const String* s : {&url, &mirror})
+      if (s->length()) out.push_back(*s);
+    return out;
+  }
+
+  // Plain HTTP (the relay) or TLS (GitHub, no CA pinned: what gets installed is decided by the SHA-256 from the
+  // manifest, so a corrupted or truncated download can never be flashed). A TLS try gets all the memory first.
+  bool open(HTTPClient& http, NetworkClient& plain, NetworkClientSecure& tls, const String& url) {
+    http.setTimeout(15000);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    if (url.startsWith("http://")) return http.begin(plain, url);
+    needMemory();
+    tls.setInsecure();
+    tls.setHandshakeTimeout(10);      // seconds; the default of 120 would hold a dead check for minutes
+    return http.begin(tls, url);
+  }
+
+  // The manifest: through the relay, then from GitHub over TLS (twice).
   bool fetchManifest(String& manifest, String& why) {
-    for (uint8_t attempt = 0; attempt < 3; attempt++) {
-      if (attempt) needMemory();
-      if (attempt == 2) delay(3000);
-      NetworkClientSecure client;
+    std::vector<String> tries = sources(manifestUrl, String());
+    tries.push_back(manifestUrl);
+    for (size_t attempt = 0; attempt < tries.size(); attempt++) {
+      if (attempt) delay(2000);
+      NetworkClient plain;
+      NetworkClientSecure tls;
       HTTPClient http;
-      if (!open(http, client, manifestUrl)) {
+      if (!open(http, plain, tls, tries[attempt])) {
         why = "bad manifest URL";
-        return false;
+        continue;
       }
       int code = http.GET();
       if (code == 200) {
         manifest = http.getString();
         http.end();
-        return manifest.length() > 0;
+        if (manifest.indexOf("\"version\"") >= 0) return true;
+        why = "not a manifest";
+        continue;
       }
-      why = "manifest HTTP " + String(code) + tlsError(client);
+      why = "manifest HTTP " + String(code) + tlsError(tls);
       http.end();
     }
     return false;
   }
 
   void check() {
-    // Someone tapped "Zainstaluj": let the relay take the answer to the phone, then give the download all the
-    // memory from the start (measured: the manifest failed twice while the busy app kept the relay working).
-    if (installWanted) {
-      delay(1500);
-      needMemory();
-    }
     String manifest, why;
     if (!fetchManifest(manifest, why)) return fail(why);
 
@@ -295,17 +322,23 @@ private:
     mbedtls_sha256_starts(&ctx, 0);
     size_t written = 0;
     String why;
-    if (ESP.getMaxAllocHeap() < 40000 || ESP.getFreeHeap() < 80000) needMemory();
+    std::vector<String> from = sources(url, mirror);
     uint8_t failures = 0;
-    for (uint8_t n = 0; written < size && failures < ATTEMPTS; n++) {
+    for (size_t n = 0; written < size && failures < ATTEMPTS; n++) {
       if (n) delay(3000);
-      const String& from = mirror.length() && n % 2 ? mirror : url;   // GitHub and the mirror in turn
       size_t before = written;
       int code = 0;
-      why = download(from, written, size, ctx, code);
+      // A source that made progress is kept; one that failed hands over to the next.
+      why = download(from.front(), written, size, ctx, code);
       if (why.startsWith("flash")) break;      // the flash refused it - another connection will not help
-      failures = written > before ? 0 : failures + 1;   // progress made: a break-off costs no attempt
-      if (written < size) needMemory();        // whatever broke it, the next try gets all the memory
+      if (written > before) {
+        failures = 0;
+      } else {
+        failures++;
+        String failed = from.front();          // the next source first, this one at the end
+        from.erase(from.begin());
+        from.push_back(failed);
+      }
     }
     uint8_t digest[32];
     mbedtls_sha256_finish(&ctx, digest);
@@ -335,9 +368,10 @@ private:
   // One connection, from `written` on (a Range request after a break-off). Returns why it stopped, "" = complete;
   // `code` is the HTTP status, negative when no connection was made.
   String download(const String& url, size_t& written, size_t size, mbedtls_sha256_context& ctx, int& code) {
+    NetworkClient plain;
     NetworkClientSecure client;
     HTTPClient http;
-    if (!open(http, client, url)) return "bad firmware URL";
+    if (!open(http, plain, client, url)) return "bad firmware URL";
     if (written) http.addHeader("Range", "bytes=" + String(written) + "-");
     code = http.GET();
     if (code != 200 && code != 206) {
