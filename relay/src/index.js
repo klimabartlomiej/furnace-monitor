@@ -67,10 +67,9 @@ export default {
 async function firmware(request, source) {
   if (!FW_SOURCES.some(p => source.startsWith(p)) || source.includes('..')) return new Response('not allowed\n', { status: 403 });
   const range = request.headers.get('Range');
-  // The manifest always fresh (GitHub's CDN keeps it 5 min, and a new release must show at once); firmware files
-  // have a new name for every version.
-  const fresh = source.endsWith('.json') ? `${source}${source.includes('?') ? '&' : '?'}t=${Date.now()}` : source;
-  const res = await fetch(fresh, { headers: range ? { Range: range } : {}, cf: { cacheTtl: 0 } });
+  // Not cached here; GitHub's own CDN still keeps the manifest up to 5 min (it ignores query strings - measured),
+  // so a new release reaches the ESPs within 5 min. Firmware files have a new name for every version.
+  const res = await fetch(source, { headers: range ? { Range: range } : {}, cf: { cacheTtl: 0 } });
   const headers = new Headers({ 'Cache-Control': 'no-store' });
   for (const h of ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges']) {
     const v = res.headers.get(h);
