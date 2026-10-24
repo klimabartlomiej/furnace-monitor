@@ -134,6 +134,22 @@ nav.tabs button{position:relative}
 .chip i{width:9px;height:9px;border-radius:50%;background:var(--c);opacity:.5}
 .chip.on{color:var(--text);border-color:var(--c);background:var(--cb)}
 .chip.on i{opacity:1}
+.mgroup-h{color:var(--muted);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin:18px 6px 8px}
+.mgroup-h:first-child{margin-top:0}
+.mgroup{padding:2px 0}
+.mrow{display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;border-top:1px solid var(--line);color:var(--text);padding:12px 16px;font-size:16px;text-align:left}
+.mrow:first-child{border-top:0}
+.mrow .badge{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;flex:none}
+.mrow .badge svg{width:17px;height:17px}
+.mrow .mt{flex:1;min-width:0}
+.mrow .mv{color:var(--muted);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
+.mrow .mv.hot{color:var(--green);font-weight:600}
+.mrow .chev{color:var(--faint);font-size:22px;line-height:1}
+.spage{display:none}
+.spage.on{display:block}
+.back{display:none;background:none;border:0;color:var(--blue);font-size:16px;padding:0;margin:0 0 6px}
+.kind small{display:block;color:var(--faint);font-size:12px;margin-top:2px}
+.kind span{color:var(--text)}
 .pair{display:none;padding:calc(env(safe-area-inset-top) + 28px) 16px 24px;max-width:520px;margin:0 auto}
 body.unpaired .view,body.unpaired nav.tabs{display:none!important}
 body.unpaired .pair{display:block}
@@ -363,78 +379,61 @@ nav.tabs button.on{color:var(--text)}
 </section>
 
 <section class="view" id="v-settings">
-  <header class="top"><h1>Ustawienia</h1></header>
-  <div class="card">
-    <div class="card-h">Progi alarmów</div>
+  <header class="top"><button class="back" id="setback">‹ Ustawienia</button><h1 id="settitle">Ustawienia</h1></header>
+  <div id="setmenu"></div>
+  <div class="spage" data-page="limits"><div class="card">
     <div id="limits"></div>
-    <p class="note">Przekroczenie progu otwiera czujnik „Alarm …” w aplikacji Dom i wysyła powiadomienie na telefon. Puste pole wyłącza dany alarm.</p>
-  </div>
-  <div class="card">
-    <div class="card-h">Korekta wskazań</div>
+    <p class="note">Przekroczenie progu wysyła powiadomienie w aplikacji (Ustawienia → Powiadomienia). Puste pole wyłącza dany alarm.</p>
+  </div></div>
+  <div class="spage" data-page="warn"><div class="card">
+    <div id="warnset"></div>
+    <p class="note">Ostrzeżenia przychodzą jako powiadomienia w aplikacji – gdy się zaczynają i gdy się kończą.</p>
+  </div></div>
+  <div class="spage" data-page="coal"><div class="card"><div id="coalset"></div></div></div>
+  <div class="spage" data-page="season"><div class="card"><div id="seasonset"></div></div></div>
+  <div class="spage" data-page="offsets"><div class="card">
     <div id="offsets"></div>
     <p class="note">Stała poprawka dodawana do odczytu czujnika: gdy pokazuje za mało – plus, gdy za dużo – minus. Działa od razu wszędzie: w aplikacji, w Domu, w Eve, w alarmach i w historii od teraz.</p>
-  </div>
-  <div class="card">
-    <div class="card-h">Ostrzeżenia</div>
-    <div id="warnset"></div>
-    <p class="note">Każde ostrzeżenie to osobny czujnik w aplikacji Dom – włącz dla niego powiadomienia. Dom powiadamia, gdy czujnik się otwiera (początek) i gdy się zamyka (koniec).</p>
-  </div>
-  <div class="card">
-    <div class="card-h">Węgiel</div>
-    <div id="coalset"></div>
-  </div>
-  <div class="card"><div id="seasonset"></div></div>
-  <div class="card">
-    <div class="card-h">Dostęp zdalny</div>
-    <div id="remoteset"></div>
-  </div>
-  <div class="card">
-    <div class="card-h">Temperatura na zewnątrz</div>
+  </div></div>
+  <div class="spage" data-page="push"><div class="card"><div id="pushset"></div></div></div>
+  <div class="spage" data-page="remote"><div class="card"><div id="remoteset"></div></div></div>
+  <div class="spage" data-page="software"><div class="card">
+    <div class="rows" id="fwinfo"></div>
+    <div id="fwupd"></div>
+    <button class="btn" id="checkupd">Sprawdź aktualizacje</button>
+    <div id="fwfilebox">
+    <p class="note">Instalacja z pliku (tylko w domowym Wi-Fi):</p>
+    <input class="field" type="file" id="fwfile" accept=".bin">
+    <input class="field" type="password" id="fwpwd" placeholder="Hasło OTA" autocomplete="off">
+    <button class="btn" id="fwup">Zainstaluj</button>
+    <div class="progress" id="fwprog"><i></i></div>
+    </div>
+  </div></div>
+  <div class="spage" data-page="device"><div class="card"><div class="rows" id="device"></div></div></div>
+  <div class="spage" data-page="outdoor"><div class="card">
     <div class="rows" id="place"></div>
     <input class="field" type="text" id="placeq" placeholder="Wpisz miejscowość…" autocomplete="off">
     <div class="places" id="places"></div>
-  </div>
-  <div class="card">
-    <div class="card-h">Urządzenie</div>
-    <div class="rows" id="device"></div>
-  </div>
-  <details class="card">
-    <summary>Oprogramowanie</summary>
-    <div class="inner">
-      <div class="rows" id="fwinfo"></div>
-      <div id="fwupd"></div>
-      <button class="btn" id="checkupd">Sprawdź aktualizacje</button>
-      <div id="fwfilebox">
-      <p class="note">Instalacja z pliku (tylko w domowym Wi-Fi):</p>
-      <input class="field" type="file" id="fwfile" accept=".bin">
-      <input class="field" type="password" id="fwpwd" placeholder="Hasło OTA" autocomplete="off">
-      <button class="btn" id="fwup">Zainstaluj</button>
-      <div class="progress" id="fwprog"><i></i></div>
-      </div>
+  </div></div>
+  <div class="spage" data-page="backup"><div class="card">
+    <p class="note" style="margin-top:0">Całe urządzenie w jednym pliku: historia, ustawienia, Wi-Fi, parowanie z aplikacją Dom i dostęp zdalny. Po przywróceniu na nowej płytce Dom i telefony widzą ją jak starą. Plik zawiera hasło Wi-Fi – nie udostępniaj go.</p>
+    <a class="btn" href="/api/backup" download>Pobierz kopię</a>
+    <p class="note">Przywrócenie zastępuje wszystko na tym urządzeniu. Stare urządzenie musi być wtedy wyłączone.</p>
+    <input class="field" type="file" id="bkfile" accept=".bin">
+    <button class="btn danger" id="bkup">Przywróć z kopii…</button>
+    <div class="progress" id="bkprog"><i></i></div>
+  </div></div>
+  <div class="spage" data-page="advanced">
+    <div class="card">
+      <div class="card-h">Czujniki na magistrali</div>
+      <button class="btn" id="scan">Skanuj</button><pre id="bus">–</pre>
     </div>
-  </details>
-  <details class="card" id="backupcard">
-    <summary>Kopia zapasowa</summary>
-    <div class="inner">
-      <p class="note" style="margin-top:0">Całe urządzenie w jednym pliku: historia, ustawienia, Wi-Fi, parowanie z aplikacją Dom i dostęp zdalny. Po przywróceniu na nowej płytce Dom i telefony widzą ją jak starą. Plik zawiera hasło Wi-Fi – nie udostępniaj go.</p>
-      <a class="btn" href="/api/backup" download>Pobierz kopię</a>
-      <p class="note">Przywrócenie zastępuje wszystko na tym urządzeniu. Stare urządzenie musi być wtedy wyłączone.</p>
-      <input class="field" type="file" id="bkfile" accept=".bin">
-      <button class="btn danger" id="bkup">Przywróć z kopii…</button>
-      <div class="progress" id="bkprog"><i></i></div>
-    </div>
-  </details>
-  <details class="card">
-    <summary>Czujniki na magistrali</summary>
-    <div class="inner"><button class="btn" id="scan">Skanuj</button><pre id="bus">–</pre></div>
-  </details>
-  <details class="card">
-    <summary>Zaawansowane</summary>
-    <div class="inner">
+    <div class="card">
+      <div class="card-h">Historia</div>
       <p class="note" style="margin-top:0">Usuwa wszystkie pomiary, podsumowania dobowe, historię dla Eve i dziennik. Progi i ustawienia zostają.</p>
       <button class="btn danger" id="clearhist">Usuń całą historię…</button>
     </div>
-  </details>
+  </div>
 </section>
 
 <nav class="tabs">
@@ -499,6 +498,14 @@ const I_COAL = '<path d="M3 19h18l-3-6.5-3.5 2.5L11 8l-3.5 6L5.5 12z"/>';
 const I_SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
 const I_ASH = '<path d="M4 10h16l-1.5 9h-13z"/><path d="M8 10c0-2 1.5-2 1.5-4M12 10c0-2 1.5-2 1.5-4M16 10c0-2 1.5-2 1.5-4"/>';
 const I_PLUS = '<path d="M12 5v14M5 12h14"/>';
+const I_BELL = '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>';
+const I_GLOBE = '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>';
+const I_CHIP = '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5v3.5M15 2.5v3.5M9 18v3.5M15 18v3.5M2.5 9h3.5M2.5 15h3.5M18 9h3.5M18 15h3.5"/>';
+const I_BOX = '<path d="M3 4h18v4H3z"/><path d="M5 8v12h14V8M10 12h4"/>';
+const I_TOOLS = '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>';
+const I_PLUSMINUS = '<path d="M12 4v8M8 8h8M8 18h8"/>';
+const I_THERMO = '<path d="M10 4.5a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0z"/><path d="M12 9.5v5.5"/>';
+const I_DROP = '<path d="M12 3c3.2 4.4 6 7.6 6 11a6 6 0 0 1-12 0c0-3.4 2.8-6.6 6-11z"/>';
 const I_FLAME = ICONS[0];
 const WARNINGS = [
   { name: 'Piec wygasa', icon: I_FLAME },
@@ -514,6 +521,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  19: 'Ustawienia jako menu: każda sprawa na osobnej stronie. Alarmy, ostrzeżenia i „Ciepła woda gotowa” tylko jako powiadomienia w tej aplikacji – w aplikacji Dom zostały same termometry (z historią w Eve). W Powiadomieniach wybierasz, co ma przychodzić na ten telefon; przychodzi też „Dostępna nowa wersja”.',
   18: 'Okno aktualizacji: gdy piec na chwilę znika (restart po instalacji), ruchomy pasek pokazuje, że instalacja trwa.',
   17: 'Aktualizacja pobiera się przez przekaźnik – piec cały czas jest połączony i pasek postępu widać także spoza domu. Wykresy: kropki na pomiarach, delikatna siatka; palcem przewijasz w lewo i prawo, przytrzymanie pokazuje wartość.',
   16: 'Pewniejsza aktualizacja z telefonu: piec najpierw odpowiada aplikacji, potem na czas pobierania zwalnia pamięć. Na iPhonie aplikacja dodana do ekranu początkowego nie prosi już o kod parowania.',
@@ -530,7 +538,7 @@ const PROBLEM_END = { 3: 5, 4: 5, 6: 7, 8: 9 };
 const EV_POWER_CUT = 11;      // time = power back, value = minutes without power
 const BOOT_REASON = ['', 'po włączeniu zasilania', 'po restarcie', 'po spadku napięcia', 'po błędzie programu'];
 const WARNING_PROBES = [[FURNACE], [FURNACE, RETURN, BOILER], [COAL], [FURNACE, RETURN], [FURNACE], [FURNACE]];
-const EV_SEASON = 12, EV_ASH = 13;
+const EV_SEASON = 12, EV_ASH = 13, EV_HOT_WATER = 14;
 const RANGES = { '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
 const STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200];
 const MIN_SPAN = 1800, MAX_SPAN = 2 * 365 * 86400, LIVE_SPAN = 26 * 3600;
@@ -1755,6 +1763,7 @@ function eventView(e) {
     case EV_SEASON: return raw ? ['c-orange', I_FLAME, 'Sezon grzewczy włączony', i ? 'sam – piec pali od 2 godzin' : '']
       : ['c-blue', I_SUN, 'Tryb lato', 'alarmy „za zimno” pieca i powrotu wyciszone'];
     case EV_ASH: return ['c-gray', I_ASH, 'Opróżniono popielnik', ''];
+    case EV_HOT_WATER: return ['c-blue', I_DROP, 'Ciepła woda gotowa', `${name}${temp}`];
     case 10: return ['c-gray', I_INFO, 'Historia usunięta', ''];
     default: return ['c-gray', I_INFO, 'Zdarzenie', ''];
   }
@@ -2031,12 +2040,58 @@ async function enablePush() {
     const { key } = await (await fetch(relayHttp('/push/key'))).json();
     const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64url(key) });
     await idbSet('pair', pairingCode());                       // the service worker opens the furnace's alerts with it
-    const r = await fetch(relayHttp('/push/subscribe'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
-    if (!r.ok) throw new Error((await r.json()).error);
+    await sendSubscription(sub);
     toast('Powiadomienia włączone');
   } catch (e) { toast('Nie udało się włączyć powiadomień: ' + e.message); }
   pushNow = await pushState();
-  renderRemote();
+  renderPush();
+  renderMenu();
+}
+
+// The subscription with the kinds this phone wants - the relay sends only those.
+async function sendSubscription(sub) {
+  await relayKeys();
+  const r = await fetch(relayHttp('/push/subscribe'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign(sub.toJSON(), { cats: pushKinds() })) });
+  if (!r.ok) throw new Error((await r.json()).error);
+}
+
+const PUSH_KINDS = [
+  ['alarm', 'Alarmy i czujniki', 'za gorąco, za zimno, czujnik nie odpowiada – i powrót do normy'],
+  ['warn', 'Ostrzeżenia', 'piec wygasa, mało węgla, cofanie żaru, popielnik…'],
+  ['power', 'Brak prądu', 'piec offline, zaniki prądu dłuższe niż minuta'],
+  ['water', 'Ciepła woda gotowa', 'bojler nagrzany – można się kąpać'],
+  ['update', 'Aktualizacje', 'nowa wersja do zainstalowania i zakończona aktualizacja'],
+];
+function pushKinds() {
+  try { const k = JSON.parse(recall('furnace-push-kinds')); if (Array.isArray(k)) return k; } catch (e) {}
+  return PUSH_KINDS.map(k => k[0]);
+}
+
+// Settings → Powiadomienia: on/off and test for this phone, then what it should get.
+function renderPush() {
+  const el = $('#pushset');
+  if (editing(el)) return;
+  if (!REMOTE) {
+    el.innerHTML = '<p class="note" style="margin-top:0">Powiadomienia włącza się w aplikacji otwieranej z internetu: Dostęp zdalny → „Otwórz na tym telefonie”, potem tam Ustawienia → Powiadomienia.</p>';
+    return;
+  }
+  let html = pushRows();
+  if (pushNow === 'on') {
+    const on = pushKinds();
+    html += '<div class="card-h" style="margin:18px 0 0">Co ma przychodzić</div>'
+      + PUSH_KINDS.map(([k, name, desc]) => `<label class="rf kind"><span>${name}<small>${desc}</small></span><input class="sw" type="checkbox" data-kind="${k}" ${on.includes(k) ? 'checked' : ''}></label>`).join('');
+  }
+  el.innerHTML = html;
+}
+
+async function onKindChange(e) {
+  if (!e.target.dataset.kind) return;
+  store('furnace-push-kinds', JSON.stringify($$('#pushset [data-kind]').filter(x => x.checked).map(x => x.dataset.kind)));
+  try {
+    const sub = await (await navigator.serviceWorker.getRegistration()).pushManager.getSubscription();
+    await sendSubscription(sub);
+    toast('Zapisano');
+  } catch (err) { toast('Nie udało się zapisać – brak połączenia?'); }
 }
 
 async function disablePush(quiet) {
@@ -2052,7 +2107,8 @@ async function disablePush(quiet) {
     if (!quiet) toast('Powiadomienia wyłączone');
   } catch (e) {}
   pushNow = await pushState();
-  renderRemote();
+  renderPush();
+  renderMenu();
 }
 
 async function testPush() {
@@ -2065,7 +2121,7 @@ async function testPush() {
 
 function pushRows() {
   const st = pushNow;
-  if (st === null) { pushState().then(s => { pushNow = s; renderRemote(); }); return ''; }
+  if (st === null) { pushState().then(s => { pushNow = s; renderPush(); renderMenu(); }); return ''; }
   const text = {
     on: '<span style="color:var(--green)">włączone</span>',
     off: 'wyłączone',
@@ -2136,7 +2192,7 @@ function renderRemote() {
   const green = t => `<span style="color:var(--green)">${t}</span>`, orange = t => `<span style="color:var(--orange)">${esc(t)}</span>`;
   if (REMOTE) {
     const d = relay.device;
-    el.innerHTML = pushRows() + '<div class="rows">' + row('Ten telefon', green('sparowany'), esc(relay.host))
+    el.innerHTML = '<div class="rows">' + row('Ten telefon', green('sparowany'), esc(relay.host))
       + (d ? row('Piec', d.online ? green('online') : '<span style="color:var(--red)">offline</span>', d.since ? `${d.online ? 'od' : 'ostatnio'} ${when(d.since / 1000)}` : '') : '') + '</div>'
       + '<button class="btn" id="rshare">Udostępnij dostęp innej osobie</button>'
       + '<button class="btn danger" id="runpair">Odłącz ten telefon…</button>';
@@ -2148,7 +2204,7 @@ function renderRemote() {
     const state = r.state === 'connected' ? green('połączony') : orange(REMOTE_STATE[r.state] || String(r.state).replace(/^error: /, 'błąd: '));
     html += '<div class="rows">' + row('Przekaźnik', state, esc(r.host) + (r.state === 'connected' && r.since ? ` · od ${when(r.since)}` : '')) + '</div>'
       + `<a class="btn primary" href="${PAGES_URL}#p=${encodeURIComponent(r.code)}" target="_blank" rel="noopener">Otwórz na tym telefonie</a>`
-      + '<p class="note">Powiadomienia na telefon (alarmy, brak prądu) włącza się w tamtej aplikacji: Ustawienia → Dostęp zdalny.</p>'
+      + '<p class="note">Powiadomienia na telefon (alarmy, brak prądu) włącza się w tamtej aplikacji: Ustawienia → Powiadomienia.</p>'
       + '<button class="btn" id="rcopy">Kopiuj kod dla innego telefonu</button>'
       + `<div class="code" id="rcode">${esc(r.code)}</div>`;
   }
@@ -2300,11 +2356,67 @@ async function installUpdate() {
   updateUi();
 }
 
+// ---------------------------------------------------------------- settings menu
+
+// Settings is a menu of pages: each row shows what is set now, a tap opens the page; "‹ Ustawienia" (and the
+// phone's back gesture) returns to the menu.
+const plural3 = n => `${n} ${plural(n, 'czujnik', 'czujniki', 'czujników')}`;
+const SET_PAGES = [
+  { group: 'Piec' },
+  { id: 'limits', title: 'Progi alarmów', icon: I_THERMO, cls: 'c-red', status: () => { const n = now.sensors.filter(s => s.low !== null || s.high !== null).length; return n ? plural3(n) : 'wyłączone'; } },
+  { id: 'warn', title: 'Ostrzeżenia', icon: I_FLAME, cls: 'c-orange', status: () => { const st = now.settings; return `${[st.goOutOn, st.freezeOn, st.burnbackOn, st.coalOn && st.lowCoalOn, st.stalledOn, st.coalOn && st.ashOn].filter(Boolean).length} z 6 włączonych`; } },
+  { id: 'coal', title: 'Węgiel', icon: I_COAL, cls: 'c-gray', status: () => (now.settings.coalOn ? 'liczony' : 'wyłączony') },
+  { id: 'season', title: 'Sezon grzewczy', icon: I_SUN, cls: 'c-blue', status: () => (now.settings.heating ? 'sezon grzewczy' : 'tryb lato') },
+  { id: 'offsets', title: 'Korekta wskazań', icon: I_PLUSMINUS, cls: 'c-gray', status: () => { const n = now.sensors.filter(s => Math.abs(s.offset || 0) >= .05).length; return n ? plural3(n) : 'brak'; } },
+  { group: 'Telefon' },
+  { id: 'push', title: 'Powiadomienia', icon: I_BELL, cls: 'c-red', status: () => (REMOTE ? { on: 'włączone', off: 'wyłączone', denied: 'zablokowane', install: 'najpierw ikona', none: 'niedostępne' }[pushNow] || '' : 'w aplikacji z internetu') },
+  { id: 'remote', title: 'Dostęp zdalny', icon: I_GLOBE, cls: 'c-blue', status: () => (REMOTE ? 'sparowany' : !remoteInfo ? '' : !remoteInfo.host ? 'wyłączony' : remoteInfo.state === 'connected' ? 'połączony' : 'łączenie') },
+  { group: 'Urządzenie' },
+  { id: 'software', title: 'Oprogramowanie', icon: I_DOWN, cls: 'c-green', status: () => (now.avail > now.fw ? `dostępna v${now.avail}` : `v${now.fw}`), hot: () => now.avail > now.fw },
+  { id: 'device', title: 'Urządzenie', icon: I_CHIP, cls: 'c-gray', status: () => `Wi-Fi ${now.rssi} dBm` },
+  { id: 'outdoor', title: 'Temperatura na zewnątrz', icon: I_SUN, cls: 'c-orange', status: () => now.settings.place || 'nie ustawiono' },
+  { id: 'backup', title: 'Kopia zapasowa', icon: I_BOX, cls: 'c-gray', local: true, status: () => '' },
+  { id: 'advanced', title: 'Zaawansowane', icon: I_TOOLS, cls: 'c-gray', status: () => '' },
+];
+let setPage = null;
+
+function renderMenu() {
+  if (!now) return;
+  let html = '', open = false;
+  for (const p of SET_PAGES) {
+    if (p.group) {
+      html += `${open ? '</div>' : ''}<div class="mgroup-h">${p.group}</div><div class="card mgroup">`;
+      open = true;
+      continue;
+    }
+    if (p.local && REMOTE) continue;                       // the backup holds the WiFi password: home WiFi only
+    let st = '';
+    try { st = p.status() || ''; } catch (e) {}
+    html += `<button class="mrow" data-page="${p.id}"><span class="badge ${p.cls}">${SVG(p.icon)}</span><span class="mt">${p.title}</span>`
+      + `<span class="mv${p.hot && p.hot() ? ' hot' : ''}">${esc(st)}</span><span class="chev">›</span></button>`;
+  }
+  $('#setmenu').innerHTML = html + (open ? '</div>' : '');
+}
+
+function showSetPage(id, push = true) {
+  setPage = id;
+  const page = SET_PAGES.find(p => p.id === id);
+  $$('.spage').forEach(p => p.classList.toggle('on', p.dataset.page === id));
+  $('#setmenu').style.display = id ? 'none' : '';
+  $('#setback').style.display = id ? 'block' : 'none';
+  $('#settitle').textContent = page ? page.title : 'Ustawienia';
+  if (push && id) history.pushState({ setPage: id }, '');
+  window.scrollTo(0, 0);
+  if (ui.tab === 'settings') renderSettings();
+}
+
 function renderSettings() {
   if (!now) return;
   const st = now.settings;
+  renderMenu();
+  renderPush();
   renderRemote();
-  loadRemote().then(renderRemote);
+  loadRemote().then(() => { renderRemote(); renderMenu(); });
   $('#seasonset').innerHTML = `<div class="warn-block"><div class="warn-head"><span class="badge ${st.heating ? 'c-orange' : 'c-blue'}">${SVG(st.heating ? I_FLAME : I_SUN)}</span>`
     + `${st.heating ? 'Sezon grzewczy' : 'Tryb lato'}<input class="sw" type="checkbox" data-k="heating" data-msg="Sezon grzewczy" ${st.heating ? 'checked' : ''}></div>`
     + `<div class="warn-desc">${st.heating ? 'Latem wyłącz – alarmy „za zimno” pieca i powrotu oraz ostrzeżenia o paleniu ucichną. Bojler i mróz działają dalej.'
@@ -2529,6 +2641,7 @@ function render(periodic) {
 function showTab(tab) {
   ui.tab = tab;
   saveUi();
+  if (setPage) showSetPage(null, false);                     // the settings tab always opens at its menu
   $$('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + tab));
   $$('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   window.scrollTo(0, 0);
@@ -2663,7 +2776,11 @@ function setup() {
   };
   $('#clearhist').onclick = clearHistory;
   $('#bkup').onclick = restoreBackup;
-  $('#backupcard').style.display = REMOTE ? 'none' : '';      // the file holds the WiFi password: home WiFi only
+  $('#setmenu').onclick = e => { const b = e.target.closest('.mrow'); if (b) showSetPage(b.dataset.page); };
+  $('#setback').onclick = () => (history.state && history.state.setPage ? history.back() : showSetPage(null, false));
+  window.addEventListener('popstate', () => { if (setPage) showSetPage(null, false); });
+  $('#pushset').addEventListener('click', onRemoteClick);
+  $('#pushset').addEventListener('change', onKindChange);
   $('#scan').onclick = async () => {
     $('#bus').textContent = 'Skanowanie…';
     try { $('#bus').textContent = await (await api('/api/bus')).text(); } catch (e) { $('#bus').textContent = 'Skanowanie nieudane'; }

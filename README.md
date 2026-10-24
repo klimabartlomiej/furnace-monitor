@@ -2,18 +2,18 @@
 
 ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - no Homebridge, no Raspberry Pi.
 
-- **Apple Home** (HomeSpan): four temperature sensors (Piec, Powrót, Zasobnik węgla, Bojler) plus one "Alarm ..."
-  contact sensor per probe, which opens when a temperature leaves its limits or a probe dies - turn on its
-  notifications for a push on the phone.
+- **Apple Home** (HomeSpan): four temperature sensors (Piec, Powrót, Zasobnik węgla, Bojler) with a fault flag.
+  Alarms, warnings and "hot water ready" are notifications of the app (below), not Home accessories.
 - **Eve app graphs**: every sensor keeps an Eve-compatible history on the ESP itself (`EveHistory.h`, protocol as
   reverse-engineered by [fakegato-history](https://github.com/simont77/fakegato-history)).
-- **Warnings** (each one a contact sensor in Apple Home, tuned in the web app): furnace dying out (falling fast or
-  heading below its min limit), freezing water, embers creeping into the coal hopper.
+- **Warnings** (tuned in the web app, sent as notifications): furnace dying out (falling fast or heading below its
+  min limit), freezing water, embers creeping into the coal hopper.
 - **Web app** `http://furnace.local:8080` on the home WiFi (in Polish): live cards, charts from 6 hours to years
   with pinch-zoom, alarm limits and warnings, event journal, furnace burning hours, outdoor temperature
   (Open-Meteo), CSV export, firmware updates.
 - **Notifications** (`web/sw.js`): in the remote app, Ustawienia -> Dostęp zdalny -> "Włącz powiadomienia":
-  alarms and their end, dead probes, warnings, power cuts of a minute or more, a finished update - sealed by the
+  alarms and their end, dead probes, warnings, power cuts of a minute or more, hot water ready, a new version to
+  install and a finished update - each phone picks which kinds it gets (the relay filters by kind) - sealed by the
   ESP with the pairing key, so the relay passes them to the push services unread - and "Piec offline" from the
   relay itself when the ESP has been gone 5 minutes (a power cut or no internet). On an iPhone the app must be on
   the home screen.
@@ -29,7 +29,8 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   learnt from refills to the top. Gives daily use, kilograms and costs (from one bucket's weight), the hopper
   level, time left, a "Mało węgla" contact in Apple Home, a 30-day chart with the frost dependence and the
   season so far. Can be switched off in the settings.
-- **Hot water**: a "Ciepła woda gotowa" contact opens when the boiler reaches its "ready" temperature.
+- **Hot water**: "Ciepła woda gotowa" - a notification (at most one an hour) when the boiler reaches its "ready"
+  temperature.
 - **Summer mode**: switches off "too cold" on the furnace and the return plus the burning warnings; the web app
   suggests it after three days without burning, and it ends by itself after two hours of burning.
 - **More warnings**: "Piec stoi po zaniku prądu" (the furnace keeps cooling after a power cut - its controller

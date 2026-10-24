@@ -67,6 +67,8 @@ function describe(a) {
     case 7: return { title: `${name}: czujnik znów działa`, body: temp, tag: `fault-${a.s}` };
     case 8: return { title: warn, body: a.s === 3 ? (v !== null ? `Zostało ~${buckets(v)} węgla.` : '') : a.s === 5 ? (v !== null ? `Spalono ~${buckets(v)} od opróżnienia.` : '') : temp, tag: `warn-${a.s}` };
     case 9: return { title: `${warn} – koniec`, body: a.s === 3 ? '' : temp, tag: `warn-${a.s}` };
+    case 14: return { title: 'Ciepła woda gotowa', body: `${name} ${temp} – można się kąpać.`, tag: 'water' };
+    case 100: return { title: 'Dostępna nowa wersja', body: `Wersja ${a.v} – otwórz aplikację i stuknij „Zainstaluj”.`, tag: 'update' };
     case 11: {
       const sec = (a.s & 0x7F) * 65536 + (a.v & 0xFFFF);
       return { title: 'Był brak prądu', body: `${hhmm((a.t - sec) * 1000)}–${hhmm(a.t * 1000)} · ${dur(sec)}`, tag: 'power' };

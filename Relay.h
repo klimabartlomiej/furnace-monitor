@@ -16,8 +16,9 @@
 //   request:  2 | id u32 | the phone's Unix time u32 | method u8 (0 GET, 1 POST) | path length u16 | path | body
 //   answer:   1 | id u32 | seq u16 | last u8 | HTTP status u16 | body chunk
 // Text messages: "ping" / "pong" (the relay answers pings itself, without waking up), and the furnace's alerts
-// for the phones' notifications: {"t":"push","d":"<nonce | ciphertext | tag, base64url>"}, AAD 'P' - the relay
-// hands "d" to the push services as it is, only the phone's service worker opens it (web/sw.js).
+// for the phones' notifications: {"t":"push","c":"<kind>","d":"<nonce | ciphertext | tag, base64url>"}, AAD 'P'
+// - the relay hands "d" to the push services as it is (only the phone's service worker opens it, web/sw.js) to
+// the phones that want that kind (alarm, warn, power, water, update).
 
 #pragma once
 
@@ -71,11 +72,12 @@ public:
 
   // A notification for the paired phones (a JSON the phone words, web/sw.js). Kept until the relay is reached -
   // a power cut's alert goes out after the restart; when too many wait, the oldest goes.
-  void alert(const String& json) {
+  void alert(const String& json, const char* kind) {
     if (!alerts) return;
     Alert a;
     a.len = min((size_t)json.length(), sizeof(a.text));
     memcpy(a.text, json.c_str(), a.len);
+    strlcpy(a.kind, kind, sizeof(a.kind));
     if (xQueueSend(alerts, &a, 0) != pdTRUE) {
       Alert oldest;
       xQueueReceive(alerts, &oldest, 0);
@@ -142,6 +144,7 @@ private:
 
   struct Alert {
     uint8_t len;
+    char    kind[8];
     char    text[160];
   };
   QueueHandle_t alerts = nullptr;
@@ -361,7 +364,7 @@ private:
     const uint8_t aad = 'P';
     mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT, a.len, sealed, 12, &aad, 1, (const uint8_t*)a.text, sealed + 12, 16,
                               sealed + 12 + a.len);
-    String msg = "{\"t\":\"push\",\"d\":\"" + base64(sealed, 12 + a.len + 16, true) + "\"}";
+    String msg = "{\"t\":\"push\",\"c\":\"" + String(a.kind) + "\",\"d\":\"" + base64(sealed, 12 + a.len + 16, true) + "\"}";
     memcpy(out + HEAD, msg.c_str(), msg.length());
     return sendFrame(tls, OP_TEXT, msg.length());
   }

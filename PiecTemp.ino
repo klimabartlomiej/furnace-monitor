@@ -1,14 +1,9 @@
 // Furnace temperature monitor
 // ESP32 + DS18B20 probes on one 1-Wire bus, exposed straight to Apple Home through HomeSpan (no bridge, no Pi).
 //
-// Apple Home (all names in Polish - the household's language):
-//   name       - temperature sensor per probe; gets a fault flag when the probe stops answering
-//   alarmName  - contact sensor per probe that OPENS when the temperature leaves its limits or the probe dies
-//   warnings   - six contact sensors (furnace dying out, freezing, embers creeping into the coal hopper, low coal,
-//                furnace stalled after a power cut, ash pan due); summer mode quiets the ones about burning
-//   hot water  - a contact sensor that opens when the boiler is warm enough (not a problem - "you can shower")
-//   Turn on notifications for the contact sensors in the Home app to get a push on the phone; Home sends one
-//   when a contact opens and one when it closes.
+// Apple Home (names in Polish - the household's language): one temperature sensor per probe, with a fault flag
+// when the probe stops answering and an Eve history. Alarms, warnings and "hot water ready" are notifications of
+// the app (Relay.h -> relay -> Web Push), not Home accessories - the phone words them (web/sw.js).
 // Coal: the web app records refills in buckets; the coal burned is taken as proportional to the furnace's heat
 // output and the factor is learnt from refills "to the top" (see recomputeCoal) - daily use, costs, hopper level,
 // time left.
@@ -72,7 +67,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 18;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 19;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -118,7 +113,6 @@ constexpr uint8_t  FAULT_AFTER        = 3;               // bad readings in a ro
 // Names are what the Home app and the web app show; HomeKit accepts only letters, digits, spaces and apostrophes.
 struct SensorConfig {
   const char*   name;          // temperature sensor
-  const char*   alarmName;     // the probe's alarm contact sensor
   DeviceAddress address;       // {} = take the next unassigned probe found on the bus
   bool          water;         // watched by the freeze warning
   float         defaultLow;    // alarm limits until they are changed in the web app; NAN = off
@@ -128,10 +122,10 @@ struct SensorConfig {
 // Pinned addresses: a dead or removed probe never shifts the others.
 // Identified on the bench 2026-10-22 (hand-warming test). The web app relies on this order.
 SensorConfig SENSORS[] = {
-  { "Piec",           "Alarm pieca",     {0x28, 0x4D, 0x83, 0x77, 0x91, 0x0C, 0x02, 0xF8}, true,  40.0, 90.0 },   // furnace; counterfeit chip, failed at ~60 C in place
-  { "Powrót",         "Alarm powrotu",   {0x28, 0xAA, 0xEF, 0x8D, 0x4A, 0x14, 0x01, 0xAE}, true,  NAN,  NAN  },   // return water
-  { "Zasobnik węgla", "Alarm zasobnika", {0x28, 0xAA, 0x61, 0x94, 0x4A, 0x14, 0x01, 0x6C}, false, NAN,  50.0 },   // coal hopper; high = embers creeping back
-  { "Bojler",         "Alarm bojlera",   {0x28, 0xAA, 0xDB, 0x95, 0x4D, 0x14, 0x01, 0x6B}, true,  35.0, NAN  },   // hot water tank
+  { "Piec",           {0x28, 0x4D, 0x83, 0x77, 0x91, 0x0C, 0x02, 0xF8}, true,  40.0, 90.0 },   // furnace; counterfeit chip, failed at ~60 C in place
+  { "Powrót",         {0x28, 0xAA, 0xEF, 0x8D, 0x4A, 0x14, 0x01, 0xAE}, true,  NAN,  NAN  },   // return water
+  { "Zasobnik węgla", {0x28, 0xAA, 0x61, 0x94, 0x4A, 0x14, 0x01, 0x6C}, false, NAN,  50.0 },   // coal hopper; high = embers creeping back
+  { "Bojler",         {0x28, 0xAA, 0xDB, 0x95, 0x4D, 0x14, 0x01, 0x6B}, true,  35.0, NAN  },   // hot water tank
 };
 constexpr size_t SENSOR_COUNT = sizeof(SENSORS) / sizeof(SENSORS[0]);
 constexpr size_t FURNACE      = 0;   // probes the warnings and the coal estimate look at
@@ -143,7 +137,6 @@ constexpr size_t BOILER       = 3;
 enum WarningId : uint8_t { WARN_GOING_OUT, WARN_FREEZE, WARN_BURNBACK, WARN_LOW_COAL, WARN_STALLED, WARN_ASH, WARN_COUNT };
 const char* WARNING_NAMES[WARN_COUNT] = { "Piec wygasa", "Ryzyko zamarznięcia", "Cofanie żaru", "Mało węgla",
                                           "Piec stoi po zaniku prądu", "Opróżnij popielnik" };
-const char* HOT_WATER_NAME = "Ciepła woda gotowa";
 
 struct Settings {
   bool     goOutOn      = true;   // furnace dying out: falling faster than goOutRate (degrees/hour), or the
@@ -177,7 +170,6 @@ struct Settings {
 struct SensorState {
   SpanCharacteristic* temperature  = nullptr;
   SpanCharacteristic* fault        = nullptr;
-  SpanCharacteristic* alarmContact = nullptr;
   EveHistory*         history      = nullptr;
   char     serial[16]      = "";          // Eve keeps histories apart by serial number
   char     historyName[40] = "";
@@ -194,7 +186,6 @@ struct SensorState {
 };
 
 struct WarningState {
-  SpanCharacteristic* contact = nullptr;
   bool    active  = false;
   uint8_t pending = 0;    // minutes the condition has held
   uint8_t calm    = 0;    // minutes it has been gone
@@ -205,6 +196,7 @@ enum EventType : uint8_t {
   EV_WARN_ON, EV_WARN_OFF, EV_HISTORY_CLEARED, EV_POWER_CUT,
   EV_SEASON,            // value 1 = heating season on, 0 = summer mode; sensor 1 = switched on by itself
   EV_ASH,               // ash pan emptied
+  EV_HOT_WATER,         // the boiler reached its "ready" temperature (value = degrees x 100)
 };
 
 // Why the ESP started - the `sensor` byte of EV_BOOT and EV_POWER_CUT.
@@ -263,7 +255,6 @@ uint8_t  pendingEventCount = 0;
 BootReason bootReason      = BOOT_OTHER;
 uint32_t powerLostAt       = 0;                 // estimated start of the power cut this boot ended, 0 = none to log
 uint32_t lastAliveMark     = 0;
-SpanCharacteristic* hotWaterContact = nullptr;
 bool     hotWaterReady     = false;
 
 // Coal is counted in buckets - what goes into the hopper; kilograms and costs are the web app's (x bucketKg).
@@ -290,6 +281,7 @@ uint32_t currentDay        = 0;   // local midnight (Unix time) of the day being
 bool     conversionPending = false;
 bool     webStarted        = false;
 bool     serialClosed      = false;   // serial input switched off after SERIAL_WINDOW_MS
+uint32_t offerTold         = 0;       // the newest version a notification has offered (flash "offerTold")
 
 bool clockSet(time_t t) { return t >= 1700000000; }
 
@@ -366,12 +358,12 @@ void logEvent(EventType type, uint8_t sensor, int16_t value) {
 }
 
 // A notification on the paired phones (Relay.h -> relay -> Web Push) for what matters away from home: alarms and
-// their end, dead probes, warnings, power cuts of a minute or more, a finished update. Restored problems are not
+// their end, dead probes, warnings, power cuts of a minute or more, hot water ready, a finished update. Restored problems are not
 // journaled again after a restart (SavedAlerts), so they are not announced twice. The phone words it (web/sw.js).
 void pushEvent(const EventRecord& e) {
   switch (e.type) {
     case EV_UPDATED: case EV_ALARM_HIGH: case EV_ALARM_LOW: case EV_ALARM_CLEAR: case EV_FAULT: case EV_FAULT_CLEAR:
-    case EV_WARN_ON:
+    case EV_WARN_ON: case EV_HOT_WATER:
       break;
     case EV_WARN_OFF:
       if (e.sensor == WARN_ASH) return;                     // the ash pan was emptied - nothing to tell
@@ -383,8 +375,12 @@ void pushEvent(const EventRecord& e) {
       return;
   }
   String j = String("{\"t\":") + e.time + ",\"e\":" + e.type + ",\"s\":" + e.sensor + ",\"v\":" + e.value;
-  if (e.type >= EV_ALARM_HIGH && e.type <= EV_FAULT_CLEAR && e.sensor < SENSOR_COUNT) j += String(",\"n\":\"") + SENSORS[e.sensor].name + "\"";
-  relay.alert(j + "}");
+  if (((e.type >= EV_ALARM_HIGH && e.type <= EV_FAULT_CLEAR) || e.type == EV_HOT_WATER) && e.sensor < SENSOR_COUNT)
+    j += String(",\"n\":\"") + SENSORS[e.sensor].name + "\"";
+  // Which kind it is - each phone chooses what it gets (the relay filters; it cannot read the alert itself).
+  const char* kind = e.type == EV_UPDATED ? "update" : e.type == EV_POWER_CUT ? "power" : e.type == EV_HOT_WATER ? "water"
+                     : e.type == EV_WARN_ON || e.type == EV_WARN_OFF ? "warn" : "alarm";
+  relay.alert(j + "}", kind);
 }
 
 // The clock is set: events from before it get their real time (boot time + their seconds since boot).
@@ -461,14 +457,6 @@ void restoreAlerts() {
 
 // ------------------------------------------------------------------ HomeKit
 
-SpanCharacteristic* newContactAccessory(const char* name, bool open) {
-  new SpanAccessory();
-    new Service::AccessoryInformation();
-      new Characteristic::Identify();
-      new Characteristic::Name(name);
-    new Service::ContactSensor();
-      return new Characteristic::ContactSensorState(open ? 1 : 0);
-}
 
 void createAccessories() {
   new SpanAccessory();                       // the bridge itself
@@ -497,11 +485,6 @@ void createAccessories() {
       s.history = new EveHistory(s.historyName, s.historyPath);
   }
 
-  // One alarm contact per probe, so a dead probe that keeps its alarm open never hides a new alarm elsewhere.
-  for (size_t i = 0; i < SENSOR_COUNT; i++)
-    state[i].alarmContact = newContactAccessory(SENSORS[i].alarmName, state[i].alarm != 0 || state[i].faulty);
-  for (uint8_t w = 0; w < WARN_COUNT; w++) warnings[w].contact = newContactAccessory(WARNING_NAMES[w], warnings[w].active);
-  hotWaterContact = newContactAccessory(HOT_WATER_NAME, hotWaterReady);
 }
 
 // Pushes the state of one probe to HomeKit; only changed values are sent.
@@ -516,11 +499,6 @@ void reportSensor(size_t i) {
   }
   int fault = s.faulty ? 1 : 0;
   if (s.fault->getVal() != fault) s.fault->setVal(fault);
-  int open = (s.alarm != 0 || s.faulty) ? 1 : 0;   // 1 = contact open = alarm
-  if (s.alarmContact->getVal() != open) {
-    s.alarmContact->setVal(open);
-    Serial.printf("%s: %s\n", SENSORS[i].alarmName, open ? "OPEN" : "closed");
-  }
 }
 
 // ------------------------------------------------------------------ measurement
@@ -667,7 +645,6 @@ void setWarning(WarningId w, bool condition, bool known, uint8_t holdOn, uint8_t
     if (s.active && ++s.calm >= holdOff) s.active = false;
   }
   if (s.active == before) return;
-  s.contact->setVal(s.active ? 1 : 0);
   Serial.printf("Warning %s: %s\n", WARNING_NAMES[w], s.active ? "ON" : "off");
   logEvent(s.active ? EV_WARN_ON : EV_WARN_OFF, w, toHundredths(value));
   saveAlerts();
@@ -744,14 +721,19 @@ void evaluateWarnings(bool tick = false) {
   bool ashDue = ashAt && clockSet(now) && ((now - ashAt) / 86400.0f >= settings.ashDays || ashBuckets >= settings.ashLimit);
   setWarning(WARN_ASH, ashDue, clockSet(now), 1, 1, heating && settings.coalOn && settings.ashOn, upTo320(ashBuckets), tick);
 
-  // Hot water ready: not a problem, just a contact for a push when the boiler is warm enough.
+  // Hot water ready: not a problem, a notification "you can shower" when the boiler is warm enough - at most one
+  // an hour, as a boiler around its "ready" temperature crosses it back and forth.
   const SensorState& b = state[BOILER];
   if (!b.faulty && !isnan(b.lastGood)) {
     bool ready = b.lastGood >= settings.hotWater - (hotWaterReady ? HOT_WATER_HYSTERESIS : 0);
     if (ready != hotWaterReady) {
       hotWaterReady = ready;
-      hotWaterContact->setVal(ready ? 1 : 0);
       saveAlerts();
+      static uint32_t lastToldMs = 0;
+      if (ready && (!lastToldMs || millis() - lastToldMs >= 3600UL * 1000)) {
+        lastToldMs = millis();
+        logEvent(EV_HOT_WATER, BOILER, toHundredths(b.lastGood));
+      }
     }
   }
 }
@@ -1851,6 +1833,7 @@ void setup() {
   relay.begin(WEB_PORT, prefs.getString("relayHost", RELAY_HOST), secret);
   updater.onNeedMemory = [](bool on) { relay.pause(on); };
   updater.proxyHost = [] { return relay.host(); };
+  offerTold = prefs.getUInt("offerTold", 0);
   bootReason = readBootReason();
   // The power went within ALIVE_INTERVAL_S after the last mark (without marks: within the minute after the last
   // stored one). A power cut is journaled as the cut itself, other starts as EV_BOOT.
@@ -1895,6 +1878,14 @@ void loop() {
   logHistory();
   updater.loop();
   if (updater.takeJustConfirmed()) logEvent(EV_UPDATED, 0, FW_VERSION);
+  // A newer version found by the hourly check: once per version (also across restarts), a notification to open
+  // the app and tap "Zainstaluj". A forced one installs by itself - "updated" comes then.
+  uint32_t offer = updater.available();
+  if (offer && offer != offerTold && !updater.forced()) {
+    offerTold = offer;
+    prefs.putUInt("offerTold", offer);
+    relay.alert(String("{\"t\":") + (uint32_t)time(nullptr) + ",\"e\":100,\"v\":" + offer + "}", "update");
+  }
 
   // Readings on the full minute once NTP has set the clock, every READ_INTERVAL_MS before that.
   time_t wall = time(nullptr);
