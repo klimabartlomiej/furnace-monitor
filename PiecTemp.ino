@@ -4,9 +4,9 @@
 // Apple Home (names in Polish - the household's language): one temperature sensor per probe, with a fault flag
 // when the probe stops answering and an Eve history. Alarms, warnings and "hot water ready" are notifications of
 // the app (Relay.h -> relay -> Web Push), not Home accessories - the phone words them (web/sw.js).
-// Coal: the web app records refills in buckets; the coal burned is taken as proportional to the furnace's heat
-// output and the factor is learnt from refills "to the top" (see recomputeCoal) - daily use, costs, hopper level,
-// time left.
+// Coal: the web app records refills in kilograms (shovels and buckets are its shortcuts); the coal burned is taken
+// as proportional to the furnace's heat output and the factor is learnt from refills "to the top" (see
+// recomputeCoal) - daily use, costs, hopper level, time left.
 // Pairing: Home app -> Add Accessory -> More options -> "Czujniki pieca", setup code 466-37-726.
 // Eve app: every temperature sensor carries an Eve history (EveHistory.h).
 //
@@ -67,7 +67,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 21;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 22;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -149,16 +149,15 @@ struct Settings {
   float    burnbackRate = 10;
   float    hotWater     = 45;     // boiler temperature that counts as "hot water ready" (web app + Home contact)
   bool     coalOn       = true;   // coal tracking; off = no coal card, refills or low-coal warning
-  float    hopperBuckets = 0;     // buckets the hopper holds, 0 = not set (no level estimate)
-  float    bucketKg     = 10;     // one bucket of coal - only for kg and costs; the coal model counts buckets
+  float    hopperKg     = 100;    // kg the hopper holds (Ustawienia -> Dane kotla), 0 = not set (no level estimate)
   float    coalPrice    = 0;      // PLN per tonne, 0 = no costs
   bool     lowCoalOn    = true;   // the hopper estimate runs out within lowCoalHours
   float    lowCoalHours = 12;
   bool     heating      = true;   // heating season; off = summer: no "too cold" on the furnace and the return, no
                                   // burning warnings (comes back by itself after SEASON_AUTO_MIN of burning)
   bool     stalledOn    = true;   // after a power cut the furnace keeps cooling - its controller did not restart
-  bool     ashOn        = true;   // ash pan reminder: after ashLimit buckets burned or ashDays since emptied
-  float    ashLimit     = 15;
+  bool     ashOn        = true;   // ash pan reminder: after ashLimit kg burned or ashDays since emptied
+  float    ashLimit     = 150;
   float    ashDays      = 7;
   float    offset[SENSOR_COUNT] = {};   // per probe, added to every reading: a probe reading 2 degrees low gets +2
   float    lat          = NAN;    // location of the house; the web app fetches the outdoor temperature for it
@@ -223,7 +222,7 @@ struct __attribute__((packed)) DayRecord {
 
 struct __attribute__((packed)) RefillRecord {
   uint32_t time;                      // when the coal went in (may be entered later)
-  uint16_t amount10;                  // buckets x 10 (coal is carried up loose in buckets)
+  uint16_t kg10;                      // kilograms x 10 (up to v21 buckets x 10 - see coalToKilograms)
   uint8_t  full;                      // 1 = filled the hopper to the top
   uint8_t  reserved;
 };
@@ -258,19 +257,19 @@ uint32_t powerLostAt       = 0;                 // estimated start of the power 
 uint32_t lastAliveMark     = 0;
 bool     hotWaterReady     = false;
 
-// Coal is counted in buckets - what goes into the hopper; kilograms and costs are the web app's (x bucketKg).
-float    coalK             = NAN;               // buckets of coal per degree-minute, learnt from refills (flash "coalK")
+// Coal is counted in kilograms - what goes into the hopper; costs are the web app's (x price per tonne).
+float    coalK             = NAN;               // kg of coal per degree-minute, learnt from refills (flash "coalK")
 uint16_t coalSamples       = 0;                 // refill-to-refill intervals it was learnt from (flash "coalN")
 uint32_t lastFullAt        = 0;                 // last refill to the top, 0 = none
-float    addedSinceFull    = 0;                 // buckets put in since then without filling up
+float    addedSinceFull    = 0;                 // kg put in since then without filling up
 float    heatSinceFull     = NAN;               // degree-minutes since then, NAN = beyond the minute log
 RefillRecord lastRefill    = {};                // the newest refill (time 0 = none)
-float    coalLevel         = NAN;               // buckets in the hopper (estimate)
-float    coalRate          = NAN;               // buckets per hour over the last day
+float    coalLevel         = NAN;               // kg in the hopper (estimate)
+float    coalRate          = NAN;               // kg per hour over the last day
 float    coalHoursLeft     = NAN;               // at that pace; INFINITY when the furnace hardly burns
 uint32_t ashAt             = 0;                 // ash pan last emptied (flash "ashAt"); counting starts with the clock
 float    heatSinceAsh      = NAN;               // degree-minutes since then, NAN = beyond the minute log
-float    ashBuckets        = NAN;               // coal burned since then, buckets (once coalK is known)
+float    ashBurned         = NAN;               // coal burned since then, kg (once coalK is known)
 uint16_t burningMinutes    = 0;                 // in a row - ends summer mode at SEASON_AUTO_MIN
 bool     stallWatch        = false;             // started from a power cut: watch whether the furnace comes back
 float    stallFrom         = NAN;               // furnace temperature at the first reading after that cut
@@ -656,7 +655,7 @@ float burnThreshold() {
   return isnan(state[FURNACE].low) ? 40 : state[FURNACE].low;
 }
 
-// A journal value is degrees x 100 in an int16 - bucket counts are capped to fit; NAN stays "no value".
+// A journal value is degrees x 100 in an int16 - kilograms are capped to fit; NAN stays "no value".
 float upTo320(float v) {
   return isnan(v) ? NAN : fminf(v, 320);
 }
@@ -701,11 +700,11 @@ void evaluateWarnings(bool tick = false) {
              state[COAL_HOPPER].lastGood, tick);
 
   // Low coal: at the current pace the hopper estimate runs out within lowCoalHours, or is nearly empty
-  // (half again as long before it clears, so a wobbling pace does not flap it). Logged with the buckets left.
+  // (half again as long before it clears, so a wobbling pace does not flap it). Logged with the kg left.
   float lowHours = settings.lowCoalHours * (warnings[WARN_LOW_COAL].active ? 1.5f : 1);
   // Unknown while there is a model but no estimate yet (after a power cut, before the clock).
-  bool lowCoal = !isnan(coalLevel) && (coalHoursLeft < lowHours || coalLevel < settings.hopperBuckets * 0.05f);
-  bool coalKnown = !isnan(coalLevel) || isnan(coalK) || settings.hopperBuckets <= 0;
+  bool lowCoal = !isnan(coalLevel) && (coalHoursLeft < lowHours || coalLevel < settings.hopperKg * 0.05f);
+  bool coalKnown = !isnan(coalLevel) || isnan(coalK) || settings.hopperKg <= 0;
   setWarning(WARN_LOW_COAL, lowCoal, coalKnown, 2, 5, heating && settings.coalOn && settings.lowCoalOn, upTo320(coalLevel),
              tick);
 
@@ -717,11 +716,11 @@ void evaluateWarnings(bool tick = false) {
   else stalled = stallWatch && millis() < STALL_WATCH_MS && f.lastGood <= stallFrom - STALL_DROP && slope <= STALL_SLOPE;
   setWarning(WARN_STALLED, stalled, !isnan(slope) || !stallWatch, 3, 10, heating && settings.stalledOn, f.lastGood, tick);
 
-  // Ash pan: due after ashLimit buckets of coal (once the coal use is learnt) or ashDays since it was emptied.
+  // Ash pan: due after ashLimit kg of coal (once the coal use is learnt) or ashDays since it was emptied.
   // Unknown without a clock (right after a power cut), so it does not close and reopen.
   time_t now = time(nullptr);
-  bool ashDue = ashAt && clockSet(now) && ((now - ashAt) / 86400.0f >= settings.ashDays || ashBuckets >= settings.ashLimit);
-  setWarning(WARN_ASH, ashDue, clockSet(now), 1, 1, heating && settings.coalOn && settings.ashOn, upTo320(ashBuckets), tick);
+  bool ashDue = ashAt && clockSet(now) && ((now - ashAt) / 86400.0f >= settings.ashDays || ashBurned >= settings.ashLimit);
+  setWarning(WARN_ASH, ashDue, clockSet(now), 1, 1, heating && settings.coalOn && settings.ashOn, upTo320(ashBurned), tick);
 
   // Hot water ready: not a problem, a notification "you can shower" when the boiler is warm enough - at most one
   // an hour, as a boiler around its "ready" temperature crosses it back and forth.
@@ -801,7 +800,7 @@ void recomputeCoal() {
   lastRefill = {};
   for (const RefillRecord& r : sortedRefills()) {
     lastRefill = r;
-    added += r.amount10 / 10.0f;
+    added += r.kg10 / 10.0f;
     if (!r.full) continue;
     fulls++;
     if (prevFull >= logStart) {
@@ -837,14 +836,14 @@ void recomputeCoal() {
 // Hopper level, burning pace (last 24 h of readings) and time left - every 10 minutes, after a refill and after
 // a settings change.
 void updateCoal(uint32_t now) {
-  coalRate = coalLevel = coalHoursLeft = ashBuckets = NAN;
+  coalRate = coalLevel = coalHoursLeft = ashBurned = NAN;
   if (!settings.coalOn || isnan(coalK)) return;
-  if (!isnan(heatSinceAsh)) ashBuckets = coalK * heatSinceAsh;
+  if (!isnan(heatSinceAsh)) ashBurned = coalK * heatSinceAsh;
   uint32_t covered;
   float heat = heatBetween(now - 86400, now, &covered);
   if (covered >= 60) coalRate = coalK * heat / (covered / 60.0f);
-  if (settings.hopperBuckets <= 0 || !lastFullAt || isnan(heatSinceFull)) return;
-  coalLevel = constrain(settings.hopperBuckets + addedSinceFull - coalK * heatSinceFull, 0.0f, settings.hopperBuckets);
+  if (settings.hopperKg <= 0 || !lastFullAt || isnan(heatSinceFull)) return;
+  coalLevel = constrain(settings.hopperKg + addedSinceFull - coalK * heatSinceFull, 0.0f, settings.hopperKg);
   if (!isnan(coalRate)) coalHoursLeft = coalRate > 0.01f ? coalLevel / coalRate : INFINITY;
 }
 
@@ -991,7 +990,7 @@ void logHistory() {
   currentDay = today;
 }
 
-// The morning summary: yesterday's coal (buckets and cost, once the coal use is learnt), burning hours, the
+// The morning summary: yesterday's coal (kg and cost, once the coal use is learnt), burning hours, the
 // furnace's low and high and the power cuts, as one notification from MORNING_HOUR - once a day, across restarts
 // too. From the daily summary written at midnight; the phone words it (web/sw.js).
 void morningSummary(time_t now) {
@@ -1017,13 +1016,40 @@ void morningSummary(time_t now) {
   });
   String j = String("{\"t\":") + (uint32_t)now + ",\"e\":101,\"d\":" + yesterday + ",\"m\":" + (unsigned)d.burnMinutes;
   if (settings.coalOn && !isnan(coalK)) {
-    float buckets = coalK * d.heat;
-    j += ",\"b\":" + String(lroundf(buckets * 10));
-    if (settings.coalPrice > 0) j += ",\"z\":" + String(lroundf(buckets * settings.bucketKg * settings.coalPrice / 1000));
+    float kg = coalK * d.heat;
+    j += ",\"kg\":" + String(lroundf(kg));
+    if (settings.coalPrice > 0) j += ",\"z\":" + String(lroundf(kg * settings.coalPrice / 1000));
   }
   int16_t lo = d.min[FURNACE], hi = d.max[FURNACE];
   if (lo != NO_VALUE) j += ",\"lo\":" + String(lo) + ",\"hi\":" + String(hi);
   relay.alert(j + ",\"pc\":" + cuts + ",\"ps\":" + cutSeconds + "}", "summary");
+}
+
+// Coal was counted in buckets up to v21, in kilograms since v22 (the web app turns shovels and buckets into kg).
+// Once, with the bucket weight it was all entered with: the refills, the coal warnings in the journal, the ash limit
+// and the learnt factor. The hopper starts over at the default 100 kg (the owner's figure for this furnace). In
+// steps ("coalKg"), so a power cut halfway converts nothing twice.
+void coalToKilograms() {
+  uint8_t step = prefs.getUChar("coalKg", 0);
+  if (step >= 3) return;
+  float kg = prefs.getFloat("bucketKg", 10);
+  if (step < 1) {
+    refills.update([&](RefillRecord& r) { r.kg10 = min(65535L, lroundf(r.kg10 * kg)); });
+    prefs.putUChar("coalKg", 1);
+  }
+  if (step < 2) {
+    events.update([&](EventRecord& e) {
+      if ((e.type == EV_WARN_ON || e.type == EV_WARN_OFF) && (e.sensor == WARN_LOW_COAL || e.sensor == WARN_ASH) && e.value != NO_VALUE)
+        e.value = toHundredths(upTo320(e.value / 100.0f * kg));
+    });
+    prefs.putUChar("coalKg", 2);
+  }
+  if (prefs.isKey("ashLim")) prefs.putFloat("ashKg", prefs.getFloat("ashLim", 15) * kg);
+  if (prefs.isKey("coalK")) prefs.putFloat("coalK", prefs.getFloat("coalK", 0) * kg);
+  for (const char* key : {"hopBk", "ashLim", "bucketKg"}) prefs.remove(key);
+  prefs.putUChar("coalKg", 3);
+  loadSettings();
+  Serial.printf("Coal: now in kg (a bucket was %.1f kg)\n", kg);
 }
 
 // wipe: the first start after a full reset - everything goes.
@@ -1073,15 +1099,14 @@ void loadSettings() {
   settings.burnbackRate = prefs.getFloat("bbRate", d.burnbackRate);
   settings.hotWater     = prefs.getFloat("hotWater", d.hotWater);
   settings.coalOn       = prefs.getBool("coalOn", d.coalOn);
-  settings.hopperBuckets = prefs.getFloat("hopBk", d.hopperBuckets);
-  settings.bucketKg     = prefs.getFloat("bucketKg", d.bucketKg);
+  settings.hopperKg     = prefs.getFloat("hopKg", d.hopperKg);
   settings.coalPrice    = prefs.getFloat("coalPr", d.coalPrice);
   settings.lowCoalOn    = prefs.getBool("lcOn", d.lowCoalOn);
   settings.lowCoalHours = prefs.getFloat("lcHrs", d.lowCoalHours);
   settings.heating      = prefs.getBool("heating", d.heating);
   settings.stalledOn    = prefs.getBool("stallOn", d.stalledOn);
   settings.ashOn        = prefs.getBool("ashOn", d.ashOn);
-  settings.ashLimit     = prefs.getFloat("ashLim", d.ashLimit);
+  settings.ashLimit     = prefs.getFloat("ashKg", d.ashLimit);
   settings.ashDays      = prefs.getFloat("ashDays", d.ashDays);
   for (size_t i = 0; i < SENSOR_COUNT; i++) settings.offset[i] = prefs.getFloat(prefKey("off", i).c_str(), 0);
   settings.lat          = prefs.getFloat("lat", d.lat);
@@ -1099,15 +1124,14 @@ void saveSettings() {
   prefs.putFloat("bbRate", settings.burnbackRate);
   prefs.putFloat("hotWater", settings.hotWater);
   prefs.putBool("coalOn", settings.coalOn);
-  prefs.putFloat("hopBk", settings.hopperBuckets);
-  prefs.putFloat("bucketKg", settings.bucketKg);
+  prefs.putFloat("hopKg", settings.hopperKg);
   prefs.putFloat("coalPr", settings.coalPrice);
   prefs.putBool("lcOn", settings.lowCoalOn);
   prefs.putFloat("lcHrs", settings.lowCoalHours);
   prefs.putBool("heating", settings.heating);
   prefs.putBool("stallOn", settings.stalledOn);
   prefs.putBool("ashOn", settings.ashOn);
-  prefs.putFloat("ashLim", settings.ashLimit);
+  prefs.putFloat("ashKg", settings.ashLimit);
   prefs.putFloat("ashDays", settings.ashDays);
   for (size_t i = 0; i < SENSOR_COUNT; i++) prefs.putFloat(prefKey("off", i).c_str(), settings.offset[i]);
   prefs.putFloat("lat", settings.lat);
@@ -1217,7 +1241,7 @@ void handleNow() {
   j += ",\"hotWater\":";  j += hotWaterReady ? "true" : "false";
   j += ",\"stallFrom\":"; j += jsonNumber(stallFrom, 1);
   j += ",\"ash\":{\"at\":"; j += ashAt;
-  j += ",\"buckets\":";   j += jsonNumber(ashBuckets, 1);
+  j += ",\"kg\":";        j += jsonNumber(ashBurned, 1);
   j += '}';
   j += ",\"coal\":{\"k\":"; j += jsonNumber(coalK, 7);
   j += ",\"samples\":";   j += coalSamples;
@@ -1227,7 +1251,7 @@ void handleNow() {
   j += ",\"hoursLeft\":"; j += isinf(coalHoursLeft) ? String("1e9") : jsonNumber(coalHoursLeft, 1);
   j += ",\"lastRefill\":";
   if (lastRefill.time) {
-    j += '[';  j += lastRefill.time;  j += ',';  j += lastRefill.amount10;  j += ',';  j += (int)lastRefill.full;  j += ']';
+    j += '[';  j += lastRefill.time;  j += ',';  j += lastRefill.kg10;  j += ',';  j += (int)lastRefill.full;  j += ']';
   } else {
     j += "null";
   }
@@ -1240,8 +1264,7 @@ void handleNow() {
   j += ",\"burnbackRate\":"; j += jsonNumber(settings.burnbackRate, 1);
   j += ",\"hotWater\":";     j += jsonNumber(settings.hotWater, 1);
   j += ",\"coalOn\":";       j += settings.coalOn ? "true" : "false";
-  j += ",\"hopperBuckets\":"; j += jsonNumber(settings.hopperBuckets, 1);
-  j += ",\"bucketKg\":";     j += jsonNumber(settings.bucketKg, 1);
+  j += ",\"hopperKg\":";     j += jsonNumber(settings.hopperKg, 0);
   j += ",\"coalPrice\":";    j += jsonNumber(settings.coalPrice, 0);
   j += ",\"lowCoalOn\":";    j += settings.lowCoalOn ? "true" : "false";
   j += ",\"lowCoalHours\":"; j += jsonNumber(settings.lowCoalHours, 0);
@@ -1436,14 +1459,13 @@ void handleSettings() {
   number("burnbackRate", settings.burnbackRate, 1, 60);
   number("hotWater", settings.hotWater, 20, 90);
   flag("coalOn", settings.coalOn);
-  number("hopperBuckets", settings.hopperBuckets, 0, 500);
-  number("bucketKg", settings.bucketKg, 1, 50);
+  number("hopperKg", settings.hopperKg, 0, 2000);
   number("coalPrice", settings.coalPrice, 0, 20000);
   flag("lowCoalOn", settings.lowCoalOn);
   number("lowCoalHours", settings.lowCoalHours, 1, 96);
   flag("stalledOn", settings.stalledOn);
   flag("ashOn", settings.ashOn);
-  number("ashLimit", settings.ashLimit, 1, 200);
+  number("ashLimit", settings.ashLimit, 5, 2000);
   number("ashDays", settings.ashDays, 1, 60);
   float oldOffset[SENSOR_COUNT];
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
@@ -1482,7 +1504,7 @@ void handleRefills() {
   bool first = true;
   refills.forEach(0, [&](const RefillRecord& r) {
     char line[40];
-    int n = snprintf(line, sizeof(line), "%s[%u,%u,%u]", first ? "" : ",", (unsigned)r.time, r.amount10, r.full);
+    int n = snprintf(line, sizeof(line), "%s[%u,%u,%u]", first ? "" : ",", (unsigned)r.time, r.kg10, r.full);
     w.put(line, n);
     first = false;
   });
@@ -1502,21 +1524,21 @@ void coalChanged() {
   handleNow();
 }
 
-void addRefill(float buckets, bool full, uint32_t t) {
-  RefillRecord r = {t, (uint16_t)lroundf(buckets * 10), (uint8_t)full, 0};
+void addRefill(float kg, bool full, uint32_t t) {
+  RefillRecord r = {t, (uint16_t)lroundf(kg * 10), (uint8_t)full, 0};
   refills.add(r);
   recountCoal();
 }
 
-// POST buckets, full (1/0), time (Unix; optional - a refill entered later, up to 7 days back). Answers /api/now.
+// POST kg, full (1/0), time (Unix; optional - a refill entered later, up to 7 days back). Answers /api/now.
 void handleRefill() {
   uint32_t now = time(nullptr), t = argOr("time", now);
-  float buckets = parseNumber(server.arg("buckets"));
-  if (!clockSet(now) || isnan(buckets) || buckets < 0.1f || buckets > 500 || t > now + 300 || t + 7 * 86400 < now) {
+  float kg = parseNumber(server.arg("kg"));
+  if (!clockSet(now) || isnan(kg) || kg < 0.5f || kg > 2000 || t > now + 300 || t + 7 * 86400 < now) {
     server.send(400, "text/plain", "bad refill");
     return;
   }
-  addRefill(buckets, server.arg("full") == "1", min(t, now));
+  addRefill(kg, server.arg("full") == "1", min(t, now));
   handleNow();
 }
 
@@ -1860,6 +1882,7 @@ void setup() {
   loadSettings();
   restoreAlerts();
   setupHistory(wipe);
+  coalToKilograms();
   if (wipe) prefs.remove("wipe");
   coalK = prefs.getFloat("coalK", NAN);
   coalSamples = prefs.getUShort("coalN", 0);

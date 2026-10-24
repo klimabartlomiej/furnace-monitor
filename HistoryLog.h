@@ -257,6 +257,25 @@ public:
     return true;
   }
 
+  // Every record through f once - a change of what a field means (a few hundred records, at boot). LittleFS
+  // keeps the old file until the new one is closed.
+  template <typename F> void update(F f) {
+    for (uint8_t s = 0; s < 2; s++) {
+      if (!count[s]) continue;
+      std::vector<T> all(count[s]);
+      File file = LittleFS.open(path(s), "r");
+      if (!file) continue;
+      size_t n = file.read((uint8_t*)all.data(), all.size() * sizeof(T));
+      file.close();
+      if (n != all.size() * sizeof(T)) continue;
+      for (T& r : all) f(r);
+      file = LittleFS.open(path(s), "w");
+      if (!file) continue;
+      file.write((const uint8_t*)all.data(), n);
+      file.close();
+    }
+  }
+
   // Time of the record added last, 0 when empty.
   uint32_t newestTime() const { return count[cur] ? last[cur] : last[cur ^ 1]; }
 

@@ -25,12 +25,13 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   only the ESP and the paired phones have - the relay sees noise and stores nothing but when the ESP was last seen
   (the app shows "offline since" after a power cut). Nothing to open on the router, works behind CGNAT. Pairing:
   home web app -> Ustawienia -> Dostęp zdalny -> "Otwórz na tym telefonie" (or copy the code to another phone).
-- **Coal** (feeder furnace with a hopper, coal carried up loose in buckets): "Dosypałem" in the web app records a
-  refill in buckets (to the top or not, also for an earlier hour; or from how full the hopper was before). Coal
-  burned is taken as proportional to the heat output (furnace minus return, summed per minute); the factor is
-  learnt from refills to the top. Gives daily use, kilograms and costs (from one bucket's weight), the hopper
-  level, time left, a "Mało węgla" contact in Apple Home, a 30-day chart with the frost dependence and the
-  season so far. Can be switched off in the settings.
+- **Coal** (feeder furnace with a hopper, coal carried up loose): "Dosypałem" in the web app records a refill in
+  kilograms - typed, or counted in shovels (~3.2 kg) and buckets (~9.6 kg) - to the top or not, also for an
+  earlier hour, or from how full the hopper was before. Coal burned is taken as proportional to the heat output
+  (furnace minus return, summed per minute); the factor is learnt from refills to the top. Gives daily use in kg
+  and costs, the hopper level (its size in Ustawienia -> Dane kotła, 100 kg by default), time left, a "Mało
+  węgla" warning, a 30-day chart with the frost dependence and the season so far. Can be switched off in the
+  settings. Up to v21 coal was counted in buckets; v22 converts the stored data once (coalToKilograms).
 - **Hot water**: "Ciepła woda gotowa" - a notification (at most one an hour) when the boiler reaches its "ready"
   temperature.
 - **Summer mode**: switches off "too cold" on the furnace and the return plus the burning warnings; the web app

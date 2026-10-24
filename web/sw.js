@@ -36,6 +36,8 @@ const hhmm = ms => new Date(ms).toLocaleTimeString(LOCALE, { hour: '2-digit', mi
 const dur = s => { const m = Math.round(s / 60), h = Math.floor(m / 60); return h ? `${h} godz. ${m % 60} min` : `${m} min`; };
 const durCut = s => (s < 60 ? `${s} s` : dur(s));
 const plural = (n, one, few, many) => n === 1 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
+const kg = v => `${v < 10 ? n1(v) : Math.round(v)} kg`;
+// Firmware before v22 counted coal in buckets (its morning summary sends b = buckets x 10).
 const buckets = b => { const r = b >= 20 ? Math.round(b) : Math.round(b * 2) / 2; return `${String(r).replace('.', ',')} ${r === 1 ? 'wiadro' : Number.isInteger(r) ? plural(r, 'wiadro', 'wiadra', 'wiader') : 'wiadra'}`; };
 
 // The ESP's alert: the pairing code -> key (as in Relay.h), AES-GCM with AAD 'P'.
@@ -66,12 +68,14 @@ function describe(a) {
     case 5: return { title: `${name}: wróciło do normy`, body: temp, tag: `alarm-${a.s}` };
     case 6: return { title: `${name}: czujnik nie odpowiada`, body: 'Sprawdź przewód czujnika.', tag: `fault-${a.s}` };
     case 7: return { title: `${name}: czujnik znów działa`, body: temp, tag: `fault-${a.s}` };
-    case 8: return { title: warn, body: a.s === 3 ? (v !== null ? `Zostało ~${buckets(v)} węgla.` : '') : a.s === 5 ? (v !== null ? `Spalono ~${buckets(v)} od opróżnienia.` : '') : temp, tag: `warn-${a.s}` };
+    case 8: return { title: warn, body: a.s === 3 ? (v !== null ? `Zostało ~${kg(v)} węgla.` : '') : a.s === 5 ? (v !== null ? `Spalono ~${kg(v)} od opróżnienia.` : '') : temp, tag: `warn-${a.s}` };
     case 9: return { title: `${warn} – koniec`, body: a.s === 3 ? '' : temp, tag: `warn-${a.s}` };
     case 14: return { title: 'Ciepła woda gotowa', body: `${name} ${temp} – można się kąpać.`, tag: 'water' };
     case 101: {                                         // the morning summary of the day before
       const parts = [];
-      if (a.b !== undefined) parts.push(`${buckets(a.b / 10)} węgla${a.z !== undefined ? ` (≈${a.z} zł)` : ''}`);
+      const cost = a.z !== undefined ? ` (≈${a.z} zł)` : '';
+      if (a.kg !== undefined) parts.push(`~${kg(a.kg)} węgla${cost}`);
+      else if (a.b !== undefined) parts.push(`${buckets(a.b / 10)} węgla${cost}`);
       parts.push(`piec palił ${dur(a.m * 60)}`);
       if (a.lo !== undefined) parts.push(`piec ${n1(a.lo / 100)}–${n1(a.hi / 100)}°`);
       parts.push(a.pc ? `${a.pc} ${plural(a.pc, 'zanik', 'zaniki', 'zaników')} prądu (${durCut(a.ps)})` : 'bez zaników prądu');
