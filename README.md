@@ -6,8 +6,11 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   Alarms, warnings and "hot water ready" are notifications of the app (below), not Home accessories.
 - **Eve app graphs**: every sensor keeps an Eve-compatible history on the ESP itself (`EveHistory.h`, protocol as
   reverse-engineered by [fakegato-history](https://github.com/simont77/fakegato-history)).
-- **Warnings** (tuned in the web app, sent as notifications): furnace dying out (falling fast or heading below its
-  min limit), freezing water, embers creeping into the coal hopper.
+- **Warnings** (tuned in the web app, sent as notifications): furnace dying out (falling and within a few degrees
+  of its min limit - a fast fall alone, e.g. from a bath, is no sign), freezing water, embers creeping into the
+  coal hopper.
+- **Baths**: hot water drawn shows as the boiler losing 2 degrees within 10 minutes; each draw goes into the journal
+  (how far it fell, how long), shows as a blue mark on the furnace and boiler charts and is counted per month.
 - **Web app** `http://furnace.local:8080` on the home WiFi (in Polish): live cards, charts from 6 hours to years
   with pinch-zoom, alarm limits and warnings, event journal, furnace burning hours, outdoor temperature
   (Open-Meteo), CSV export, firmware updates. The "Miesiące" tab goes back season by season (September to

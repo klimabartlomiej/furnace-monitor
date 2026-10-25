@@ -560,6 +560,7 @@ const I_TOOLS = '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7"
 const I_PLUSMINUS = '<path d="M12 4v8M8 8h8M8 18h8"/>';
 const I_THERMO = '<path d="M10 4.5a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0z"/><path d="M12 9.5v5.5"/>';
 const I_DROP = '<path d="M12 3c3.2 4.4 6 7.6 6 11a6 6 0 0 1-12 0c0-3.4 2.8-6.6 6-11z"/>';
+const I_SHOWER = '<path d="M5 21V9a5 5 0 0 1 9.5-2.2"/><path d="M11 9.5a5 5 0 0 1 8 0z"/><path d="M12.5 13v1.5M15 14v1.5M17.5 13v1.5M13.5 17.5V19M16.5 17.5V19"/>';
 const I_FLAME = ICONS[0];
 const I_BOILER = '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M5 9h14"/><rect x="9" y="13" width="6" height="5" rx="1"/>';
 const WARNINGS = [
@@ -576,6 +577,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
+  23: 'Ostrzeżenie „Piec wygasa” dopiero, gdy temperatura spada i jest blisko progu min. (domyślnie 3°) – szybki spadek sam nie wystarczy, bo daje go np. kąpiel. Kąpiele: gdy bojler nagle traci ciepło, zapisuję to w dzienniku, pokazuję niebieską kreską na wykresach pieca i bojlera i liczę w Miesiącach.',
   22: 'Węgiel w kilogramach: dosypanie wpisujesz w kg albo liczysz łopatami (ok. 3,2 kg) i wiadrami (ok. 9,6 kg) – aplikacja sama przelicza. Dotychczasowe dosypania przeliczone na kg. Nowa strona Ustawienia → Dane kotła z pojemnością zasobnika (domyślnie 100 kg).',
   21: 'Nowa zakładka Miesiące: każdy sezon grzewczy (od września) miesiąc po miesiącu – słupki pokazują, kiedy szło najwięcej węgla albo godzin palenia; stuknięty miesiąc ma swoje dni, węgiel i koszt, dosypania, temperatury, zaniki prądu i alarmy, z porównaniem do roku wcześniej. Strzałkami wstecz do poprzednich miesięcy i sezonów. Aktualizacje są podpisane – piec instaluje tylko wersje wydane przez nas (Ustawienia → Oprogramowanie).',
   20: 'Wykresy: legenda pasków i kresek (brak prądu, alarm, ostrzeżenie, koniec), a przytrzymanie na nich mówi, co to było. Przycisk pełnego ekranu – obrócony telefon pokazuje wykres szeroko. Poranne podsumowanie o 7:00: wczorajszy węgiel i koszt, godziny palenia, temperatury pieca i zaniki prądu (Ustawienia → Powiadomienia → Podsumowanie dnia).',
@@ -596,7 +598,7 @@ const PROBLEM_END = { 3: 5, 4: 5, 6: 7, 8: 9 };
 const EV_POWER_CUT = 11;      // time = power back, value = minutes without power
 const BOOT_REASON = ['', 'po włączeniu zasilania', 'po restarcie', 'po spadku napięcia', 'po błędzie programu'];
 const WARNING_PROBES = [[FURNACE], [FURNACE, RETURN, BOILER], [COAL], [FURNACE, RETURN], [FURNACE], [FURNACE]];
-const EV_SEASON = 12, EV_ASH = 13, EV_HOT_WATER = 14;
+const EV_SEASON = 12, EV_ASH = 13, EV_HOT_WATER = 14, EV_BATH = 15;   // EV_BATH: e[2] = minutes, e[3] = boiler drop x 100
 const RANGES = { '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
 const STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200];
 const MIN_SPAN = 1800, MAX_SPAN = 2 * 365 * 86400, LIVE_SPAN = 26 * 3600;
@@ -1088,7 +1090,7 @@ function chart(el, o) {
     const item = (color, text) => `<span><i style="background:${color}"></i>${text}</span>`;
     legend.innerHTML = (band ? '<span><i class="band"></i>brak prądu</span>' : '')
       + (colors.has('#ff453a') ? item('#ff453a', 'alarm') : '') + (colors.has('#ff9f0a') ? item('#ff9f0a', 'ostrzeżenie') : '')
-      + (colors.has('#30d158') ? item('#30d158', 'koniec – wróciło do normy') : '')
+      + (colors.has('#30d158') ? item('#30d158', 'koniec – wróciło do normy') : '') + (colors.has('#0a84ff') ? item('#0a84ff', 'kąpiel') : '')
       + (band || colors.size ? `<span class="lg-hint">${el.id === 'detail' ? 'przytrzymaj na nim palec' : 'dotknij go'} – zobaczysz, co to</span>` : '');
   }
   el.innerHTML = `<svg width="${W}" height="${H}"><defs>${defs}<clipPath id="${el.id}-c"><rect x="${L}" y="0" width="${pw}" height="${H}"/></clipPath></defs>`
@@ -1233,9 +1235,8 @@ function describe(s) {
 function warningText(w) {
   const s = now.sensors;
   if (w === 0) {
-    const f = s[FURNACE];
-    if (now.forecast !== null && f.low !== null) return `za ok. ${now.forecast} min spadnie poniżej ${n1(f.low)}°`;
-    return f.trend !== null ? `temperatura spada ${n1(-f.trend)}° na godzinę` : 'temperatura szybko spada';
+    const f = s[FURNACE], near = f.temp !== null && f.low !== null ? `${n1(f.temp - f.low)}° nad progiem min. i spada` : 'zbliża się do progu min.';
+    return now.forecast !== null ? `${near} – za ok. ${now.forecast} min poniżej ${n1(f.low)}°` : near;
   }
   if (w === 1) {
     const cold = s.filter(x => x.water && x.temp !== null).sort((a, b) => a.temp - b.temp)[0];
@@ -1752,8 +1753,9 @@ function paintDetail() {
   const lines = shown.map(i => { const d = detailData(i); return { color: colorOf(i), name: nameOf(i), agg: d.agg, step: d.step, dash: i === OUT, pts: windowed(d.pts, view.t0, view.t1) }; });
   const step = lines.length ? lines[0].step : 60;
   const limits = single && s0 ? [s0.high !== null && { v: s0.high, label: `maks. ${n1(s0.high)}°` }, s0.low !== null && { v: s0.low, label: `min. ${n1(s0.low)}°` }].filter(Boolean) : [];
-  const MARK = { 3: '#ff453a', 4: '#ff453a', 6: '#ff453a', 8: '#ff9f0a', 5: '#30d158', 7: '#30d158', 9: '#30d158' };
-  const concerns = e => e[1] >= 8 ? (WARNING_PROBES[e[2]] || []).some(p => shown.includes(p)) : shown.includes(e[2]);
+  const MARK = { 3: '#ff453a', 4: '#ff453a', 6: '#ff453a', 8: '#ff9f0a', 5: '#30d158', 7: '#30d158', 9: '#30d158', [EV_BATH]: '#0a84ff' };
+  const concerns = e => (e[1] === EV_BATH ? shown.includes(BOILER) || shown.includes(FURNACE)
+    : e[1] >= 8 ? (WARNING_PROBES[e[2]] || []).some(p => shown.includes(p)) : shown.includes(e[2]));
   const marks = journal.filter(e => MARK[e[1]] && concerns(e)).map(e => { const v = eventView(e); return { t: e[0], color: MARK[e[1]], title: v[2], sub: v[3] }; });
   chart($('#detail'), { series: lines, t0: view.t0, t1: view.t1, step, limits, marks, bands: outages(), fill: single, band: single,
     smooth: step === 60 ? 2 : step <= 300 ? 1 : 0 });
@@ -1942,7 +1944,8 @@ function happened(t0, t1) {
   if (from >= t1) return null;
   const ev = allJournal.filter(e => e[0] >= t0 && e[0] < t1);
   return { from: from > t0 ? from : 0, cuts: outages(allJournal).filter(c => c.t0 >= t0 && c.t0 < t1),
-    alarms: ev.filter(e => e[1] === 3 || e[1] === 4 || e[1] === 6).length, warns: ev.filter(e => e[1] === 8).length };
+    alarms: ev.filter(e => e[1] === 3 || e[1] === 4 || e[1] === 6).length, warns: ev.filter(e => e[1] === 8).length,
+    baths: ev.filter(e => e[1] === EV_BATH).length, bathsKnown: allJournal.some(e => e[1] === EV_BATH && e[0] < t1) };
 }
 
 function renderMonths() {
@@ -2047,6 +2050,7 @@ function paintMonths() {
     const sec = h.cuts.reduce((a, c) => a + c.sec, 0), longest = h.cuts.reduce((a, c) => (!a || c.sec > a.sec ? c : a), null);
     rows.push(row('Zaniki prądu', h.cuts.length ? `${h.cuts.length} · ${durShort(sec)}` : 'brak', `${longest ? `najdłuższy ${durCut(longest.sec)}, ${day(longest.t0)}` : ''}${note}`));
     rows.push(row('Alarmy', h.alarms || 'brak', `${h.warns ? `ostrzeżenia: ${h.warns}` : 'bez ostrzeżeń'}${note}`));
+    if (h.bathsKnown) rows.push(row('Kąpiele', h.baths || 'brak', h.baths ? `średnio ${n1(h.baths / ms.n * 7)} na tydzień` : ''));
   }
   mh += `<div class="rows" style="margin-top:12px">${rows.join('')}</div>`;
   if (cmp) mh += `<p class="note">Strzałki: średnio na dzień względem miesiąca ${MONTH_NAMES[monthSel % 12].toLowerCase()} ${Math.floor(monthSel / 12) - 1}.</p>`;
@@ -2089,6 +2093,7 @@ function eventView(e) {
       : ['c-blue', I_SUN, 'Tryb lato', 'alarmy „za zimno” pieca i powrotu wyciszone'];
     case EV_ASH: return ['c-gray', I_ASH, 'Opróżniono popielnik', ''];
     case EV_HOT_WATER: return ['c-blue', I_DROP, 'Ciepła woda gotowa', `${name}${temp}`];
+    case EV_BATH: return ['c-blue', I_SHOWER, 'Kąpiel', `ciepła woda z bojlera: −${n1(raw / 100)}° w ${i} min`];
     case 10: return ['c-gray', I_INFO, 'Historia usunięta', ''];
     default: return ['c-gray', I_INFO, 'Zdarzenie', ''];
   }
@@ -2767,7 +2772,7 @@ function renderSettings() {
 
   if (!editing($('#warnset')))
     $('#warnset').innerHTML =
-      warnBlock(0, st.goOutOn, 'Gdy temperatura pieca szybko spada albo zaraz osiągnie próg min.', [['Spadek szybszy niż', 'goOutRate', st.goOutRate, '°/h'], ['Próg min. w ciągu', 'goOutHorizon', st.goOutHorizon, 'min']])
+      warnBlock(0, st.goOutOn, `Gdy temperatura pieca spada i zbliża się do progu min. – zanim przyjdzie alarm „za zimno”. Sam szybki spadek (np. przy kąpieli) nie wystarczy.${now.sensors[FURNACE].low === null ? ' Wymaga progu min. pieca (Progi alarmów).' : ''}`, [['Bliżej progu min. niż', 'goOutMargin', st.goOutMargin, '°C']])
       + warnBlock(1, st.freezeOn, 'Gdy woda w piecu, na powrocie lub w bojlerze robi się bardzo zimna.', [['Poniżej', 'freezeTemp', st.freezeTemp, '°C']])
       + warnBlock(2, st.burnbackOn, 'Gdy temperatura zasobnika rośnie szybko – żar może cofać się do węgla.', [['Wzrost szybszy niż', 'burnbackRate', st.burnbackRate, '°/h']])
       + warnBlock(4, st.stalledOn, 'Gdy po powrocie prądu piec dalej stygnie – sterownik mógł się sam nie uruchomić.', [])
@@ -2867,7 +2872,7 @@ async function saveSetting(fields, message) {
 
 // What the ESP accepts for each number (handleSettings) - checked here first, with the range in the message.
 const SETTING_RANGES = {
-  goOutRate: [1, 60], goOutHorizon: [5, 240], freezeTemp: [-20, 20], burnbackRate: [1, 60], hotWater: [20, 90],
+  goOutMargin: [1, 20], freezeTemp: [-20, 20], burnbackRate: [1, 60], hotWater: [20, 90],
   hopperKg: [0, 2000], coalPrice: [0, 20000], lowCoalHours: [1, 96], ashLimit: [5, 2000], ashDays: [1, 60],
 };
 

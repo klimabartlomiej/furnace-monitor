@@ -67,7 +67,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 22;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 23;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -90,6 +90,8 @@ constexpr uint32_t REFILL_CAPACITY    = 512;             // coal refills kept (a
 constexpr uint8_t  COAL_INTERVALS     = 10;              // latest refill-to-refill intervals the kg factor averages
 constexpr float    COAL_MIN_HEAT      = 600;             // degree-minutes an interval needs to count (10 degrees, 1 h)
 constexpr float    HOT_WATER_HYSTERESIS = 3;             // degrees below "ready" before the hot-water contact closes
+constexpr float    BATH_DROP          = 2;               // boiler degrees lost within BATH_WINDOW = hot water drawn
+constexpr uint8_t  BATH_WINDOW        = 10;              // minutes (standing, the boiler loses well under 1 degree/h)
 constexpr uint16_t SEASON_AUTO_MIN    = 6 * 60;          // minutes of burning that end summer mode by themselves -
                                                          // longer than firing it up for hot water in summer
 constexpr uint32_t STALL_WATCH_MS     = 3 * 3600 * 1000; // after a power cut, how long a cooling furnace is watched
@@ -140,9 +142,8 @@ const char* WARNING_NAMES[WARN_COUNT] = { "Piec wygasa", "Ryzyko zamarznięcia",
                                           "Piec stoi po zaniku prądu", "Opróżnij popielnik" };
 
 struct Settings {
-  bool     goOutOn      = true;   // furnace dying out: falling faster than goOutRate (degrees/hour), or the
-  float    goOutRate    = 8;      // trend reaches its min limit within goOutHorizon minutes
-  uint16_t goOutHorizon = 45;
+  bool     goOutOn      = true;   // furnace dying out: falling and closer than goOutMargin degrees to its min limit
+  float    goOutMargin  = 3;
   bool     freezeOn     = true;   // any water probe at or below freezeTemp
   float    freezeTemp   = 5;
   bool     burnbackOn   = true;   // coal hopper warming faster than burnbackRate (degrees/hour)
@@ -197,6 +198,8 @@ enum EventType : uint8_t {
   EV_SEASON,            // value 1 = heating season on, 0 = summer mode; sensor 1 = switched on by itself
   EV_ASH,               // ash pan emptied
   EV_HOT_WATER,         // the boiler reached its "ready" temperature (value = degrees x 100)
+  EV_BATH,              // hot water drawn - a bath, a shower: time = when it began, value = how far the boiler fell
+                        // (degrees x 100), sensor = minutes it took (see watchBath)
 };
 
 // Why the ESP started - the `sensor` byte of EV_BOOT and EV_POWER_CUT.
@@ -346,9 +349,10 @@ String busReport() {
 
 // ------------------------------------------------------------------ event journal
 
-void logEvent(EventType type, uint8_t sensor, int16_t value) {
+// at: when it happened, 0 = now.
+void logEvent(EventType type, uint8_t sensor, int16_t value, time_t at = 0) {
   time_t now = time(nullptr);
-  EventRecord e = {(uint32_t)now, (uint8_t)type, sensor, value};
+  EventRecord e = {(uint32_t)(at ? at : now), (uint8_t)type, sensor, value};
   if (!clockSet(now)) {
     e.time = millis() / 1000;
     if (pendingEventCount < 8) pendingEvents[pendingEventCount++] = e;
@@ -608,6 +612,11 @@ void pushRecent(const float* values) {
   if (recentCount < TREND_MINUTES) recentCount++;
 }
 
+// The reading of probe i `ago` minutes back (0 = this minute's), NAN beyond what the ring holds.
+float recentAgo(size_t i, uint8_t ago) {
+  return ago < recentCount ? recent[(recentNext + TREND_MINUTES - 1 - ago) % TREND_MINUTES][i] : NAN;
+}
+
 // Least-squares slope of the last TREND_MINUTES minutes in degrees per hour; NAN with fewer than 10 readings.
 float trendPerHour(size_t i) {
   float sx = 0, sy = 0, sxx = 0, sxy = 0;
@@ -666,22 +675,16 @@ void evaluateWarnings(bool tick = false) {
   // Summer mode: the warnings about burning stay quiet; freezing, embers in the hopper and hot water keep working.
   const bool heating = settings.heating;
 
-  // Furnace dying out: only while it still burns (above its min limit, or 30 degrees without one).
+  // Furnace dying out: falling and already within goOutMargin of its min limit - the step before the "too cold"
+  // alarm. A fast fall alone says nothing: hot water drawn for a bath pulls the furnace down fast and it comes back,
+  // and a furnace going out need not fall fast at all. Needs the min limit; only while still above it, with one
+  // degree more to clear.
   const SensorState& f = state[FURNACE];
   float slope = trendPerHour(FURNACE);
-  bool burning = !f.faulty && !isnan(f.lastGood) && f.lastGood > (isnan(f.low) ? 30 : f.low);
-  bool dying = false;
-  goOutForecast = -1;
-  if (burning && !isnan(slope)) {
-    if (slope <= -settings.goOutRate) dying = true;
-    if (!isnan(f.low) && slope < -0.5f) {
-      float toLimit = (f.lastGood - f.low) / -slope * 60;
-      if (toLimit <= settings.goOutHorizon) {
-        dying = true;
-        goOutForecast = lroundf(toLimit);
-      }
-    }
-  }
+  bool burning = !f.faulty && !isnan(f.lastGood) && !isnan(f.low) && f.lastGood > f.low;
+  float margin = settings.goOutMargin + (warnings[WARN_GOING_OUT].active ? 1 : 0);
+  bool dying = burning && !isnan(slope) && slope < -0.5f && f.lastGood <= f.low + margin;
+  goOutForecast = dying ? lroundf((f.lastGood - f.low) / -slope * 60) : -1;
   setWarning(WARN_GOING_OUT, dying, !burning || !isnan(slope), 5, 10, heating && settings.goOutOn, f.lastGood, tick);
 
   // Freezing: the coldest water probe, with one degree of hysteresis.
@@ -847,6 +850,46 @@ void updateCoal(uint32_t now) {
   if (!isnan(coalRate)) coalHoursLeft = coalRate > 0.01f ? coalLevel / coalRate : INFINITY;
 }
 
+// Baths and showers: hot water drawn makes the boiler drop BATH_DROP degrees within BATH_WINDOW minutes. One
+// journal entry per draw, written once the boiler stops falling (rising again, or flat for 10 minutes): its time is
+// when the fall began, the value how far it fell, the sensor byte how many minutes it took. A new draw starts only
+// on a falling boiler and looks back no further than the last one's end. Information only - no notification.
+void watchBath(time_t now) {
+  static time_t from = 0, lowAt = 0, ended = 0;        // the draw being followed (from = 0: none), the last one's end
+  static float top = NAN, low = NAN;
+  float b = recentAgo(BOILER, 0);
+  if (isnan(b) || !clockSet(now)) {
+    from = 0;
+    return;
+  }
+  if (!from) {
+    float before = recentAgo(BOILER, 1);
+    if (isnan(before) || b >= before) return;
+    uint8_t topAgo = 0;
+    top = NAN;
+    for (uint8_t k = 1; k <= BATH_WINDOW && now - k * 60 > ended; k++) {
+      float v = recentAgo(BOILER, k);
+      if (!isnan(v) && (isnan(top) || v > top)) {
+        top = v;
+        topAgo = k;
+      }
+    }
+    if (isnan(top) || top - b < BATH_DROP) return;
+    from = now - topAgo * 60;
+    low = b;
+    lowAt = now;
+  } else if (b < low) {
+    low = b;
+    lowAt = now;
+  } else if (b >= low + 0.3f || now - lowAt >= 10 * 60) {
+    uint32_t minutesLong = (lowAt - from) / 60;
+    logEvent(EV_BATH, minutesLong > 255 ? 255 : minutesLong, toHundredths(top - low), from);
+    Serial.printf("Bath: boiler -%.1f in %u min\n", top - low, (unsigned)minutesLong);
+    from = 0;
+    ended = now;
+  }
+}
+
 // Switches the heating season (from the web app, or on by itself when the furnace burns in summer mode): the
 // furnace and return alarms are judged again under the new limits, and the journal gets the change.
 void setHeating(bool on, bool automatic) {
@@ -892,6 +935,7 @@ void readAll() {
   burningMinutes = !isnan(furnace) && furnace >= burnThreshold() ? min(burningMinutes + 1, 60000) : 0;
   if (!settings.heating && burningMinutes >= SEASON_AUTO_MIN) setHeating(true, true);
   pushRecent(values);
+  watchBath(time(nullptr));
   evaluateWarnings(true);
 }
 
@@ -1091,8 +1135,7 @@ void loadLimits() {
 void loadSettings() {
   Settings d;
   settings.goOutOn      = prefs.getBool("goOn", d.goOutOn);
-  settings.goOutRate    = prefs.getFloat("goRate", d.goOutRate);
-  settings.goOutHorizon = prefs.getUShort("goHor", d.goOutHorizon);
+  settings.goOutMargin  = prefs.getFloat("goMar", d.goOutMargin);
   settings.freezeOn     = prefs.getBool("frOn", d.freezeOn);
   settings.freezeTemp   = prefs.getFloat("frTemp", d.freezeTemp);
   settings.burnbackOn   = prefs.getBool("bbOn", d.burnbackOn);
@@ -1116,8 +1159,7 @@ void loadSettings() {
 
 void saveSettings() {
   prefs.putBool("goOn", settings.goOutOn);
-  prefs.putFloat("goRate", settings.goOutRate);
-  prefs.putUShort("goHor", settings.goOutHorizon);
+  prefs.putFloat("goMar", settings.goOutMargin);
   prefs.putBool("frOn", settings.freezeOn);
   prefs.putFloat("frTemp", settings.freezeTemp);
   prefs.putBool("bbOn", settings.burnbackOn);
@@ -1256,8 +1298,7 @@ void handleNow() {
     j += "null";
   }
   j += "},\"settings\":{\"goOutOn\":"; j += settings.goOutOn ? "true" : "false";
-  j += ",\"goOutRate\":";    j += jsonNumber(settings.goOutRate, 1);
-  j += ",\"goOutHorizon\":"; j += settings.goOutHorizon;
+  j += ",\"goOutMargin\":";  j += jsonNumber(settings.goOutMargin, 1);
   j += ",\"freezeOn\":";     j += settings.freezeOn ? "true" : "false";
   j += ",\"freezeTemp\":";   j += jsonNumber(settings.freezeTemp, 1);
   j += ",\"burnbackOn\":";   j += settings.burnbackOn ? "true" : "false";
@@ -1449,10 +1490,7 @@ void handleSettings() {
     else bad = k;
   };
   flag("goOutOn", settings.goOutOn);
-  number("goOutRate", settings.goOutRate, 1, 60);
-  float horizon = settings.goOutHorizon;
-  number("goOutHorizon", horizon, 5, 240);
-  settings.goOutHorizon = lroundf(horizon);
+  number("goOutMargin", settings.goOutMargin, 1, 20);
   flag("freezeOn", settings.freezeOn);
   number("freezeTemp", settings.freezeTemp, -20, 20);
   flag("burnbackOn", settings.burnbackOn);
