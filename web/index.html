@@ -1949,6 +1949,13 @@ function happened(t0, t1) {
     baths: ev.filter(e => e[1] === EV_BATH).length, bathsKnown: allJournal.some(e => e[1] === EV_BATH && e[0] < t1) };
 }
 
+// A weekly rate in whole numbers: "2 tygodniowo", or the two around it - "2–3 tygodniowo".
+function perWeek(v) {
+  if (v < 1) return 'rzadziej niż raz w tygodniu';
+  const lo = Math.floor(v), hi = Math.ceil(v);
+  return `${lo === hi ? lo : `${lo}–${hi}`} tygodniowo`;
+}
+
 function renderMonths() {
   if (!now) return;
   paintMonths();
@@ -2051,7 +2058,7 @@ function paintMonths() {
     const sec = h.cuts.reduce((a, c) => a + c.sec, 0), longest = h.cuts.reduce((a, c) => (!a || c.sec > a.sec ? c : a), null);
     rows.push(row('Zaniki prądu', h.cuts.length ? `${h.cuts.length} · ${durShort(sec)}` : 'brak', `${longest ? `najdłuższy ${durCut(longest.sec)}, ${day(longest.t0)}` : ''}${note}`));
     rows.push(row('Alarmy', h.alarms || 'brak', `${h.warns ? `ostrzeżenia: ${h.warns}` : 'bez ostrzeżeń'}${note}`));
-    if (h.bathsKnown) rows.push(row('Kąpiele', h.baths || 'brak', h.baths ? `średnio ${n1(h.baths / ms.n * 7)} na tydzień` : ''));
+    if (h.bathsKnown) rows.push(row('Kąpiele', h.baths || 'brak', h.baths ? perWeek(h.baths / ms.n * 7) : ''));
   }
   mh += `<div class="rows" style="margin-top:12px">${rows.join('')}</div>`;
   if (cmp) mh += `<p class="note">Strzałki: średnio na dzień względem miesiąca ${MONTH_NAMES[monthSel % 12].toLowerCase()} ${Math.floor(monthSel / 12) - 1}.</p>`;
