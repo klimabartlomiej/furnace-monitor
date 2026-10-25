@@ -276,6 +276,30 @@ public:
     }
   }
 
+  // All records at once, oldest segment first: f gets them as a std::vector<T>& to drop, add or sort, and they are
+  // written back (at most 2 x perSegment, the newest kept) - a one-time repair at boot. Each segment goes to a new
+  // file renamed over the old one, so a power cut leaves the old file or the new one.
+  template <typename F> void edit(F f) {
+    std::vector<T> all;
+    forEach(0, [&](const T& r) { all.push_back(r); });
+    f(all);
+    size_t skip = all.size() > 2 * per ? all.size() - 2 * per : 0, n0 = all.size() - skip;
+    if (n0 > per) n0 = per;
+    const T* part[2] = {all.data() + skip, all.data() + skip + n0};
+    uint32_t n[2] = {(uint32_t)n0, (uint32_t)(all.size() - skip - n0)};
+    for (uint8_t s = 0; s < 2; s++) {
+      String fresh = path(s) + ".new";
+      File file = LittleFS.open(fresh, "w");
+      if (!file) return;
+      file.write((const uint8_t*)part[s], n[s] * sizeof(T));
+      file.close();
+      LittleFS.rename(fresh, path(s));
+      count[s] = n[s];
+      last[s] = n[s] ? part[s][n[s] - 1].time : 0;
+    }
+    cur = n[1] ? 1 : 0;
+  }
+
   // Time of the record added last, 0 when empty.
   uint32_t newestTime() const { return count[cur] ? last[cur] : last[cur ^ 1]; }
 

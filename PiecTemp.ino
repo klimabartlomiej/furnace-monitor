@@ -67,7 +67,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 23;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 24;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -92,6 +92,7 @@ constexpr float    COAL_MIN_HEAT      = 600;             // degree-minutes an in
 constexpr float    HOT_WATER_HYSTERESIS = 3;             // degrees below "ready" before the hot-water contact closes
 constexpr float    BATH_DROP          = 2;               // boiler degrees lost within BATH_WINDOW = hot water drawn
 constexpr uint8_t  BATH_WINDOW        = 10;              // minutes (standing, the boiler loses well under 1 degree/h)
+constexpr uint8_t  BATH_MIN_MINUTES   = 5;               // a shorter fall is a sink or a quick rinse, not a bath
 constexpr uint16_t SEASON_AUTO_MIN    = 6 * 60;          // minutes of burning that end summer mode by themselves -
                                                          // longer than firing it up for hot water in summer
 constexpr uint32_t STALL_WATCH_MS     = 3 * 3600 * 1000; // after a power cut, how long a cooling furnace is watched
@@ -199,7 +200,7 @@ enum EventType : uint8_t {
   EV_ASH,               // ash pan emptied
   EV_HOT_WATER,         // the boiler reached its "ready" temperature (value = degrees x 100)
   EV_BATH,              // hot water drawn - a bath, a shower: time = when it began, value = how far the boiler fell
-                        // (degrees x 100), sensor = minutes it took (see watchBath)
+                        // (degrees x 100), sensor = minutes it took (see BathWatch)
 };
 
 // Why the ESP started - the `sensor` byte of EV_BOOT and EV_POWER_CUT.
@@ -612,11 +613,6 @@ void pushRecent(const float* values) {
   if (recentCount < TREND_MINUTES) recentCount++;
 }
 
-// The reading of probe i `ago` minutes back (0 = this minute's), NAN beyond what the ring holds.
-float recentAgo(size_t i, uint8_t ago) {
-  return ago < recentCount ? recent[(recentNext + TREND_MINUTES - 1 - ago) % TREND_MINUTES][i] : NAN;
-}
-
 // Least-squares slope of the last TREND_MINUTES minutes in degrees per hour; NAN with fewer than 10 readings.
 float trendPerHour(size_t i) {
   float sx = 0, sy = 0, sxx = 0, sxy = 0;
@@ -850,45 +846,59 @@ void updateCoal(uint32_t now) {
   if (!isnan(coalRate)) coalHoursLeft = coalRate > 0.01f ? coalLevel / coalRate : INFINITY;
 }
 
-// Baths and showers: hot water drawn makes the boiler drop BATH_DROP degrees within BATH_WINDOW minutes. One
-// journal entry per draw, written once the boiler stops falling (rising again, or flat for 10 minutes): its time is
-// when the fall began, the value how far it fell, the sensor byte how many minutes it took. A new draw starts only
-// on a falling boiler and looks back no further than the last one's end. Information only - no notification.
-void watchBath(time_t now) {
-  static time_t from = 0, lowAt = 0, ended = 0;        // the draw being followed (from = 0: none), the last one's end
-  static float top = NAN, low = NAN;
-  float b = recentAgo(BOILER, 0);
-  if (isnan(b) || !clockSet(now)) {
-    from = 0;
-    return;
-  }
-  if (!from) {
-    float before = recentAgo(BOILER, 1);
-    if (isnan(before) || b >= before) return;
-    uint8_t topAgo = 0;
-    top = NAN;
-    for (uint8_t k = 1; k <= BATH_WINDOW && now - k * 60 > ended; k++) {
-      float v = recentAgo(BOILER, k);
-      if (!isnan(v) && (isnan(top) || v > top)) {
-        top = v;
-        topAgo = k;
-      }
+// Baths and showers: hot water drawn makes the boiler drop BATH_DROP degrees within BATH_WINDOW minutes. Fed the
+// boiler once a minute - live, and once over the minute log (rescanHistory); a gap starts over. feed() is true when a
+// draw of BATH_MIN_MINUTES or more has ended (the boiler rising again, or flat for 10 minutes): from = when the fall
+// began, drop = how far it fell, minutes = how long it took. A new draw starts only on a falling boiler and looks
+// back no further than the last one's end. Information only - no notification.
+class BathWatch {
+public:
+  time_t  from    = 0;
+  float   drop    = 0;
+  uint8_t minutes = 0;
+
+  bool feed(time_t t, float b) {
+    if (isnan(b) || t - last > 120) n = following = 0;
+    last = t;
+    if (isnan(b)) return false;
+    memmove(ring + 1, ring, BATH_WINDOW * sizeof(float));
+    ring[0] = b;
+    if (n <= BATH_WINDOW) n++;
+    if (!following) {
+      if (n < 2 || b >= ring[1]) return false;
+      uint8_t topAgo = 0;
+      top = NAN;
+      for (uint8_t k = 1; k < n && t - k * 60 > ended; k++)
+        if (isnan(top) || ring[k] > top) {
+          top = ring[k];
+          topAgo = k;
+        }
+      if (isnan(top) || top - b < BATH_DROP) return false;
+      following = t - topAgo * 60;
+      low = b;
+      lowAt = t;
+    } else if (b < low) {
+      low = b;
+      lowAt = t;
+    } else if (b >= low + 0.3f || t - lowAt >= 10 * 60) {
+      uint32_t m = (lowAt - following) / 60;
+      from = following;
+      drop = top - low;
+      minutes = m > 255 ? 255 : m;
+      following = 0;
+      ended = t;
+      return minutes >= BATH_MIN_MINUTES;
     }
-    if (isnan(top) || top - b < BATH_DROP) return;
-    from = now - topAgo * 60;
-    low = b;
-    lowAt = now;
-  } else if (b < low) {
-    low = b;
-    lowAt = now;
-  } else if (b >= low + 0.3f || now - lowAt >= 10 * 60) {
-    uint32_t minutesLong = (lowAt - from) / 60;
-    logEvent(EV_BATH, minutesLong > 255 ? 255 : minutesLong, toHundredths(top - low), from);
-    Serial.printf("Bath: boiler -%.1f in %u min\n", top - low, (unsigned)minutesLong);
-    from = 0;
-    ended = now;
+    return false;
   }
-}
+
+private:
+  float   ring[BATH_WINDOW + 1];                         // the boiler, ring[k] = k minutes ago
+  uint8_t n = 0;                                         // readings in the ring
+  time_t  last = 0, following = 0, lowAt = 0, ended = 0; // following: the draw's start, 0 = none
+  float   top = NAN, low = NAN;
+};
+BathWatch bathWatch;
 
 // Switches the heating season (from the web app, or on by itself when the furnace burns in summer mode): the
 // furnace and return alarms are judged again under the new limits, and the journal gets the change.
@@ -935,7 +945,10 @@ void readAll() {
   burningMinutes = !isnan(furnace) && furnace >= burnThreshold() ? min(burningMinutes + 1, 60000) : 0;
   if (!settings.heating && burningMinutes >= SEASON_AUTO_MIN) setHeating(true, true);
   pushRecent(values);
-  watchBath(time(nullptr));
+  if (clockSet(now) && bathWatch.feed(now, values[BOILER])) {
+    logEvent(EV_BATH, bathWatch.minutes, toHundredths(bathWatch.drop), bathWatch.from);
+    Serial.printf("Bath: boiler -%.1f in %u min\n", bathWatch.drop, bathWatch.minutes);
+  }
   evaluateWarnings(true);
 }
 
@@ -1094,6 +1107,54 @@ void coalToKilograms() {
   prefs.putUChar("coalKg", 3);
   loadSettings();
   Serial.printf("Coal: now in kg (a bucket was %.1f kg)\n", kg);
+}
+
+// Once (v24): the baths from before their detection, found in the minute log (31 days back), and the "Piec wygasa"
+// warnings the old rule raised on a fast fall alone - an ON more than goOutMargin above the min limit goes, with the
+// OFF that closed it; so do v23's "baths" shorter than BATH_MIN_MINUTES. The journal is written back in time order.
+void rescanHistory() {
+  if (prefs.getUChar("rescan", 0)) return;
+  std::vector<EventRecord> baths;
+  BathWatch watch;
+  if (minutes.newest()) minutes.forEach(minutes.oldest(), minutes.newest(), [&](uint32_t m, const MinuteRecord& r) {
+    if (watch.feed(m * 60, r.v[BOILER] == NO_VALUE ? NAN : r.v[BOILER] / 100.0f))
+      baths.push_back({(uint32_t)watch.from, (uint8_t)EV_BATH, watch.minutes, toHundredths(watch.drop)});
+  });
+  float low = state[FURNACE].low;
+  uint16_t added = 0, dropped = 0;
+  events.edit([&](std::vector<EventRecord>& all) {
+    std::vector<EventRecord> keep;
+    bool closeNext = false;                              // the OFF of a dropped ON goes too
+    for (const EventRecord& e : all) {
+      bool goingOut = (e.type == EV_WARN_ON || e.type == EV_WARN_OFF) && e.sensor == WARN_GOING_OUT;
+      if (goingOut && e.type == EV_WARN_ON) {
+        closeNext = !isnan(low) && e.value != NO_VALUE && e.value / 100.0f > low + settings.goOutMargin;
+        if (closeNext) {
+          dropped++;
+          continue;
+        }
+      } else if (goingOut && closeNext) {
+        closeNext = false;
+        continue;
+      }
+      if (e.type == EV_BATH && e.sensor < BATH_MIN_MINUTES) continue;
+      keep.push_back(e);
+    }
+    for (const EventRecord& b : baths) {                 // a bath v23 logged live stays as it is
+      bool known = false;
+      for (const EventRecord& e : keep)
+        if (e.type == EV_BATH && e.time + 1800 > b.time && e.time < b.time + 1800) known = true;
+      if (!known) {
+        keep.push_back(b);
+        added++;
+      }
+    }
+    for (size_t i = 1; i < keep.size(); i++)            // nearly in order already: an insertion sort is enough
+      for (size_t j = i; j && keep[j].time < keep[j - 1].time; j--) std::swap(keep[j], keep[j - 1]);
+    all.swap(keep);
+  });
+  prefs.putUChar("rescan", 1);
+  Serial.printf("History: %u baths found back, %u false going-out warnings dropped\n", added, dropped);
 }
 
 // wipe: the first start after a full reset - everything goes.
@@ -1921,6 +1982,7 @@ void setup() {
   restoreAlerts();
   setupHistory(wipe);
   coalToKilograms();
+  if (!updater.crashLoop()) rescanHistory();
   if (wipe) prefs.remove("wipe");
   coalK = prefs.getFloat("coalK", NAN);
   coalSamples = prefs.getUShort("coalN", 0);
@@ -1981,11 +2043,14 @@ void loop() {
   if (updater.takeJustConfirmed()) logEvent(EV_UPDATED, 0, FW_VERSION);
   // A newer version found by the hourly check: once per version (also across restarts), a notification to open
   // the app and tap "Zainstaluj". A forced one installs by itself - "updated" comes then.
+  // A new version is told once, and only when the hourly check found it: after "Sprawdz aktualizacje" the app
+  // already shows it.
   uint32_t offer = updater.available();
   if (offer && offer != offerTold && !updater.forced()) {
     offerTold = offer;
     prefs.putUInt("offerTold", offer);
-    relay.alert(String("{\"t\":") + (uint32_t)time(nullptr) + ",\"e\":100,\"v\":" + offer + "}", "update");
+    if (!updater.checkedOnRequest())
+      relay.alert(String("{\"t\":") + (uint32_t)time(nullptr) + ",\"e\":100,\"v\":" + offer + "}", "update");
   }
 
   // Readings on the full minute once NTP has set the clock, every READ_INTERVAL_MS before that.

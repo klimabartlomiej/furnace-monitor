@@ -9,8 +9,10 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
 - **Warnings** (tuned in the web app, sent as notifications): furnace dying out (falling and within a few degrees
   of its min limit - a fast fall alone, e.g. from a bath, is no sign), freezing water, embers creeping into the
   coal hopper.
-- **Baths**: hot water drawn shows as the boiler losing 2 degrees within 10 minutes; each draw goes into the journal
-  (how far it fell, how long), shows as a blue mark on the furnace and boiler charts and is counted per month.
+- **Baths**: hot water drawn shows as the boiler losing 2 degrees within 10 minutes; each draw falling 5 minutes or
+  more (shorter = a sink) goes into the journal (how far it fell, how long), shows as a blue mark on the furnace and
+  boiler charts and is counted per month. v24 also found the baths of the minute log (31 days back) once and dropped
+  the "Piec wygasa" warnings the old fast-fall rule had raised far above the min limit.
 - **Web app** `http://furnace.local:8080` on the home WiFi (in Polish): live cards, charts from 6 hours to years
   with pinch-zoom, alarm limits and warnings, event journal, furnace burning hours, outdoor temperature
   (Open-Meteo), CSV export, firmware updates. The "Miesiące" tab goes back season by season (September to

@@ -108,6 +108,8 @@ public:
   }
 
   uint32_t available() const { return offered; }   // a newer version waiting to be installed, 0 = none
+  // The latest check was asked for (the web app's button, an install): its result shows in the app right away.
+  bool checkedOnRequest() const { return onRequest; }
   bool forced() const { return mustUpdate; }         // ... that this version may not refuse (installs by itself)
   // 1 = signatures demanded, 0 = the verifier failed its self-test (SHA-256 only), -1 = not checked yet.
   int8_t signatures() const { return sigCheck; }
@@ -157,6 +159,7 @@ public:
     bool due = lastCheckMs ? millis() - lastCheckMs >= CHECK_INTERVAL_MS
                            : millis() >= (crashes ? CRASH_CHECK_MS : FIRST_CHECK_MS);
     if (!due && !checkRequested) return;
+    onRequest = checkRequested;
     checkRequested = false;
     lastCheckMs = millis();
     target = done = total = 0;
@@ -170,6 +173,7 @@ private:
   bool        probation      = false;
   bool        justConfirmed  = false;
   bool        checkRequested = false;
+  bool        onRequest      = false;   // see checkedOnRequest()
   uint32_t    networkUpMs    = 0;
   uint32_t    lastCheckMs    = 0;
   uint32_t    bad            = 0;    // a version that went back here - skipped
