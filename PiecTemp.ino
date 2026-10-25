@@ -58,6 +58,7 @@
 #include <DallasTemperature.h>
 #include <algorithm>
 #include <vector>
+#include "TechLog.h"
 #include "Backup.h"
 #include "EveHistory.h"
 #include "HistoryLog.h"
@@ -67,7 +68,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 24;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 25;                   // bump for every release (release/publish.ps1)
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
 
@@ -183,6 +184,7 @@ struct SensorState {
   float    lastGood    = NAN;
   float    unconfirmed = NAN;             // big jump waiting for the next reading to agree
   uint8_t  badReadings = 0;
+  uint16_t errors      = 0;               // invalid readings since the start (the diagnostic report)
   bool     faulty      = false;
   int8_t   alarm       = 0;               // -1 too cold, 0 ok, +1 too hot
 };
@@ -260,6 +262,7 @@ BootReason bootReason      = BOOT_OTHER;
 uint32_t powerLostAt       = 0;                 // estimated start of the power cut this boot ended, 0 = none to log
 uint32_t lastAliveMark     = 0;
 bool     hotWaterReady     = false;
+int      networkUps        = 0;                 // WiFi connections since the start (the diagnostic report)
 
 // Coal is counted in kilograms - what goes into the hopper; costs are the web app's (x price per tonne).
 float    coalK             = NAN;               // kg of coal per degree-minute, learnt from refills (flash "coalK")
@@ -320,7 +323,7 @@ void assignAddresses() {
     for (auto& s : SENSORS) {
       if (!isUnset(s.address)) continue;
       memcpy(s.address, found, 8);
-      Serial.printf("'%s' auto-assigned %s - pin this address in SENSORS\n", s.name, formatAddress(found).c_str());
+      techLog.printf("'%s' auto-assigned %s - pin this address in SENSORS\n", s.name, formatAddress(found).c_str());
       break;
     }
   }
@@ -526,7 +529,7 @@ float readSensor(size_t i) {
 void logAlarmChange(size_t i, int8_t before, float t) {
   int8_t now = state[i].alarm;
   if (now == before) return;
-  Serial.printf("%s: alarm %s\n", SENSORS[i].name, now > 0 ? "TOO HOT" : now < 0 ? "TOO COLD" : "cleared");
+  techLog.printf("%s: alarm %s\n", SENSORS[i].name, now > 0 ? "TOO HOT" : now < 0 ? "TOO COLD" : "cleared");
   logEvent(now > 0 ? EV_ALARM_HIGH : now < 0 ? EV_ALARM_LOW : EV_ALARM_CLEAR, i, toHundredths(t));
   saveAlerts();
 }
@@ -576,7 +579,7 @@ bool registerReading(size_t i, float t) {
   // A sudden jump is accepted only once the next reading agrees with it - filters one-off glitches.
   if (!isnan(s.lastGood) && fabsf(t - s.lastGood) > MAX_JUMP && !(fabsf(t - s.unconfirmed) <= CONFIRM_TOLERANCE)) {
     s.unconfirmed = t;
-    Serial.printf("%s: %.2f C looks like a glitch, waiting for confirmation\n", SENSORS[i].name, t);
+    techLog.printf("%s: %.2f C looks like a glitch, waiting for confirmation\n", SENSORS[i].name, t);
     return false;
   }
 
@@ -596,8 +599,9 @@ bool registerReading(size_t i, float t) {
 
 void registerBadReading(size_t i) {
   SensorState& s = state[i];
-  Serial.printf("%s: no valid reading\n", SENSORS[i].name);
+  techLog.printf("%s: no valid reading\n", SENSORS[i].name);
   if (s.badReadings < 255) s.badReadings++;
+  if (s.errors < 65535) s.errors++;
   if (s.badReadings >= FAULT_AFTER && !s.faulty) {
     s.faulty = true;
     logEvent(EV_FAULT, i, NO_VALUE);
@@ -651,7 +655,7 @@ void setWarning(WarningId w, bool condition, bool known, uint8_t holdOn, uint8_t
     if (s.active && ++s.calm >= holdOff) s.active = false;
   }
   if (s.active == before) return;
-  Serial.printf("Warning %s: %s\n", WARNING_NAMES[w], s.active ? "ON" : "off");
+  techLog.printf("Warning %s: %s\n", WARNING_NAMES[w], s.active ? "ON" : "off");
   logEvent(s.active ? EV_WARN_ON : EV_WARN_OFF, w, toHundredths(value));
   saveAlerts();
 }
@@ -907,7 +911,7 @@ void setHeating(bool on, bool automatic) {
   settings.heating = on;
   prefs.putBool("heating", on);
   logEvent(EV_SEASON, automatic, on);
-  Serial.printf("Heating season %s%s\n", on ? "on" : "off (summer mode)", automatic ? " - furnace burning" : "");
+  techLog.printf("Heating season %s%s\n", on ? "on" : "off (summer mode)", automatic ? " - furnace burning" : "");
   rejudgeAlarm(FURNACE);
   rejudgeAlarm(RETURN_WATER);
   evaluateWarnings();
@@ -947,7 +951,7 @@ void readAll() {
   pushRecent(values);
   if (clockSet(now) && bathWatch.feed(now, values[BOILER])) {
     logEvent(EV_BATH, bathWatch.minutes, toHundredths(bathWatch.drop), bathWatch.from);
-    Serial.printf("Bath: boiler -%.1f in %u min\n", bathWatch.drop, bathWatch.minutes);
+    techLog.printf("Bath: boiler -%.1f in %u min\n", bathWatch.drop, bathWatch.minutes);
   }
   evaluateWarnings(true);
 }
@@ -1106,7 +1110,7 @@ void coalToKilograms() {
   for (const char* key : {"hopBk", "ashLim", "bucketKg"}) prefs.remove(key);
   prefs.putUChar("coalKg", 3);
   loadSettings();
-  Serial.printf("Coal: now in kg (a bucket was %.1f kg)\n", kg);
+  techLog.printf("Coal: now in kg (a bucket was %.1f kg)\n", kg);
 }
 
 // Once (v24): the baths from before their detection, found in the minute log (31 days back), and the "Piec wygasa"
@@ -1154,27 +1158,27 @@ void rescanHistory() {
     all.swap(keep);
   });
   prefs.putUChar("rescan", 1);
-  Serial.printf("History: %u baths found back, %u false going-out warnings dropped\n", added, dropped);
+  techLog.printf("History: %u baths found back, %u false going-out warnings dropped\n", added, dropped);
 }
 
 // wipe: the first start after a full reset - everything goes.
 void setupHistory(bool wipe) {
-  if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed - no history");
+  if (!LittleFS.begin(true)) techLog.println("LittleFS mount failed - no history");
   // Files of an older layout would eat the space of the new ones: a layout change wipes the history once.
   bool newLayout = prefs.getUChar("fsLayout", 0) != FS_LAYOUT;
   if (newLayout || wipe) {
-    Serial.println(wipe ? "Full reset - wiping the history" : "History layout changed - formatting LittleFS");
+    techLog.println(wipe ? "Full reset - wiping the history" : "History layout changed - formatting LittleFS");
     LittleFS.format();
     prefs.putUChar("fsLayout", FS_LAYOUT);
   }
-  if (!minutes.begin()) Serial.println("No \"minutes\" partition - per-minute history disabled");
+  if (!minutes.begin()) techLog.println("No \"minutes\" partition - per-minute history disabled");
   if (wipe) minutes.clear();
-  if (!alive.begin()) Serial.println("No \"alive\" partition - power cuts timed from the minute log");
+  if (!alive.begin()) techLog.println("No \"alive\" partition - power cuts timed from the minute log");
   if (newLayout || wipe) alive.clear();                       // old LittleFS blocks / the last home's marks
   daily.begin();
   events.begin();
   refills.begin();
-  Serial.printf("LittleFS: %u of %u KB used\n", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
+  techLog.printf("LittleFS: %u of %u KB used\n", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
   for (auto& row : recent)
     for (auto& v : row) v = NAN;
 }
@@ -1296,7 +1300,7 @@ void handleNow() {
   if (!clockSet(time(nullptr)) && clockSet(argOr("t", 0))) {
     timeval tv = {(time_t)argOr("t", 0), 0};
     settimeofday(&tv, nullptr);
-    Serial.println("Clock set from the web app - no NTP");
+    techLog.println("Clock set from the web app - no NTP");
   }
   String j;
   j.reserve(2600);
@@ -1465,6 +1469,26 @@ void handleSeries() {
     }
   });
   w.end();
+}
+
+// GET: the diagnostic report, plain text for a support request - the device, its health since the start and the
+// technical log (TechLog.h). No passwords or keys.
+void handleDiag() {
+  String r;
+  r.reserve(TechLog::SIZE + 800);
+  r += "Furnace monitor v" + String(FW_VERSION) + ", up " + String(millis() / 60000) + " min, started: " + TechLog::startReason();
+  r += "\nheap " + String(ESP.getFreeHeap() / 1024) + " KB, lowest " + String(ESP.getMinFreeHeap() / 1024) + " KB, largest block "
+     + String(ESP.getMaxAllocHeap() / 1024) + " KB";
+  r += "\nWiFi " + String(WiFi.RSSI()) + " dBm, connected " + String(networkUps) + "x; relay " + relay.state() + ", connected "
+     + String(relay.connections()) + "x";
+  for (size_t i = 0; i < SENSOR_COUNT; i++)
+    r += "\n" + String(SENSORS[i].name) + ": " + (state[i].faulty ? String("FAULTY") : jsonNumber(state[i].lastGood, 2)) + ", read errors "
+       + String(state[i].errors);
+  r += "\nupdate: " + updater.status() + ", signatures " + String(updater.signatures());
+  r += "\nLittleFS " + String(LittleFS.usedBytes() / 1024) + " of " + String(LittleFS.totalBytes() / 1024) + " KB, minute log "
+     + String(minutes.newest() ? (minutes.newest() - minutes.oldest() + 1) / 1440 : 0) + " days\n--- log\n";
+  r += techLog.text();
+  server.send(200, "text/plain; charset=utf-8", r);
 }
 
 // GET since. Binary DayRecords, oldest first.
@@ -1751,7 +1775,7 @@ void handleRestoreChunk() {
     restoreError = viaRelay() ? "only from the home WiFi" : updater.busy() ? "an update is being downloaded" : "";
     restoreStarted = restoreError.isEmpty();
     if (restoreStarted) {
-      Serial.println("Restoring a backup");
+      techLog.println("Restoring a backup");
       backup.begin();
     }
   } else if (up.status == UPLOAD_FILE_WRITE) {
@@ -1771,7 +1795,7 @@ void handleRestoreDone() {
   } else {
     server.send(200, "text/plain", "restored, restarting");
   }
-  Serial.println("Backup restored - restarting");
+  techLog.println("Backup restored - restarting");
   delay(500);
   ESP.restart();
 }
@@ -1788,7 +1812,7 @@ void handleUpdate() {
 void handleClearHistory() {
   server.send(200, "text/plain", "history cleared, restarting");
   prefs.putBool("cleared", true);
-  Serial.println("History cleared from the web app - restarting");
+  techLog.println("History cleared from the web app - restarting");
   delay(300);
   minutes.clear();
   LittleFS.format();
@@ -1820,7 +1844,7 @@ void keepOtaPassword() {
   nvs_set_str(nvs, "OTADATA", hash.c_str());
   nvs_commit(nvs);
   nvs_close(nvs);
-  Serial.println("OTA password restored after a factory reset");
+  techLog.println("OTA password restored after a factory reset");
 }
 
 // The web app's "install from file" uses the network-OTA password; without one set, nothing is accepted.
@@ -1860,14 +1884,15 @@ void handleFirmwareDone() {
     return;
   }
   server.send(200, "text/plain", "installed, restarting");
-  Serial.println("Firmware uploaded from the web app - restarting");
+  techLog.println("Firmware uploaded from the web app - restarting");
   delay(500);
   ESP.restart();
 }
 
 // Called by HomeSpan every time WiFi comes up; the web server is started once and survives reconnects.
 void onNetworkUp(int count) {
-  Serial.printf("Network up (#%d), IP %s - web app http://%s.local:%u\n",
+  networkUps = count;
+  techLog.printf("Network up (#%d), IP %s - web app http://%s.local:%u\n",
                 count, WiFi.localIP().toString().c_str(), DEVICE_NAME, WEB_PORT);
   configTzTime(TIME_ZONE, "pool.ntp.org", "time.google.com");   // the histories need real timestamps
   // Mains-powered: WiFi modem sleep saves nothing here and makes every reply wait for the router's next beacon
@@ -1886,6 +1911,7 @@ void onNetworkUp(int count) {
   server.on("/api/now", HTTP_GET, handleNow);
   server.on("/api/series", HTTP_GET, handleSeries);
   server.on("/api/daily", HTTP_GET, handleDaily);
+  server.on("/api/diag", HTTP_GET, handleDiag);
   server.on("/api/events", HTTP_GET, handleEvents);
   server.on("/api/csv", HTTP_GET, handleCsv);
   server.on("/api/limits", HTTP_POST, handleLimits);
@@ -1934,10 +1960,10 @@ void buttonTask(void*) {
       uint32_t held = millis() - pressedAt;
       if (level < 2 && held >= FULL_RESET_HOLD_MS) {
         level = 2;
-        Serial.println("BOOT held 15 s - release for a FULL reset (WiFi, HomeKit pairing, history)");
+        techLog.println("BOOT held 15 s - release for a FULL reset (WiFi, HomeKit pairing, history)");
       } else if (level < 1 && held >= WIFI_RESET_HOLD_MS) {
         level = 1;
-        Serial.println("BOOT held 5 s - release to forget the WiFi, keep holding for a full reset");
+        techLog.println("BOOT held 5 s - release to forget the WiFi, keep holding for a full reset");
       }
       continue;
     }
@@ -1950,7 +1976,7 @@ void buttonTask(void*) {
       prefs.putBool("wipe", true);                 // the history goes at the next start (setup)
     }
     WiFi.disconnect(false, true);                  // also the network the WiFi driver kept
-    Serial.println(level == 2 ? "FULL reset - restarting" : "WiFi forgotten - restarting");
+    techLog.println(level == 2 ? "FULL reset - restarting" : "WiFi forgotten - restarting");
     delay(300);
     esp_restart();
   }
@@ -1960,6 +1986,7 @@ void buttonTask(void*) {
 
 void setup() {
   Serial.begin(115200);
+  techLog.begin();
   setenv("TZ", TIME_ZONE, 1);     // local days from the first second - after a soft restart the clock is already set
   tzset();
   snprintf(firmwareRevision, sizeof(firmwareRevision), "%u", (unsigned)FW_VERSION);
@@ -2019,7 +2046,7 @@ void setup() {
   homeSpan.enableAutoStartAP();              // no stored WiFi -> open the setup hotspot
   homeSpan.setHostNameSuffix("");            // host name is exactly DEVICE_NAME
   if (otaHashStored().length()) homeSpan.enableOTA();   // password lives in flash (CLI "O"), not in this public code
-  else Serial.println("No OTA password set (serial \"O\") - network OTA and the web upload stay off");
+  else techLog.println("No OTA password set (serial \"O\") - network OTA and the web upload stay off");
   homeSpan.setConnectionCallback(onNetworkUp);
   homeSpan.begin(Category::Bridges, "Czujniki pieca", DEVICE_NAME);
   createAccessories();

@@ -41,6 +41,7 @@
 #include <mbedtls/sha256.h>
 #include <mbedtls/ecdsa.h>
 #include "ReleaseKeys.h"
+#include "TechLog.h"
 
 class RemoteUpdate {
 public:
@@ -73,14 +74,14 @@ public:
     store.begin("update", false);
     esp_ota_img_states_t s;
     probation = esp_ota_get_state_partition(esp_ota_get_running_partition(), &s) == ESP_OK && s == ESP_OTA_IMG_PENDING_VERIFY;
-    if (probation) Serial.printf("Update: v%u is on probation\n", (unsigned)version);
+    if (probation) techLog.printf("Update: v%u is on probation\n", (unsigned)version);
     else esp_ota_mark_app_valid_cancel_rollback();   // flashed over USB: nothing to verify
 
     // "trying" is the version installed last; running another one means it went back.
     uint32_t trying = store.getUInt("trying", 0);
     if (trying && trying != version) {
       store.putUInt("bad", trying);
-      Serial.printf("Update: v%u did not work - not installing it again\n", (unsigned)trying);
+      techLog.printf("Update: v%u did not work - not installing it again\n", (unsigned)trying);
     }
     if (trying && (trying != version || !probation)) store.remove("trying");
     bad = store.getUInt("bad", 0);
@@ -89,7 +90,7 @@ public:
     bool crash = r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT || r == ESP_RST_WDT;
     crashes = crash ? store.getUChar("crashes", 0) + 1 : 0;
     if (crashes != store.getUChar("crashes", 0)) store.putUChar("crashes", crashes);
-    if (crashes) Serial.printf("Update: crash restart #%u - checking for a fix soon\n", crashes);
+    if (crashes) techLog.printf("Update: crash restart #%u - checking for a fix soon\n", crashes);
   }
 
   // Two crash restarts in a row: the sketch skips its heavy start-up work until a fix arrives or it settles.
@@ -133,7 +134,7 @@ public:
 
   void loop() {
     if (phase == RESTARTING && millis() - restartAt >= 500) {
-      Serial.printf("Update: v%u written, restarting\n", (unsigned)target);
+      techLog.printf("Update: v%u written, restarting\n", (unsigned)target);
       ESP.restart();
     }
     if (crashes && millis() >= CRASH_FREE_MS) {
@@ -148,7 +149,7 @@ public:
         store.remove("trying");
         setStatus("v" + String(version) + " installed and confirmed");
       } else if (!networkUpMs && millis() >= ROLLBACK_AFTER_MS) {
-        Serial.println("Update: the new version never got online - rolling back");
+        techLog.println("Update: the new version never got online - rolling back");
         delay(200);
         esp_ota_mark_app_invalid_rollback_and_reboot();
       }
@@ -207,7 +208,7 @@ private:
     portENTER_CRITICAL(&mux);
     strlcpy(statusText, s.c_str(), sizeof(statusText));
     portEXIT_CRITICAL(&mux);
-    Serial.println("Update: " + s);
+    techLog.println("Update: " + s);
   }
 
   void fail(const String& why) { setStatus("check failed: " + why); }
@@ -350,7 +351,7 @@ private:
       String forged = RELEASE_SELFTEST;
       forged.replace("\"version\":1,", "\"version\":2,");
       sigCheck = signedByUs(RELEASE_SELFTEST) && !signedByUs(forged);
-      Serial.printf("Update: signature check %s\n", sigCheck ? "passed its self-test" : "FAILED its self-test - SHA-256 only");
+      techLog.printf("Update: signature check %s\n", sigCheck ? "passed its self-test" : "FAILED its self-test - SHA-256 only");
     }
     if (sigCheck && !signedByUs(manifest)) {
       offered = 0;
@@ -376,7 +377,7 @@ private:
     String sha = field(manifest, "sha256");
     size_t size = field(manifest, "size").toInt();
     if (url.isEmpty() || sha.length() != 64 || !size) return fail("incomplete manifest");
-    Serial.printf("Update: v%u available (%u bytes), installing\n", (unsigned)available, (unsigned)size);
+    techLog.printf("Update: v%u available (%u bytes), installing\n", (unsigned)available, (unsigned)size);
     install(url, mirror, sha, size, available);
   }
 
@@ -413,7 +414,7 @@ private:
     uint8_t digest[32];
     mbedtls_sha256_finish(&ctx, digest);
     mbedtls_sha256_free(&ctx);
-    Serial.printf("Update: %u of %u bytes, heap %u (largest block %u)%s%s\n", (unsigned)written, (unsigned)size,
+    techLog.printf("Update: %u of %u bytes, heap %u (largest block %u)%s%s\n", (unsigned)written, (unsigned)size,
                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(), why.length() ? " - " : "", why.c_str());
 
     char hex[65];

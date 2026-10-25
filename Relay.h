@@ -28,6 +28,7 @@
 #include <mbedtls/gcm.h>
 #include <mbedtls/sha256.h>
 #include <time.h>
+#include "TechLog.h"
 
 class Relay {
 public:
@@ -110,6 +111,7 @@ public:
     return s;
   }
   uint32_t connectedAt() const { return connectedSince; }   // Unix time, 0 = not connected
+  uint16_t connections() const { return connects; }          // since the start (the diagnostic report)
   uint32_t served() const { return requests; }
 
   static String base64(const uint8_t* p, size_t n, bool url) {
@@ -139,6 +141,8 @@ private:
   volatile bool     paused     = false;
   char     stateText[64] = "off";
   volatile uint32_t connectedSince = 0;
+  uint16_t connects = 0;
+  String   lastEnd;                  // why the last connection ended - logged once, not on every retry
   volatile uint32_t requests = 0;
   uint16_t port = 80;
 
@@ -211,6 +215,8 @@ private:
       String why = session(version);
       connectedSince = 0;
       setState(why);
+      if (why != lastEnd) techLog.printf("Relay: %s\n", why.c_str());
+      lastEnd = why;
       // Right back after a connection that worked for a while; longer and longer while it keeps failing.
       backoff = millis() - start > 60000 ? 3000 : min(backoff ? backoff * 2 : 5000, (uint32_t)120000);
       if (why == "reconnecting" || why == "paused") backoff = 0;
@@ -243,6 +249,9 @@ private:
     }
     connectedSince = time(nullptr);
     setState("connected");
+    connects++;
+    techLog.printf("Relay: connected (#%u)\n", connects);
+    lastEnd = "";
 
     uint32_t lastPing = millis(), pingSent = 0;
     for (;;) {
