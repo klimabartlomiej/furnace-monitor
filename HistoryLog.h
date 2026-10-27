@@ -58,6 +58,7 @@ public:
   }
 
   uint32_t newest() const { return last; }
+  uint32_t capacityMinutes() const { return capacity; }   // how far back the ring reaches when full
 
   uint32_t oldest() const {
     if (!last) return 0;

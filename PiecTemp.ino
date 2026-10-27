@@ -16,7 +16,7 @@
 // WiFi, HomeKit pairing and remote access (Ustawienia -> Kopia zapasowa).
 // Remote access (Relay.h): the same app from GitHub Pages, anywhere - through a Cloudflare relay (relay/), end-to-end
 // encrypted with a key paired in the home app (Ustawienia -> Dostep zdalny). Nothing to open on the router.
-// History (HistoryLog.h): every minute for 31 days in its own flash partition; daily summaries for 2.5-5 years,
+// History (HistoryLog.h): every minute for 31 days (ESP32-S3: ~90) in its own flash partition; daily summaries for 2.5-5 years,
 // the event journal and coal refills appended to segment files and 14 days of Eve entries on LittleFS. The
 // newest data always replaces the oldest, nothing ever fills up.
 //
@@ -31,7 +31,7 @@
 // (a hotspot blocks everything for its whole timeout).
 // Serial commands work for SERIAL_WINDOW_MS after a boot (opening the Serial Monitor resets the board); then the
 // input is switched off - a stray byte would otherwise make HomeSpan wait for a newline forever.
-// The blue LED (if the board has one on GPIO2) shows the HomeSpan status.
+// The blue LED (if the board has one on GPIO2) - on the ESP32-S3 the RGB LED - shows the HomeSpan status.
 //
 // Updates:
 //   - over the internet (any home): bump FW_VERSION and its CHANGES note in web/index.html, run
@@ -41,9 +41,12 @@
 //     Port -> "furnace at ..." (both use the OTA password set with the serial command "O"; without a password
 //     set both stay off - HomeSpan would otherwise accept its public default).
 //
-// Arduino IDE: board "ESP32 Dev Module"; the partition table comes from partitions.csv in this folder
-// (2 x 1.69 MB app slots for OTA, 352 KB minute ring, 16 KB alive marks, 208 KB LittleFS). A partition change
-// needs a USB upload.
+// Two boards, one code (CONFIG_IDF_TARGET_ESP32S3 picks the pins, the LED and the update channel):
+//   - ESP32 Dev Module (4 MB): partitions.csv in this folder (2 x 1.69 MB app slots for OTA, 352 KB minute ring,
+//     16 KB alive marks, 208 KB LittleFS) - full, kept as it is,
+//   - ESP32-S3 N16R8 (16 MB flash, 8 MB PSRAM): partitions_s3.csv (2 x 4 MB app slots, 1 MB minute ring, core
+//     dump, ~7 MB LittleFS); release/publish.ps1 -Target s3 builds it with PSRAM=opi, FlashSize=16M.
+// A partition change needs a USB upload.
 // Libraries:   HomeSpan, OneWire 2.3.8+, DallasTemperature.
 // Serial Monitor (115200 baud): "@a" lists the probes on the bus, "@u" checks for updates, "?" HomeSpan help.
 
@@ -68,9 +71,15 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 25;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 26;                   // bump for every release (release/publish.ps1)
+// Each board has its own release channel - a firmware for the other chip must never be offered.
+#if CONFIG_IDF_TARGET_ESP32S3
+const char* UPDATE_MANIFEST_URL =
+  "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/s3/manifest.json";
+#else
 const char* UPDATE_MANIFEST_URL =
   "https://raw.githubusercontent.com/klimabartlomiej/furnace-monitor/main/release/manifest.json";
+#endif
 
 const char* DEVICE_NAME  = "furnace";                       // host name: furnace.local
 const char* RELAY_HOST   = "furnace-relay.klimsoft.workers.dev";   // remote access relay (relay/); the
@@ -105,9 +114,15 @@ constexpr uint32_t ALIVE_INTERVAL_S   = 2;               // "still alive" mark -
 constexpr uint8_t  TREND_MINUTES      = 30;              // window of the trend the warnings look at
 constexpr uint8_t  MORNING_HOUR       = 7;               // the summary of the day before goes out from this hour
 constexpr uint8_t  BOOT_BUTTON_PIN    = 0;               // the BOOT button on the board
-constexpr uint8_t  STATUS_LED_PIN     = 2;               // blue on-board LED on most ESP32 dev boards
 constexpr uint16_t WEB_PORT           = 8080;            // port 80 belongs to HomeKit (HomeSpan)
+#if CONFIG_IDF_TARGET_ESP32S3
+constexpr uint8_t  STATUS_PIXEL_PIN   = PIN_RGB_LED;     // the RGB LED of the ESP32-S3-DevKitC-1 (GPIO48)
+constexpr uint8_t  ONE_WIRE_PIN       = 4;               // GPIO4 (next to 3V3 on the header) - the DQ (data) wire,
+                                                         // 4.7k pull-up to 3.3V
+#else
+constexpr uint8_t  STATUS_LED_PIN     = 2;               // blue on-board LED on most ESP32 dev boards
 constexpr uint8_t  ONE_WIRE_PIN       = 22;              // D22 - GPIO of the DQ (data) wire, 4.7k pull-up to 3.3V
+#endif
 constexpr uint32_t READ_INTERVAL_MS   = 60 * 1000;       // one reading per minute (on the full minute once NTP is in)
 constexpr uint32_t CONVERSION_MS      = 800;             // 12-bit conversion takes 750 ms
 constexpr float    ALARM_HYSTERESIS   = 2.0;             // degrees back inside the limit before an alarm clears
@@ -1313,6 +1328,7 @@ void handleNow() {
   j += ",\"fsUsed\":";   j += (uint32_t)LittleFS.usedBytes();
   j += ",\"fsTotal\":";  j += (uint32_t)LittleFS.totalBytes();
   j += ",\"oldest\":";   j += minutes.oldest() * 60;
+  j += ",\"minuteDays\":"; j += minutes.capacityMinutes() / 1440;
   j += ",\"fw\":";       j += FW_VERSION;
   j += ",\"ota\":";      j += otaHashStored().length() ? "true" : "false";
   j += ",\"update\":\""; j += updater.status();
@@ -1476,7 +1492,8 @@ void handleSeries() {
 void handleDiag() {
   String r;
   r.reserve(TechLog::SIZE + 800);
-  r += "Furnace monitor v" + String(FW_VERSION) + ", up " + String(millis() / 60000) + " min, started: " + TechLog::startReason();
+  r += "Furnace monitor v" + String(FW_VERSION) + " on " + ESP.getChipModel() + " (PSRAM " + String(ESP.getPsramSize() / 1048576)
+     + " MB), up " + String(millis() / 60000) + " min, started: " + TechLog::startReason();
   r += "\nheap " + String(ESP.getFreeHeap() / 1024) + " KB, lowest " + String(ESP.getMinFreeHeap() / 1024) + " KB, largest block "
      + String(ESP.getMaxAllocHeap() / 1024) + " KB";
   r += "\nWiFi " + String(WiFi.RSSI()) + " dBm, connected " + String(networkUps) + "x; relay " + relay.state() + ", connected "
@@ -2038,7 +2055,11 @@ void setup() {
 
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
   xTaskCreatePinnedToCore(buttonTask, "bootButton", 4096, nullptr, 1, nullptr, 0);
+#if CONFIG_IDF_TARGET_ESP32S3
+  homeSpan.setStatusPixel(STATUS_PIXEL_PIN);
+#else
   homeSpan.setStatusPin(STATUS_LED_PIN);
+#endif
   homeSpan.setGetCharacteristicsCallback(EveHistory::onGetCharacteristics);
   homeSpan.setApSSID(AP_SSID);
   homeSpan.setApPassword(AP_PASSWORD);
