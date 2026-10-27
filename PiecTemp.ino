@@ -167,18 +167,18 @@ constexpr size_t SENSOR_COUNT = 8;   // slots
 constexpr size_t SENSOR_COUNT = 4;   // the classic board keeps its 4
 #endif
 
-// The probes at dad's, identified on the bench 2026-10-22 (hand-warming test), with their first limits - the slots
-// until the web app saves others.
-struct SlotDefault {
-  SlotConfig config;
-  float      low, high;        // NAN = off
+// The probes at dad's, identified on the bench 2026-10-22 (hand-warming test) - the slots until the web app saves
+// others.
+const SlotConfig DEFAULT_SLOTS[] = {
+  {{0x28, 0x4D, 0x83, 0x77, 0x91, 0x0C, 0x02, 0xF8}, "Piec",           ROLE_FURNACE, 1},   // counterfeit chip, failed at ~60 C in place
+  {{0x28, 0xAA, 0xEF, 0x8D, 0x4A, 0x14, 0x01, 0xAE}, "Powrót",         ROLE_RETURN,  1},
+  {{0x28, 0xAA, 0x61, 0x94, 0x4A, 0x14, 0x01, 0x6C}, "Zasobnik węgla", ROLE_HOPPER,  1},
+  {{0x28, 0xAA, 0xDB, 0x95, 0x4D, 0x14, 0x01, 0x6B}, "Bojler",         ROLE_BOILER,  1},   // hot water tank
 };
-const SlotDefault DEFAULT_SLOTS[] = {
-  {{{0x28, 0x4D, 0x83, 0x77, 0x91, 0x0C, 0x02, 0xF8}, "Piec",           ROLE_FURNACE, 1}, 40.0, 90.0},   // counterfeit chip, failed at ~60 C in place
-  {{{0x28, 0xAA, 0xEF, 0x8D, 0x4A, 0x14, 0x01, 0xAE}, "Powrót",         ROLE_RETURN,  1}, NAN,  NAN },
-  {{{0x28, 0xAA, 0x61, 0x94, 0x4A, 0x14, 0x01, 0x6C}, "Zasobnik węgla", ROLE_HOPPER,  1}, NAN,  50.0},   // high = embers creeping back
-  {{{0x28, 0xAA, 0xDB, 0x95, 0x4D, 0x14, 0x01, 0x6B}, "Bojler",         ROLE_BOILER,  1}, 35.0, NAN },   // hot water tank
-};
+// Alarm limits a slot has until the web app sets its own - by role, so a replacement probe or a new home gets them
+// too (NAN = off): the furnace 40..90, embers creeping into the hopper above 50, a boiler below 35.
+const float ROLE_LOW[ROLE_COUNT]  = {NAN, 40, NAN, NAN, 35, NAN};
+const float ROLE_HIGH[ROLE_COUNT] = {NAN, 90, NAN, 50, NAN, NAN};
 constexpr size_t DEFAULT_COUNT = sizeof(DEFAULT_SLOTS) / sizeof(DEFAULT_SLOTS[0]);
 SlotConfig slots[SENSOR_COUNT];
 // The slots by role, -1 = no probe in that role (mapRoles). FLUE is shown and charted; no warning uses it yet.
@@ -454,6 +454,14 @@ bool max6675Present() {
   return f != 0xFFFF && f != 0 && !(f & 0x8002);
 }
 
+// The thermocouple board, when one answers; its address goes to `a`.
+bool findThermocouple(DeviceAddress a) {
+  memset(a, 0, 8);
+  a[0] = KIND_MAX6675;
+  a[1] = (uint8_t)TC_CS_PIN;
+  return max6675Present();
+}
+
 float readThermocouple() {
   uint16_t f = max6675Frame();
   return f == 0xFFFF || f == 0 || (f & 0x8006) ? NAN : (f >> 3) * 0.25f;
@@ -480,10 +488,23 @@ void mapRoles() {
   }
 }
 
+// A slot that gets another probe (the web app, or found at a start): the old probe's offset goes - a calibration is
+// the probe's own - and its alarm and fault are not brought back (flash "freshSlots", read by restoreAlerts); a slot
+// emptied or newly taken loses its limits too.
+void forgetSlot(size_t i, bool limitsToo) {
+  prefs.remove(prefKey("off", i).c_str());
+  if (limitsToo) {
+    prefs.remove(prefKey("lo", i).c_str());
+    prefs.remove(prefKey("hi", i).c_str());
+  }
+  prefs.putUChar("freshSlots", prefs.getUChar("freshSlots", 0) | 1 << i);
+}
+
 // A probe no slot knows goes into the first free slot. False when all are taken.
 bool placeProbe(const DeviceAddress found, const char* name, uint8_t role) {
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
     if (!isUnset(slots[i].address)) continue;
+    forgetSlot(i, true);
     memcpy(slots[i].address, found, 8);
     strlcpy(slots[i].name, name, sizeof(slots[i].name));
     slots[i].role = role;
@@ -507,7 +528,7 @@ void loadSlots() {
   }
   if (prefs.getBytes("slots", slots, sizeof(slots)) != sizeof(slots)) {
     memset(slots, 0, sizeof(slots));
-    for (size_t i = 0; i < DEFAULT_COUNT && i < SENSOR_COUNT; i++) slots[i] = DEFAULT_SLOTS[i].config;
+    for (size_t i = 0; i < DEFAULT_COUNT && i < SENSOR_COUNT; i++) slots[i] = DEFAULT_SLOTS[i];
   }
   for (auto& slot : slots) slot.name[sizeof(slot.name) - 1] = 0;
   mapRoles();
@@ -520,8 +541,8 @@ void loadSlots() {
     snprintf(name, sizeof(name), "Czujnik %02X", found[7]);   // the CRC byte - tells two new probes apart
     added |= placeProbe(found, name, ROLE_OTHER);
   }
-  DeviceAddress tc = {KIND_MAX6675, (uint8_t)TC_CS_PIN};
-  if (max6675Present() && slotOf(tc) < 0) added |= placeProbe(tc, "Spaliny", FLUE < 0 ? ROLE_FLUE : ROLE_OTHER);
+  DeviceAddress tc;
+  if (findThermocouple(tc) && slotOf(tc) < 0) added |= placeProbe(tc, "Spaliny", FLUE < 0 ? ROLE_FLUE : ROLE_OTHER);
   if (added) prefs.putBytes("slots", slots, sizeof(slots));
   mapRoles();
 }
@@ -545,8 +566,8 @@ String busReport() {
   oneWire.reset_search();
   while (oneWire.search(a))
     if (bus.validAddress(a)) line(a, bus.getTempC(a));
-  DeviceAddress tc = {KIND_MAX6675, (uint8_t)TC_CS_PIN};
-  if (max6675Present()) line(tc, readThermocouple());
+  DeviceAddress tc;
+  if (findThermocouple(tc)) line(tc, readThermocouple());
   if (count == 0) out = "No probe found - check the wiring and the pull-up resistor\n";
   return out;
 }
@@ -653,16 +674,22 @@ void saveAlerts() {
 }
 
 void restoreAlerts() {
+  uint8_t fresh = prefs.getUChar("freshSlots", 0);          // slots with another probe since (forgetSlot)
   SavedAlerts a;
-  if (!prefs.isKey("alerts") || prefs.getBytes("alerts", &a, sizeof(a)) != sizeof(a)) return;
-  for (size_t i = 0; i < SENSOR_COUNT; i++) {
-    if (!slotUsed(i)) continue;                // a slot switched off keeps no old alarm
-    state[i].alarm  = constrain(a.alarm[i], -1, 1);
-    state[i].faulty = a.faulty >> i & 1;
-    if (state[i].faulty) state[i].badReadings = FAULT_AFTER;
+  if (prefs.isKey("alerts") && prefs.getBytes("alerts", &a, sizeof(a)) == sizeof(a)) {
+    for (size_t i = 0; i < SENSOR_COUNT; i++) {
+      if (!slotUsed(i) || fresh >> i & 1) continue;          // a slot switched off or with a new probe starts clean
+      state[i].alarm  = constrain(a.alarm[i], -1, 1);
+      state[i].faulty = a.faulty >> i & 1;
+      if (state[i].faulty) state[i].badReadings = FAULT_AFTER;
+    }
+    for (uint8_t w = 0; w < WARN_COUNT; w++) warnings[w].active = a.warnings >> w & 1;
+    hotWaterReady = a.hotWater && BOILER >= 0;
   }
-  for (uint8_t w = 0; w < WARN_COUNT; w++) warnings[w].active = a.warnings >> w & 1;
-  hotWaterReady = a.hotWater;
+  if (fresh) {
+    saveAlerts();
+    prefs.remove("freshSlots");
+  }
 }
 
 // ------------------------------------------------------------------ HomeKit
@@ -921,15 +948,17 @@ void evaluateWarnings(bool tick = false) {
   float margin = settings.goOutMargin + (warnings[WARN_GOING_OUT].active ? 1 : 0);
   bool dying = burning && !isnan(slope) && slope < -0.5f && f.lastGood <= f.low + margin;
   goOutForecast = dying ? lroundf((f.lastGood - f.low) / -slope * 60) : -1;
-  setWarning(WARN_GOING_OUT, dying, !burning || !isnan(slope), 5, 10, heating && settings.goOutOn, f.lastGood, tick);
+  setWarning(WARN_GOING_OUT, dying, !burning || !isnan(slope), 5, 10, heating && settings.goOutOn && FURNACE >= 0, f.lastGood, tick);
 
   // Freezing: the coldest water probe, with one degree of hysteresis.
   float coldest = NAN;
+  bool anyWater = false;
+  for (size_t i = 0; i < SENSOR_COUNT; i++) anyWater |= slotUsed(i) && isWater(i);
   for (size_t i = 0; i < SENSOR_COUNT; i++)
     if (slotUsed(i) && isWater(i) && !state[i].faulty && !isnan(state[i].lastGood))
       coldest = isnan(coldest) ? state[i].lastGood : fminf(coldest, state[i].lastGood);
   bool freezing = !isnan(coldest) && coldest < settings.freezeTemp + (warnings[WARN_FREEZE].active ? 1 : 0);
-  setWarning(WARN_FREEZE, freezing, !isnan(coldest), 2, 2, settings.freezeOn, coldest, tick);
+  setWarning(WARN_FREEZE, freezing, !isnan(coldest), 2, 2, settings.freezeOn && anyWater, coldest, tick);
 
   // Embers creeping into the coal hopper: its temperature climbing fast. Also in summer mode (a fire for hot
   // water), and a probe that dies - embers may have destroyed it - keeps the warning as it was.
@@ -954,7 +983,8 @@ void evaluateWarnings(bool tick = false) {
   bool stalled;
   if (warnings[WARN_STALLED].active) stalled = !(slope >= 2) && !(f.lastGood >= stallFrom - 1);
   else stalled = stallWatch && millis() < STALL_WATCH_MS && f.lastGood <= stallFrom - STALL_DROP && slope <= STALL_SLOPE;
-  setWarning(WARN_STALLED, stalled, !isnan(slope) || !stallWatch, 3, 10, heating && settings.stalledOn, f.lastGood, tick);
+  setWarning(WARN_STALLED, stalled, !isnan(slope) || !stallWatch, 3, 10, heating && settings.stalledOn && FURNACE >= 0, f.lastGood,
+             tick);
 
   // Ash pan: due after ashLimit kg of coal (once the coal use is learnt) or ashDays since it was emptied.
   // Unknown without a clock (right after a power cut), so it does not close and reopen.
@@ -965,6 +995,10 @@ void evaluateWarnings(bool tick = false) {
   // Hot water ready: not a problem, a notification "you can shower" when the boiler is warm enough - at most one
   // an hour, as a boiler around its "ready" temperature crosses it back and forth.
   const SensorState& b = BOILER >= 0 ? state[BOILER] : noProbe;
+  if (BOILER < 0 && hotWaterReady) {                        // the boiler's role went to no probe
+    hotWaterReady = false;
+    saveAlerts();
+  }
   if (!b.faulty && !isnan(b.lastGood)) {
     bool ready = b.lastGood >= settings.hotWater - (hotWaterReady ? HOT_WATER_HYSTERESIS : 0);
     if (ready != hotWaterReady) {
@@ -1078,7 +1112,7 @@ void recomputeCoal() {
 // a settings change.
 void updateCoal(uint32_t now) {
   coalRate = coalLevel = coalHoursLeft = ashBurned = NAN;
-  if (!settings.coalOn || isnan(coalK)) return;
+  if (!settings.coalOn || isnan(coalK) || FURNACE < 0 || RETURN_WATER < 0) return;   // no heat without both
   if (!isnan(heatSinceAsh)) ashBurned = coalK * heatSinceAsh;
   uint32_t covered;
   float heat = heatBetween(now - 86400, now, &covered);
@@ -1323,7 +1357,7 @@ void morningSummary(time_t now) {
     cutSeconds += (uint32_t)(e.sensor & 0x7F) << 16 | (uint16_t)e.value;
   });
   String j = String("{\"t\":") + (uint32_t)now + ",\"e\":101,\"d\":" + yesterday + ",\"m\":" + (unsigned)d.burnMinutes;
-  if (settings.coalOn && !isnan(coalK)) {
+  if (settings.coalOn && !isnan(coalK) && FURNACE >= 0 && RETURN_WATER >= 0) {
     float kg = coalK * d.heat;
     j += ",\"kg\":" + String(lroundf(kg));
     if (settings.coalPrice > 0) j += ",\"z\":" + String(lroundf(kg * settings.coalPrice / 1000));
@@ -1417,9 +1451,15 @@ void widenDays() {
   const size_t oldSize = 4 + 6 * from + 6, N = SENSOR_COUNT;
   int16_t none[SENSOR_COUNT];
   for (auto& v : none) v = NO_VALUE;
-  for (const char* path : {"/day0.bin", "/day1.bin"}) {
+  uint8_t done = prefs.getUChar("widened", 0);              // files already widened (a power cut halfway)
+  for (uint8_t k = 0; k < 2; k++) {
+    String path = "/day" + String(k) + ".bin";
+    if (done >> k & 1) continue;
     File f = LittleFS.open(path, "r");
-    if (!f || from >= N) continue;
+    if (!f || from >= N) {
+      if (f) f.close();
+      continue;
+    }
     std::vector<uint8_t> old(f.size());
     f.read(old.data(), old.size());
     f.close();
@@ -1436,15 +1476,17 @@ void widenDays() {
       memcpy(w + 4 + 6 * N, r + 4 + 6 * from, 6);              // burnMinutes, heat
       wide.push_back(d);
     }
-    String fresh = String(path) + ".new";
+    String fresh = path + ".new";
     f = LittleFS.open(fresh, "w");
     if (!f) continue;
     f.write((const uint8_t*)wide.data(), wide.size() * sizeof(DayRecord));
     f.close();
-    LittleFS.rename(fresh, path);
-    techLog.printf("%s: %u days widened from %u probes\n", path, (unsigned)wide.size(), from);
+    if (!LittleFS.rename(fresh, path)) continue;
+    prefs.putUChar("widened", done |= 1 << k);
+    techLog.printf("%s: %u days widened from %u probes\n", path.c_str(), (unsigned)wide.size(), from);
   }
   prefs.remove("fromProbes");
+  prefs.remove("widened");
 }
 
 // wipe: the first start after a full reset - everything goes.
@@ -1480,8 +1522,9 @@ String prefKey(const char* kind, size_t i) {
 void loadLimits() {
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
     String lo = prefKey("lo", i), hi = prefKey("hi", i);
-    state[i].low  = prefs.isKey(lo.c_str()) ? prefs.getFloat(lo.c_str()) : i < DEFAULT_COUNT ? DEFAULT_SLOTS[i].low : NAN;
-    state[i].high = prefs.isKey(hi.c_str()) ? prefs.getFloat(hi.c_str()) : i < DEFAULT_COUNT ? DEFAULT_SLOTS[i].high : NAN;
+    uint8_t role = slots[i].role < ROLE_COUNT ? slots[i].role : ROLE_OTHER;
+    state[i].low  = prefs.isKey(lo.c_str()) ? prefs.getFloat(lo.c_str()) : ROLE_LOW[role];
+    state[i].high = prefs.isKey(hi.c_str()) ? prefs.getFloat(hi.c_str()) : ROLE_HIGH[role];
   }
 }
 
@@ -1542,14 +1585,14 @@ float parseNumber(String v) {
 
 // A limit from the web app: empty = off (NAN). False for anything a probe cannot show - a typo must never switch
 // an alarm off.
-bool parseLimit(String v, float& out) {
+bool parseLimit(String v, float& out, float top) {
   v.trim();
   if (!v.length()) {
     out = NAN;
     return true;
   }
   float f = parseNumber(v);
-  if (isnan(f) || f < -55 || f > 1000) return false;   // 1000: a thermocouple (the flue)
+  if (isnan(f) || f < -55 || f > top) return false;
   out = f;
   return true;
 }
@@ -1749,9 +1792,15 @@ uint32_t argOr(const char* name, uint32_t fallback) {
 
 // GET from, to, step (seconds, multiple of 60). Binary, oldest first: uint32 time, then per probe
 // int16 min, avg, max (degrees x 100, NO_VALUE when the probe had no reading in the bucket).
+// A range from 0 at a minute step would keep the loop busy for a minute: at most ~20000 buckets an answer.
+uint32_t stepFor(uint32_t from, uint32_t to, uint32_t step) {
+  uint32_t least = to > from ? (to - from) / 20000 : 0;
+  return max(max((uint32_t)60, step / 60 * 60), (least + 59) / 60 * 60);
+}
+
 void handleSeries() {
   uint32_t to = argOr("to", time(nullptr)), from = argOr("from", to - 6 * 3600);
-  uint32_t step = max((uint32_t)60, argOr("step", 60) / 60 * 60);
+  uint32_t step = stepFor(from, to, argOr("step", 60));
   ChunkWriter w;
   w.begin("application/octet-stream");
   forEachBucket(from, to, step, [&](uint32_t t, const uint16_t* count, const int16_t* mn, const int32_t* sum, const int16_t* mx) {
@@ -1865,7 +1914,7 @@ void handleEvents() {
 // GET from, to, step. Semicolon CSV with decimal commas and local times - opens as-is in a Polish Excel.
 void handleCsv() {
   uint32_t to = argOr("to", time(nullptr)), from = argOr("from", to - 86400);
-  uint32_t step = max((uint32_t)60, argOr("step", 60) / 60 * 60);
+  uint32_t step = stepFor(from, to, argOr("step", 60));
   server.sendHeader("Content-Disposition", "attachment; filename=\"piec.csv\"");
   ChunkWriter w;
   w.begin("text/csv; charset=utf-8");
@@ -1900,7 +1949,8 @@ void handleLimits() {
   }
   SensorState& s = state[i];
   float low, high;
-  if (!parseLimit(server.arg("low"), low) || !parseLimit(server.arg("high"), high) || low >= high) {
+  float top = isThermocouple(slots[i].address) ? 1000 : 125;   // what the probe can read
+  if (!parseLimit(server.arg("low"), low, top) || !parseLimit(server.arg("high"), high, top) || low >= high) {
     server.send(400, "text/plain", "out of range");
     return;
   }
@@ -2049,13 +2099,10 @@ void handleBus() {
   server.send(200, "text/plain", busReport());
 }
 
-// GET: every probe found right now - [{"addr","kind","t","slot"}] (slot -1 = no slot has it). Blocks ~750 ms for a
-// fresh conversion; the Czujniki page asks every few seconds while it is open (warm a probe in the hand to tell
-// which is which).
+// GET: every probe found - [{"addr","kind","t","slot"}] (slot -1 = no slot has it). The DS18B20s give what their last
+// conversion left and the next one starts here, so the loop never waits the 750 ms; the Czujniki page asks every few
+// seconds while it is open, and a probe warmed in the hand shows it by the next answer.
 void handleProbes() {
-  bus.setWaitForConversion(true);
-  bus.requestTemperatures();
-  bus.setWaitForConversion(false);
   String j = "[";
   auto add = [&](const DeviceAddress a, float t) {
     if (j.length() > 1) j += ',';
@@ -2069,8 +2116,9 @@ void handleProbes() {
     float t = bus.getTempC(a);
     add(a, t == DEVICE_DISCONNECTED_C ? NAN : t);
   }
-  DeviceAddress tc = {KIND_MAX6675, (uint8_t)TC_CS_PIN};
-  if (max6675Present()) add(tc, readThermocouple());
+  DeviceAddress tc;
+  if (findThermocouple(tc)) add(tc, readThermocouple());
+  if (!conversionPending) bus.requestTemperatures();        // the minute's reading has one of its own under way
   server.send(200, "application/json", j + "]");
 }
 
@@ -2086,6 +2134,9 @@ void handleSlots() {
     if (!parseAddress(server.arg("a" + k), c.address)) return server.send(400, "text/plain", "bad address in slot " + String(i + 1));
     name.trim();
     if (name.isEmpty()) name = "Czujnik " + String(i + 1);
+    // A quote or a backslash would break /api/now and Home's accessory list (HomeSpan writes names unescaped).
+    for (char ch : name)
+      if ((uint8_t)ch < 0x20 || ch == '"' || ch == 0x5C) return server.send(400, "text/plain", "bad name in slot " + String(i + 1));
     if (name.length() >= sizeof(c.name)) return server.send(400, "text/plain", "name too long in slot " + String(i + 1));
     strlcpy(c.name, name.c_str(), sizeof(c.name));
     for (uint8_t r = 0; r < ROLE_COUNT; r++)
@@ -2099,8 +2150,10 @@ void handleSlots() {
       if (next[i].role != ROLE_OTHER && next[i].role == next[k].role && next[i].on && next[k].on)
         return server.send(400, "text/plain", String("role twice: ") + ROLE_KEYS[next[i].role]);
     }
-  memcpy(slots, next, sizeof(slots));
-  prefs.putBytes("slots", slots, sizeof(slots));
+  // The running slots stay as they are until the restart - the loop reads with them meanwhile.
+  for (size_t i = 0; i < SENSOR_COUNT; i++)
+    if (memcmp(next[i].address, slots[i].address, 8) != 0) forgetSlot(i, isUnset(next[i].address));
+  prefs.putBytes("slots", next, sizeof(next));
   techLog.println("Probe slots changed - restarting");
   server.send(200, "application/json", "{\"restart\":true}");
   restartAtMs = millis() + 1500;
@@ -2157,10 +2210,9 @@ void handleRemote() {
 void handleSupport() {
   if (server.method() == HTTP_POST) {
     uint32_t now = time(nullptr);
-    if (server.arg("revoke") == "1") {
-      prefs.remove("supKey");
-      prefs.remove("supUntil");
-      relay.setSupport(nullptr, 0);
+    if (server.arg("revoke") == "1") {                  // the key stays: its phone is told the code ended
+      prefs.putUInt("supUntil", 1);
+      relay.endSupport();
       techLog.println("Support code revoked");
     } else {
       long hours = server.arg("hours").toInt();
@@ -2420,6 +2472,39 @@ void buttonTask(void*) {
   }
 }
 
+// ------------------------------------------------------------------ status LED
+
+#if CONFIG_IDF_TARGET_ESP32S3
+// HomeSpan blinks its status device from a task of its own with a 1 KB stack (HomeSpan 2.1.8, Blinker.cpp) - enough
+// for a plain LED, not for the RGB pixel's RMT driver: the S3 crashed in it (2026-10-27, a stack overflow in
+// BlinkTask). Here on() and off() only pass the state on; a task with room drives the pixel.
+class StatusPixel : public Blinkable {
+public:
+  void begin(uint8_t pin) {
+    this->pin = pin;
+    xTaskCreatePinnedToCore(task, "statusPixel", 4096, this, 1, &handle, 0);
+  }
+  void on() override { if (handle) xTaskNotify(handle, 1, eSetValueWithOverwrite); }
+  void off() override { if (handle) xTaskNotify(handle, 0, eSetValueWithOverwrite); }
+  int getPin() override { return pin; }
+
+private:
+  uint8_t      pin    = 0;
+  TaskHandle_t handle = nullptr;
+
+  static void task(void* self) {
+    Pixel pixel(static_cast<StatusPixel*>(self)->pin);
+    pixel.setOnColor(Pixel::HSV(0, 100, 100));          // red, like HomeSpan's own status pixel
+    for (uint32_t lit;;) {
+      xTaskNotifyWait(0, 0, &lit, portMAX_DELAY);
+      if (lit) pixel.on();
+      else pixel.off();
+    }
+  }
+};
+StatusPixel statusPixel;
+#endif
+
 // ------------------------------------------------------------------ setup / loop
 
 void setup() {
@@ -2440,7 +2525,7 @@ void setup() {
   // use and ash count (limits and settings stay).
   bool wipe = prefs.getBool("wipe", false);
   if (wipe) {
-    for (const char* key : {"alerts", "coalK", "coalN", "ashAt", "relayKey"}) prefs.remove(key);   // old phones out
+    for (const char* key : {"alerts", "coalK", "coalN", "ashAt", "relayKey", "supKey", "supUntil"}) prefs.remove(key);   // old phones out
     prefs.putBool("cleared", true);
   }
   loadLimits();
@@ -2480,7 +2565,8 @@ void setup() {
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
   xTaskCreatePinnedToCore(buttonTask, "bootButton", 4096, nullptr, 1, nullptr, 0);
 #if CONFIG_IDF_TARGET_ESP32S3
-  homeSpan.setStatusPixel(STATUS_PIXEL_PIN);
+  statusPixel.begin(STATUS_PIXEL_PIN);
+  homeSpan.setStatusDevice(&statusPixel);
 #else
   homeSpan.setStatusPin(STATUS_LED_PIN);
 #endif

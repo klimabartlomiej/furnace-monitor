@@ -1,5 +1,5 @@
 # Furnace monitor on an ESP32-S3 with 16 MB flash (N16R8): two OTA app slots of 4 MB, a raw 1 MB partition for
-# the per-minute ring (MinuteLog in HistoryLog.h - about 90 days for 4 probes), 16 KB of "still alive" marks that
+# the per-minute ring (MinuteLog in HistoryLog.h - 2 MB, about 90 days of 8 slots), 16 KB of "still alive" marks that
 # time power cuts (AliveLog), a core dump of the last crash (for the diagnostic report) and ~7 MB of LittleFS.
 # nvs and otadata sit where the classic table has them, so a backup restored from the old board lands the same.
 # The build takes this file instead of partitions.csv (release/publish.ps1 -Target s3).

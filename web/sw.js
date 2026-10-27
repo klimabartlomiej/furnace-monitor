@@ -37,8 +37,6 @@ const dur = s => { const m = Math.round(s / 60), h = Math.floor(m / 60); return 
 const durCut = s => (s < 60 ? `${s} s` : dur(s));
 const plural = (n, one, few, many) => n === 1 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? few : many;
 const kg = v => `${v < 10 ? n1(v) : Math.round(v)} kg`;
-// Firmware before v22 counted coal in buckets (its morning summary sends b = buckets x 10).
-const buckets = b => { const r = b >= 20 ? Math.round(b) : Math.round(b * 2) / 2; return `${String(r).replace('.', ',')} ${r === 1 ? 'wiadro' : Number.isInteger(r) ? plural(r, 'wiadro', 'wiadra', 'wiader') : 'wiadra'}`; };
 
 // The ESP's alert: the pairing code -> key (as in Relay.h), AES-GCM with AAD 'P'.
 async function openAlert(sealed) {
@@ -75,7 +73,6 @@ function describe(a) {
       const parts = [];
       const cost = a.z !== undefined ? ` (≈${a.z} zł)` : '';
       if (a.kg !== undefined) parts.push(`~${kg(a.kg)} węgla${cost}`);
-      else if (a.b !== undefined) parts.push(`${buckets(a.b / 10)} węgla${cost}`);
       parts.push(`piec palił ${dur(a.m * 60)}`);
       if (a.lo !== undefined) parts.push(`piec ${n1(a.lo / 100)}–${n1(a.hi / 100)}°`);
       parts.push(a.pc ? `${a.pc} ${plural(a.pc, 'zanik', 'zaniki', 'zaników')} prądu (${durCut(a.ps)})` : 'bez zaników prądu');

@@ -680,7 +680,7 @@ function saveCache() {
   } catch (e) {}
 }
 function dropCache() {
-  live = []; series = null; days = []; daysAt = 0; journal = []; journalAt = 0; refillsAt = 0;
+  live = []; series = null; days = []; daysAt = 0; journal = []; journalAt = 0; refillsAt = 0; missedMemo.key = '';
   try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
 }
 function loadCache() {
@@ -792,18 +792,22 @@ async function api(path, opt = {}, ms = 12000) {
 // One request at a time. Sends the phone's clock (the ESP takes it only when it has no NTP). A device on other
 // firmware than this page reloads it once (from GitHub Pages only for a newer one - the page may be ahead of the
 // device there); a device whose history was wiped (BOOT 15 s) drops the cached data.
-let nowLoading = null;
+let nowLoading = null, nowFresh = false;       // nowFresh: `now` came from the device in this session
 function refreshNow() {
   if (!nowLoading) nowLoading = (async () => {
     try {
       const fresh = await (await api(`/api/now?t=${tNow()}`)).json();
       if (fresh.fw !== APP_VERSION && (!REMOTE || fresh.fw > APP_VERSION) && reloadOnce(fresh.fw)) return;
-      if (live.length && fresh.oldest && live[0].t < fresh.oldest - 120) dropCache();
-      now = legacyCoal(fresh);
+      // Another board (the S3's 8 slots after the classic's 4) or a wiped history: the cached data is of no use.
+      if ((live.length && fresh.oldest && live[0].t < fresh.oldest - 120) || (now && now.sensors.length !== fresh.sensors.length)) dropCache();
+      now = fromDevice(fresh);
+      nowFresh = true;
+      supportGone = false;
       online = true;
       lastOk = Date.now();
     } catch (e) {
       online = false;
+      if (readOnly() && /expired/.test(e.message)) supportGone = true;
     }
     nowLoading = null;
     render(true);
@@ -829,8 +833,10 @@ function reloadWhenBack(firstTry) {
 }
 
 // /api/series buckets: uint32 time, then per probe int16 min, avg, max (x100, -32768 = no reading).
+// A size that is no multiple of a record means another probe count than `now` - nothing is read then.
 function parseBuckets(buf) {
   const v = new DataView(buf), n = now.sensors.length, size = 4 + 6 * n, out = [];
+  if (buf.byteLength % size) throw new Error('records of another size');
   for (let o = 0; o + size <= buf.byteLength; o += size) {
     const vals = [];
     for (let i = 0; i < n; i++) {
@@ -845,6 +851,7 @@ function parseBuckets(buf) {
 // /api/daily records: uint32 time, int16 min[n], avg[n], max[n], uint16 burning minutes, uint32 heat (degree-minutes).
 function parseDays(buf) {
   const v = new DataView(buf), n = now.sensors.length, size = 4 + 6 * n + 6, out = [];
+  if (buf.byteLength % size) throw new Error('records of another size');
   for (let o = 0; o + size <= buf.byteLength; o += size) {
     const vals = [];
     for (let i = 0; i < n; i++) {
@@ -863,7 +870,7 @@ const seriesUrl = (from, to, step) => `/api/series?from=${Math.floor(from)}&to=$
 // LIVE_SPAN back, only minutes newer than what is held.
 let liveLoading = null;
 function loadLive() {
-  if (!now) return Promise.resolve();
+  if (!now || !nowFresh) return Promise.resolve();
   if (!liveLoading) liveLoading = (async () => {
     const t = tNow(), last = live.length ? live[live.length - 1].t : 0;
     try {
@@ -880,7 +887,7 @@ function loadLive() {
 
 // Daily records: all once, then only the new ones; sooner when the newest is older than yesterday (after midnight).
 async function loadDays(force) {
-  if (!now) return;
+  if (!now || !nowFresh) return;
   const newest = days.length ? days[days.length - 1].t : 0, stale = newest < midnight(tNow()) - 86400 - 3 * 3600;
   if (!force && Date.now() - daysAt < (stale ? 5 : 30) * 60e3) return;
   daysAt = Date.now();
@@ -890,24 +897,27 @@ async function loadDays(force) {
   } catch (e) { daysAt = 0; }
 }
 
+// The journal: all of it (90 days) at first and every 30 minutes, in between only the last hour - a bath is written
+// with the time it began, up to half an hour back. Rows already held are not added twice.
+let journalFullAt = 0;
 async function loadJournal() {
   if (!now || Date.now() - journalAt < 30e3) return;
   journalAt = Date.now();
-  try { journal = await (await api(`/api/events?since=${tNow() - 90 * 86400}`)).json(); } catch (e) { journalAt = 0; }
+  try {
+    if (!journal.length || Date.now() - journalFullAt > 30 * 60e3) {
+      journal = await (await api(`/api/events?since=${tNow() - 90 * 86400}`)).json();
+      journalFullAt = Date.now();
+    } else {
+      const since = journal[journal.length - 1][0] - 3600, held = new Set(journal.filter(e => e[0] >= since).map(e => e.join()));
+      const add = (await (await api(`/api/events?since=${since}`)).json()).filter(e => !held.has(e.join()));
+      if (add.length) journal = journal.concat(add);
+    }
+  } catch (e) { journalAt = 0; }
 }
 
-// Firmware before v22 counted coal in buckets of settings.bucketKg: its numbers become kg here, for the app from
-// GitHub Pages that is ahead of a device not updated yet. Marked, so nothing is converted twice.
-const oldBucketKg = n => (n && n.fw < 22 && n.settings && n.settings.bucketKg) || 0;
-function legacyCoal(n) {
+// Every /api/now answer goes through here: the probe roles are looked up for it.
+function fromDevice(n) {
   mapRoles(n);
-  const kg = oldBucketKg(n), c = n && n.coal;
-  if (!kg || n.inKg) return n;
-  const x = v => (v === null || v === undefined ? v : v * kg);
-  Object.assign(c, { k: x(c.k), level: x(c.level), rate: x(c.rate), lastRefill: c.lastRefill && [c.lastRefill[0], c.lastRefill[1] * kg, c.lastRefill[2]] });
-  n.ash.kg = x(n.ash.buckets);
-  Object.assign(n.settings, { hopperKg: x(n.settings.hopperBuckets), ashLimit: x(n.settings.ashLimit) });
-  n.inKg = true;
   return n;
 }
 
@@ -916,8 +926,7 @@ async function loadRefills() {
   if (!now || Date.now() - refillsAt < 30e3) return;
   refillsAt = Date.now();
   try {
-    const kg = oldBucketKg(now);
-    refills = (await (await api('/api/refills')).json()).map(r => (kg ? [r[0], r[1] * kg, r[2]] : r));
+    refills = await (await api('/api/refills')).json();
   } catch (e) { refillsAt = 0; }
 }
 
@@ -1326,6 +1335,7 @@ function warningText(w) {
 // Suggests summer mode after three full days without burning (once a week at most), and in summer mode says what
 // happens when the furnace burns.
 function seasonNotice() {
+  if (FURNACE < 0) return '';                                   // without a furnace probe nothing is known about burning
   if (now.settings.heating) {
     if (tNow() - (+recall('furnace-season-no') || 0) < 7 * 86400) return '';
     if (!lastDays(4).every(x => x.burn === 0)) return '';
@@ -1348,7 +1358,15 @@ function updateNotice() {
 
 // Problems (alarms, dead probes, warnings) that started since this phone last closed the "Co się działo" card,
 // each with its end from the journal. The very first visit only remembers the time.
+const missedMemo = { key: '', list: [] };
 function missedEvents() {
+  const last = journal[journal.length - 1], key = `${journal.length}:${last ? last.join() : ''}:${recall('furnace-seen')}`;
+  if (missedMemo.key !== key) missedMemo.list = findMissed();
+  missedMemo.key = `${journal.length}:${last ? last.join() : ''}:${recall('furnace-seen')}`;   // findMissed may store "seen"
+  return missedMemo.list;
+}
+
+function findMissed() {
   const seen = +recall('furnace-seen') || 0;
   if (!seen) { store('furnace-seen', tNow()); return []; }
   const out = [], blips = [];
@@ -1421,7 +1439,7 @@ function renderHome() {
   const warns = now ? now.warnings.map((on, w) => on ? w : -1).filter(w => w >= 0) : [];
   const problems = warns.filter(w => w !== 5), count = alarms.length + problems.length;       // the ash pan is a reminder
   $('#dot').className = 'dot' + (online !== true ? ' warn' : alarms.length ? ' bad' : problems.length ? ' warn' : '');
-  $('#status').textContent = online === false ? offlineText() : !now || online === null ? 'Łączenie…'
+  $('#status').textContent = supportGone ? 'Kod serwisowy nieważny' : online === false ? offlineText() : !now || online === null ? 'Łączenie…'
     : (count ? `${count} ${plural(count, 'alarm', 'alarmy', 'alarmów')}` : 'Wszystko w normie')
       + (warns.includes(5) ? ' · popielnik' : '') + (now.settings.heating ? '' : ' · tryb lato');
   // When the data is not from this moment, say from when (a date when it is not today).
@@ -1435,7 +1453,8 @@ function renderHome() {
     notices += REMOTE
       ? `<div class="banner blue">${SVG(I_INFO)}<div><b>Dodaj do ekranu początkowego:</b> Udostępnij → „Do ekranu początkowego”, w ciągu 30 minut otwórz aplikację z ikony – będzie już połączona z piecem.<br><button class="bbtn" id="copypair">Kopiuj kod (gdyby jednak prosiła)</button></div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`
       : `<div class="banner blue">${SVG(I_INFO)}<div><b>Wskazówka:</b> stuknij Udostępnij → „Do ekranu początkowego”, a strona otworzy się jak aplikacja.</div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`;
-  if (readOnly()) notices += `<div class="banner blue">${SVG(I_INFO)}<div><b>Podgląd serwisowy</b> – widzisz wszystko, ale niczego tu nie zmienisz. Dostęp wygasa sam.</div></div>`;
+  if (supportGone) notices += `<div class="banner red">${SVG(I_WARN)}<div><b>Kod serwisowy wygasł albo został unieważniony.</b> Poproś o nowy; ten telefon odłączysz w Ustawienia → Dostęp zdalny.</div></div>`;
+  else if (readOnly()) notices += `<div class="banner blue">${SVG(I_INFO)}<div><b>Podgląd serwisowy</b> – widzisz wszystko, ale niczego tu nie zmienisz. Dostęp wygasa sam.</div></div>`;
   notices += missedNotice() + seasonNotice();
   notices += warns.map(w => `<div class="banner orange">${SVG(WARNINGS[w].icon)}<div><b>${WARNINGS[w].name}</b> – ${warningText(w)}</div></div>`).join('');
   notices += alarms.map(s => `<div class="banner red">${SVG(I_WARN)}<div><b>${esc(s.name)}</b> – ${describe(s)}</div></div>`).join('');
@@ -1455,13 +1474,21 @@ function renderHome() {
   }).join('');
 
   $$('#ovRange button').forEach(b => b.classList.toggle('on', +b.dataset.h === ui.overview));
-  $('#legend').innerHTML = inUse().map(i => `<span><i style="background:${COLORS[i]}"></i>${esc(now.sensors[i].name)}</span>`).join('');
-  const span = ui.overview * 3600, t0 = t - span, step = ui.overview > 6 ? 300 : 60;
-  const buckets = step === 60 ? live : rebucket(live, step);
-  chart($('#overview'), {
-    series: inUse().map(i => ({ color: COLORS[i], name: now.sensors[i].name, pts: windowed(points(buckets, i, false), t0, t) })),
-    t0, t1: t, step, bands: outages(), smooth: step === 60 ? 3 : 1, empty: 'Historia zapełni się w ciągu kilku minut',
-  });
+  // The flue (150-300 degrees) would flatten the water probes into lines - it has its card and the Wykresy tab.
+  const lines = inUse().filter(i => roleOf(now.sensors[i], i) !== 'flue'), ov = $('#overview');
+  $('#legend').innerHTML = lines.map(i => `<span><i style="background:${COLORS[i]}"></i>${esc(now.sensors[i].name)}</span>`).join('');
+  // Redrawn only when something it shows changed - the minute data comes once a minute, the refresh every 15 s.
+  const lastLive = live.length ? live[live.length - 1].t : 0;
+  const drawn = `${lastLive}:${live.length}:${ui.overview}:${lines.join()}:${COLORS.join()}:${ov.clientWidth}:${journal.length}`;
+  if (ov.dataset.drawn !== drawn) {
+    ov.dataset.drawn = drawn;
+    const span = ui.overview * 3600, t0 = t - span, step = ui.overview > 6 ? 300 : 60;
+    const buckets = step === 60 ? live : rebucket(live, step);
+    chart(ov, {
+      series: lines.map(i => ({ color: COLORS[i], name: now.sensors[i].name, pts: windowed(points(buckets, i, false), t0, t) })),
+      t0, t1: t, step, bands: outages(), smooth: step === 60 ? 3 : 1, empty: 'Historia zapełni się w ciągu kilku minut',
+    });
+  }
   renderCoal();
   renderToday();
   renderWeek();
@@ -1473,7 +1500,7 @@ function renderToday() {
   if (outdoorNow() !== null) rows.push(['Na zewnątrz', esc(now.settings.place), `${n1(outdoorNow())}°`, '']);
   if (s[FURNACE] && s[RETURN] && s[FURNACE].temp !== null && s[RETURN].temp !== null)
     rows.push(['Piec → powrót', 'ciepło oddawane do domu', `${n1(s[FURNACE].temp - s[RETURN].temp)}°`, '']);
-  rows.push(['Piec pracuje', `dziś powyżej ${n1(burnThreshold())}°`, dur(burnSeconds(m, tNow())), '']);
+  if (FURNACE >= 0) rows.push(['Piec pracuje', `dziś powyżej ${n1(burnThreshold())}°`, dur(burnSeconds(m, tNow())), '']);
   const cuts = outages().filter(c => c.t1 >= m);
   rows.push(['Zaniki prądu', 'dziś', cuts.length ? `${cuts.length} · ${durShort(cuts.reduce((a, c) => a + c.sec, 0))}` : 'brak', cuts.length ? '' : 'good']);
   const b = s[BOILER];
@@ -1751,8 +1778,7 @@ async function saveRefill() {
   if (btn.disabled) return;
   btn.disabled = true;
   try {
-    const old = oldBucketKg(now), amount = old ? { buckets: kg / old } : { kg };
-    now = legacyCoal(await (await api('/api/refill', { method: 'POST', body: new URLSearchParams(Object.assign(amount, { full: $('#rfull').checked ? 1 : 0, time: t })) })).json());
+    now = fromDevice(await (await api('/api/refill', { method: 'POST', body: new URLSearchParams(Object.assign({ kg }, { full: $('#rfull').checked ? 1 : 0, time: t })) })).json());
     $('#rmodal').classList.remove('on');
     refillsAt = 0;
     toast(`Zapisano: ${kgIn(kg)}, ${when(t)}`);
@@ -1790,7 +1816,7 @@ async function fetchForView() {
   const span = view.t1 - view.t0, step = pickStep(span), ticket = ++fetching;
   const wantOut = ui.shown.includes(OUT);
   if (step === 86400) await loadDays();
-  else if (!(step === 60 && view.t0 >= tNow() - LIVE_SPAN + 60)) {
+  else if (nowFresh && !(step === 60 && view.t0 >= tNow() - LIVE_SPAN + 60)) {
     const fresh = series && series.step === step && series.from <= view.t0 && series.to >= Math.min(view.t1, tNow() - 90) && Date.now() - series.at < 60e3;
     if (!fresh) {
       const from = view.t0 - span / 2, to = Math.min(tNow(), view.t1 + span / 2);
@@ -1818,7 +1844,8 @@ function detailData(i) {
 
 function paintDetail() {
   if (!now || !view) return;
-  const shown = ui.shown.filter(i => i === OUT ? now.settings.lat !== null : i < now.sensors.length && now.sensors[i].on !== false);
+  let shown = ui.shown.filter(showable);
+  if (!shown.length) shown = defaultShown();
   const probes = shown.filter(i => i !== OUT);
   const single = probes.length === 1 && shown.length === 1, s0 = now.sensors[probes[0]];
   const lines = shown.map(i => { const d = detailData(i); return { color: colorOf(i), name: nameOf(i), agg: d.agg, step: d.step, dash: i === OUT, pts: windowed(d.pts, view.t0, view.t1) }; });
@@ -1874,8 +1901,14 @@ function refreshCharts() {
   paintDetail();
 }
 
+// What the chart may show now: slots in use, the outdoor line with a location.
+const showable = i => (i === OUT ? now.settings.lat !== null : i < now.sensors.length && now.sensors[i].on !== false);
+const defaultShown = () => [FURNACE >= 0 ? FURNACE : inUse()[0]].filter(i => i !== undefined);
+
 function renderCharts() {
   if (!now) return;
+  ui.shown = ui.shown.filter(showable);
+  if (!ui.shown.length) ui.shown = defaultShown();
   const keys = inUse().concat(now.settings.lat !== null ? [OUT] : []);
   $('#chips').innerHTML = keys.map(i => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${colorOf(i)};--cb:${rgba(colorOf(i), .14)}"><i></i>${esc(nameOf(i))}</button>`).join('');
   if (!view) resetView(); else fetchForView();
@@ -2221,7 +2254,12 @@ async function shareReport() {
 
 const fmtNum = v => (v === null || v === undefined ? '' : String(v).replace('.', ','));
 const row = (k, v, s) => `<div class="row"><div><div class="k">${k}</div>${s ? `<div class="s">${s}</div>` : ''}</div><div class="v num">${v}</div></div>`;
-const editing = el => el.contains(document.activeElement);
+// Typing in a field or choosing in a list - a redraw would take it away. A tapped button or switch keeps the focus
+// (Chrome) but does not count: the page it is on must still update.
+const editing = el => {
+  const a = document.activeElement;
+  return el.contains(a) && (a.tagName === 'SELECT' || a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(checkbox|radio|button|file)$/.test(a.type)));
+};
 
 // Fields: [label, setting, value, unit, empty allowed (saved as 0)].
 const fieldRows = fields => fields.map(f => `<div class="wrow"><span>${f[0]}</span><span><input type="text" inputmode="decimal" data-k="${f[1]}" value="${fmtNum(f[2])}"${f[4] ? ' data-empty="1" placeholder="–"' : ''}> ${f[3]}</span></div>`).join('');
@@ -2258,8 +2296,9 @@ function parsePairing(text) {
 
 const codeOf = p => `${p.host}/${p.fixed ? p.fixed + '.' : ''}${p.secret}`;
 const pairingCode = () => codeOf(relay);
-// Paired with a support code: everything can be seen, nothing changed.
+// Paired with a support code: everything can be seen, nothing changed. supportGone: the device said it expired.
 const readOnly = () => REMOTE && !!relay.fixed;
+let supportGone = false;
 
 function loadPairing() {
   const p = parsePairing(recall('furnace-pair'));
@@ -2273,6 +2312,8 @@ function takePairingFromLink() {
   const p = parsePairing(location.hash);
   history.replaceState(null, '', location.pathname);
   if (!p) return;
+  const had = parsePairing(recall('furnace-pair'));
+  if (p.fixed && had && !had.fixed) return toast('Ten telefon ma pełny dostęp – kod serwisowy jest dla kogoś innego');
   store('furnace-pair', codeOf(p));
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   if (!standalone && /iPhone|iPad/.test(navigator.userAgent)) handOff(p);
@@ -2752,7 +2793,7 @@ function updateBanner() {
   const u = now.upd || { phase: 0 };
   if (u.phase && online === false) return `<div class="banner blue">${SVG(I_INFO)}<div style="flex:1"><b>Aktualizacja</b> – trwa instalacja, piec na chwilę zniknie i wróci sam<div class="progress on wait"><i></i></div></div></div>`;
   if (u.phase) return `<div class="banner blue">${SVG(I_INFO)}<div style="flex:1"><b>Aktualizacja</b> – ${esc(updatePhaseText())}<div class="progress on"><i style="width:${updatePercent()}%"></i></div></div></div>`;
-  if (now.avail > now.fw) return `<div class="banner blue">${SVG(I_INFO)}<div><b>Dostępna wersja ${now.avail}</b>${now.forced ? ' – wymagana, zainstaluje się sama' : ''}<br><button class="bbtn" id="updshow">Co nowego / zainstaluj</button></div></div>`;
+  if (now.avail > now.fw && !readOnly()) return `<div class="banner blue">${SVG(I_INFO)}<div><b>Dostępna wersja ${now.avail}</b>${now.forced ? ' – wymagana, zainstaluje się sama' : ''}<br><button class="bbtn" id="updshow">Co nowego / zainstaluj</button></div></div>`;
   return '';
 }
 
@@ -2774,7 +2815,7 @@ function updateUi() {
   const offered = now.avail > now.fw && !u.phase, version = u.phase ? u.to : offered ? now.avail : 0;
   let shown = 0;
   try { shown = +sessionStorage.getItem('furnace-offer') || 0; } catch (e) {}
-  if (!updateOpen && version && shown !== version && (offered || now.forced)) openUpdate();
+  if (!updateOpen && version && shown !== version && (offered || now.forced) && !readOnly()) openUpdate();
   else if (updateOpen) renderUpdate();
   clearTimeout(watchTimer);
   if (Date.now() < watchUntil) watchTimer = setTimeout(refreshNow, u.phase ? 1500 : 3000);
@@ -2821,9 +2862,10 @@ function renderUpdate() {
 // The ESP may drop the relay right after the tap (the download needs its memory): no answer is not a failure -
 // the dialog waits for the new version, and says so if it never comes.
 async function installUpdate() {
+  if (readOnly()) return closeUpdate();
   const to = now.avail;
   try {
-    now = legacyCoal(await (await api('/api/update', { method: 'POST', body: new URLSearchParams({ install: to }) })).json());
+    now = fromDevice(await (await api('/api/update', { method: 'POST', body: new URLSearchParams({ install: to }) })).json());
   } catch (e) {
     if (!REMOTE) return toast('Brak połączenia z piecem');
   }
@@ -2899,7 +2941,7 @@ function renderSettings() {
   renderMenu();
   renderPush();
   renderRemote();
-  Promise.all([loadRemote(), loadSupport()]).then(() => { renderRemote(); renderMenu(); });
+  if (!setPage || setPage === 'remote') Promise.all([loadRemote(), loadSupport()]).then(() => { renderRemote(); renderMenu(); });
   $('#seasonset').innerHTML = `<div class="warn-block"><div class="warn-head"><span class="badge ${st.heating ? 'c-orange' : 'c-blue'}">${SVG(st.heating ? I_FLAME : I_SUN)}</span>`
     + `${st.heating ? 'Sezon grzewczy' : 'Tryb lato'}<input class="sw" type="checkbox" data-k="heating" data-msg="Sezon grzewczy" ${st.heating ? 'checked' : ''}></div>`
     + `<div class="warn-desc">${st.heating ? 'Latem wyłącz – alarmy „za zimno” pieca i powrotu oraz ostrzeżenia o paleniu ucichną. Bojler i mróz działają dalej.'
@@ -2980,8 +3022,6 @@ function renderSettings() {
 let slotDraft = null, probesFound = null, probeTimer = 0;
 const slotsFromNow = () => now.sensors.map(x => ({ addr: x.addr || '', name: x.name || '', role: x.role || 'other', on: x.on !== false, kind: x.kind || '' }));
 const draftChanged = () => slotDraft && JSON.stringify(slotDraft) !== JSON.stringify(slotsFromNow());
-// Typing a name or choosing in a list - a periodic redraw would take the field away.
-const typing = el => el.contains(document.activeElement) && /^(INPUT|SELECT)$/.test(document.activeElement.tagName) && document.activeElement.type !== 'checkbox';
 const tempText = t => (t === null || t === undefined ? '–' : `${n1(t)}°`);
 
 async function pollProbes() {
@@ -2995,7 +3035,7 @@ async function pollProbes() {
 
 function renderProbes(force) {
   const page = $('.spage[data-page="probes"]'), box = $('#probeset'), fresh = $('#probenew');
-  if (!now || (!force && typing(page))) return;
+  if (!now || (!force && editing(page))) return;
   if (!now.sensors.length || now.sensors[0].addr === undefined) {
     box.innerHTML = '<p class="note" style="margin-top:0">Ta wersja oprogramowania pieca ma czujniki wpisane na stałe – najpierw zaktualizuj ją (Ustawienia → Oprogramowanie).</p>';
     $('#probesave').style.display = 'none';
@@ -3019,6 +3059,10 @@ function renderProbes(force) {
         return `<button class="rchip${d.role === r ? ' on' : ''}" data-i="${i}" data-role="${r}" style="--c:${rc};--cb:${rgba(rc, .16)}">${SVG(ROLES[r].icon)}${ROLES[r].label}</button>`;
       }).join('')}</div>`
       + (missing ? `<button class="plink" data-free="${i}">Zwolnij miejsce</button>` : '')
+      // A probe placed by itself at a start (a replacement put in with the power off) takes over a slot's history.
+      + (d.role === 'other' && slotDraft.some((x, k) => k !== i && x.addr)
+        ? `<div class="proles"><select class="pswap" data-from="${i}" aria-label="Użyj zamiast"><option value="">Użyj zamiast…</option>${
+          slotDraft.map((x, k) => (k !== i && x.addr ? `<option value="${k}">${esc(x.name)}</option>` : '')).join('')}</select></div>` : '')
       + '</div>';
   }).join('') || '<p class="note" style="margin-top:0">Nie znaleziono żadnego czujnika – sprawdź podłączenie.</p>';
 
@@ -3041,7 +3085,10 @@ function onProbeClick(e) {
     if (r !== 'other') slotDraft.forEach((d, k) => { if (k !== i && d.role === r) d.role = 'other'; });
     slotDraft[i].role = r;
   } else if (add) {
-    const i = slotDraft.findIndex(d => !d.addr), tc = add.dataset.kind === 'Termopara K';
+    // A slot free on the device too - one emptied here still holds the old probe's history.
+    let i = slotDraft.findIndex((d, k) => !d.addr && !(now.sensors[k] && now.sensors[k].addr));
+    if (i < 0) i = slotDraft.findIndex(d => !d.addr);
+    const tc = add.dataset.kind === 'Termopara K';
     if (i < 0) return;
     const flue = tc && !slotDraft.some(d => d.addr && d.role === 'flue');
     slotDraft[i] = { addr: add.dataset.add, name: flue ? 'Spaliny' : `Czujnik ${i + 1}`, role: flue ? 'flue' : 'other', on: true, kind: add.dataset.kind };
@@ -3056,8 +3103,9 @@ function onProbeChange(e) {
   if (t.dataset.on !== undefined) {
     slotDraft[+t.dataset.on].on = t.checked;
   } else if (t.classList.contains('pswap') && t.value !== '') {
-    const d = slotDraft[+t.value];
-    Object.assign(d, { addr: t.dataset.addr, kind: t.dataset.kind, on: true });
+    const d = slotDraft[+t.value], from = t.dataset.from !== undefined ? slotDraft[+t.dataset.from] : null;
+    Object.assign(d, { addr: from ? from.addr : t.dataset.addr, kind: from ? from.kind : t.dataset.kind, on: true });
+    if (from) slotDraft[+t.dataset.from] = { addr: '', name: '', role: 'other', on: false, kind: '' };
     toast(`${d.name}: nowy czujnik, historia zostaje`);
     t.blur();
   } else return;
@@ -3075,6 +3123,7 @@ function onProbeName(e) {
 }
 
 async function saveSlots() {
+  if (readOnly()) return toast('Kod serwisowy pozwala tylko oglądać');
   const names = slotDraft.map(d => d.name.trim());
   const bad = slotDraft.findIndex((d, i) => d.addr && (!names[i] || new TextEncoder().encode(names[i]).length > 31));
   if (bad >= 0) return toast(`Miejsce ${bad + 1}: nazwa pusta albo za długa`);
@@ -3127,7 +3176,7 @@ async function saveLimits(i) {
   if ([lo, hi].some(v => v !== '' && (+v < -55 || +v > top))) return fail(`Próg musi być między −55 a ${top}°`);
   if (lo !== '' && hi !== '' && +lo >= +hi) return fail('MIN musi być niższy niż MAKS');
   try {
-    now = legacyCoal(await (await api('/api/limits', { method: 'POST', body: new URLSearchParams({ s: i, low: lo, high: hi }) })).json());
+    now = fromDevice(await (await api('/api/limits', { method: 'POST', body: new URLSearchParams({ s: i, low: lo, high: hi }) })).json());
     toast(`${now.sensors[i].name}: zapisano progi`);
   } catch (e) { toast(/out of range/.test(e.message) ? 'Nieprawidłowy próg – nie zapisano' : 'Nie udało się zapisać – brak połączenia z piecem?'); }
   if (!editing($('#limits'))) render();
@@ -3135,7 +3184,7 @@ async function saveLimits(i) {
 
 async function saveSetting(fields, message) {
   try {
-    now = legacyCoal(await (await api('/api/settings', { method: 'POST', body: new URLSearchParams(fields) })).json());
+    now = fromDevice(await (await api('/api/settings', { method: 'POST', body: new URLSearchParams(fields) })).json());
     toast(message || 'Zapisano');
   } catch (e) { toast(/out of range/.test(e.message) ? 'Wartość poza dozwolonym zakresem – nie zapisano' : 'Nie udało się zapisać – brak połączenia z piecem?'); }
   render();
@@ -3361,7 +3410,7 @@ function setup() {
     if (e.target.closest('#refill')) openRefill();
     if (e.target.id !== 'ashdone') return;
     try {
-      now = legacyCoal(await (await api('/api/ash', { method: 'POST' })).json());
+      now = fromDevice(await (await api('/api/ash', { method: 'POST' })).json());
       journalAt = 0;
       toast('Zapisano: popielnik opróżniony');
     } catch (err) { toast('Nie udało się zapisać – brak połączenia z piecem?'); }
@@ -3405,7 +3454,7 @@ function setup() {
     e.target.disabled = true;
     try {
       // With its time: the ESP removes only this one, never an older refill on a second tap.
-      now = legacyCoal(await (await api('/api/refill-undo', { method: 'POST', body: new URLSearchParams({ time: r[0] }) })).json());
+      now = fromDevice(await (await api('/api/refill-undo', { method: 'POST', body: new URLSearchParams({ time: r[0] }) })).json());
       toast('Cofnięto dosypanie');
     } catch (err) { toast(/not the last/.test(err.message) ? 'To dosypanie jest już cofnięte' : 'Nie udało się – brak połączenia z piecem?'); }
     refillsAt = 0;
@@ -3489,8 +3538,14 @@ function setup() {
   render();
   saveCache();
   loadOutdoor().then(render);
-  setInterval(refreshNow, 15000);
-  setInterval(() => loadLive().then(loadJournal).then(() => { saveCache(); render(true); }), 60000);
+  // Hidden, the app does nothing: coming back refreshes it (visibilitychange). The cache is written every 10 minutes
+  // and when the app goes to the background.
+  let minutesRun = 0;
+  setInterval(() => { if (!document.hidden) refreshNow(); }, 15000);
+  setInterval(() => {
+    if (document.hidden) return;
+    loadLive().then(loadJournal).then(() => { if (++minutesRun % 10 === 0) saveCache(); render(true); });
+  }, 60000);
   setInterval(() => loadOutdoor().then(() => { if (ui.tab === 'home') render(); }), 20 * 60e3);
 })();
 </script>

@@ -14,8 +14,8 @@
 //   0 end
 // The minutes go as records, not as the raw partition: the new board's ring may be of another size.
 // A backup of fewer probes (the classic board's 4 into the S3's 8 slots) is taken: its minutes get the missing
-// probes as "no value", and NVS "furnace/fromProbes" tells the sketch to widen the files it knows (daily summaries)
-// at the next start.
+// probes as "no value", and NVS "furnace/fromProbes" (set before the first file) tells the sketch to widen the files
+// it knows (daily summaries) at the next start.
 
 #pragma once
 
@@ -89,14 +89,11 @@ public:
   }
 
   String end() {
+    // The end mark is a single 0 (write() above, and every older firmware) while a section head is read two bytes at
+    // a time: the 0 may still wait in buf.
+    if (error.isEmpty() && stage == TYPE && have == 1 && buf[0] == 0) stage = DONE;
     if (error.isEmpty() && stage != DONE) error = "the file ends too early";
     if (file) file.close();
-    nvs_handle_t h;
-    if (error.isEmpty() && probes < N && nvs_open("furnace", NVS_READWRITE, &h) == ESP_OK) {
-      nvs_set_u8(h, "fromProbes", probes);
-      nvs_commit(h);
-      nvs_close(h);
-    }
     return error;
   }
 
@@ -243,6 +240,15 @@ private:
     if (type == 1 && left > 4097) error = "NVS entry too big";
     if (type == 2) {
       if (!formatted) {                                      // the old board's files replace whatever is here
+        // A narrower backup's daily files are its width: say so before the first of them is written - a restore
+        // broken off later (the WiFi, a closed tab) restarts the ESP too, and they must be widened all the same.
+        // The NVS sections come first, so "furnace" is not emptied after this.
+        nvs_handle_t h;
+        if (probes < N && nvs_open("furnace", NVS_READWRITE, &h) == ESP_OK) {
+          nvs_set_u8(h, "fromProbes", probes);
+          nvs_commit(h);
+          nvs_close(h);
+        }
         LittleFS.format();
         formatted = true;
       }

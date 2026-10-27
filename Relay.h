@@ -128,9 +128,16 @@ public:
     portEXIT_CRITICAL(&mux);
   }
 
+  // Revoked before its time: the key stays known, so the phone still using it is told the code has ended.
+  void endSupport() {
+    portENTER_CRITICAL(&mux);
+    if (supUntil) supUntil = 1;
+    portEXIT_CRITICAL(&mux);
+  }
+
   uint32_t supportUntil() const { return supUntil; }
 
-  // "<host>/<room>.<secret>", empty without one (or with remote access off).
+  // "<host>/<room>.<secret>" while it works, empty otherwise (or with remote access off).
   String supportCode() const {
     uint8_t s[32];
     portENTER_CRITICAL(&mux);
@@ -138,7 +145,7 @@ public:
     memcpy(s, supSecret, 32);
     uint32_t until = supUntil;
     portEXIT_CRITICAL(&mux);
-    return h.length() && until ? h + "/" + r + "." + base64(s, 32, true) : String();
+    return h.length() && until > (uint32_t)time(nullptr) ? h + "/" + r + "." + base64(s, 32, true) : String();
   }
 
   uint32_t connectedAt() const { return connectedSince; }   // Unix time, 0 = not connected
@@ -424,16 +431,18 @@ private:
     size_t n = len - 28;
     const uint8_t aad = 'Q';
     uint8_t* p = in + 12;
-    uint32_t now = time(nullptr);
-    bool support = supUntil && now >= 1700000000 && now < supUntil, readOnly = false;
-    if (support && supSet != supVersion) {                 // a new support key: this task's context takes it
-      uint8_t k[32];
-      portENTER_CRITICAL(&mux);
+    // The support key, also an expired one (its phone is told so); `until` and the key are read together.
+    uint32_t now = time(nullptr), until;
+    uint8_t k[32];
+    portENTER_CRITICAL(&mux);
+    until = supUntil;
+    bool support = until != 0, readOnly = false, newKey = support && supSet != supVersion;
+    if (newKey) {
       memcpy(k, supKey, 32);
       supSet = supVersion;
-      portEXIT_CRITICAL(&mux);
-      mbedtls_gcm_setkey(&gcmSupport, MBEDTLS_CIPHER_ID_AES, k, 256);
     }
+    portEXIT_CRITICAL(&mux);
+    if (newKey) mbedtls_gcm_setkey(&gcmSupport, MBEDTLS_CIPHER_ID_AES, k, 256);
     sealer = &gcm;
     if (support) memcpy(spare, p, n);                      // a failed try wipes the buffer
     if (mbedtls_gcm_auth_decrypt(&gcm, n, in, 12, &aad, 1, in + 12 + n, 16, p, p) != 0) {
@@ -455,7 +464,9 @@ private:
     // headers or a second request (a POST behind a support code's GET).
     bool clean = true;
     for (char c : path) clean &= c > ' ' && c < 127;
-    if (now >= 1700000000 && (sent + REQUEST_SKEW_S < now || sent > now + REQUEST_SKEW_S))
+    if (readOnly && !(now >= 1700000000 && now < until))
+      reply(tls, id, 403, "support code expired");
+    else if (now >= 1700000000 && (sent + REQUEST_SKEW_S < now || sent > now + REQUEST_SKEW_S))
       reply(tls, id, 401, "check the phone's clock");
     else if (!clean)
       reply(tls, id, 400, "bad path");
@@ -467,9 +478,10 @@ private:
       forward(tls, id, method, path, body);
   }
 
-  // What the support code may not read: the backup (WiFi password, keys), the pairing code and its own code.
+  // What the support code may not read: the backup (WiFi password, keys), the pairing code and its own code - nor
+  // the bus scans, which hold the loop.
   static bool supportMayRead(const String& path) {
-    for (const char* no : {"/api/backup", "/api/remote", "/api/support"})
+    for (const char* no : {"/api/backup", "/api/remote", "/api/support", "/api/bus", "/api/probes"})
       if (path.startsWith(no)) return false;
     return true;
   }
