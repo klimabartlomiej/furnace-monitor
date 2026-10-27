@@ -55,7 +55,7 @@ public:
       h.lastEntry++;
       h.usedMemory++;
     }
-    writeRecord(h.lastEntry, {unixTime, (int16_t)lroundf(celsius * 100)});
+    writeRecord(h.lastEntry, {unixTime, (int16_t)lroundf(fminf(fmaxf(celsius, -327.0f), 327.0f) * 100)});   // the flue
     lastTime = unixTime;
     publishStatus(true);
     Serial.printf("[Eve] %s: entry %u = %.2f C\n", path, (unsigned)h.lastEntry, celsius);

@@ -119,39 +119,67 @@ constexpr uint16_t WEB_PORT           = 8080;            // port 80 belongs to H
 constexpr uint8_t  STATUS_PIXEL_PIN   = PIN_RGB_LED;     // the RGB LED of the ESP32-S3-DevKitC-1 (GPIO48)
 constexpr uint8_t  ONE_WIRE_PIN       = 4;               // GPIO4 (next to 3V3 on the header) - the DQ (data) wire,
                                                          // 4.7k pull-up to 3.3V
+constexpr int8_t   TC_CS_PIN          = 10;              // MAX6675 thermocouple board (the flue): CS, SCK and SO -
+constexpr uint8_t  TC_SCK_PIN         = 12;              // the S3's default SPI pins, driven by hand (16 bits a minute)
+constexpr uint8_t  TC_SO_PIN          = 13;
 #else
 constexpr uint8_t  STATUS_LED_PIN     = 2;               // blue on-board LED on most ESP32 dev boards
 constexpr uint8_t  ONE_WIRE_PIN       = 22;              // D22 - GPIO of the DQ (data) wire, 4.7k pull-up to 3.3V
+constexpr int8_t   TC_CS_PIN          = -1;              // no thermocouple on the classic board (no flash left)
+constexpr uint8_t  TC_SCK_PIN         = 0;
+constexpr uint8_t  TC_SO_PIN          = 0;
 #endif
 constexpr uint32_t READ_INTERVAL_MS   = 60 * 1000;       // one reading per minute (on the full minute once NTP is in)
 constexpr uint32_t CONVERSION_MS      = 800;             // 12-bit conversion takes 750 ms
 constexpr float    ALARM_HYSTERESIS   = 2.0;             // degrees back inside the limit before an alarm clears
 constexpr float    MAX_JUMP           = 10.0;            // a bigger change between readings needs confirmation
+constexpr float    MAX_JUMP_FLUE      = 150.0;           // ... on a thermocouple: the flue gains 50 degrees a minute
+                                                         // when the fan starts
 constexpr float    CONFIRM_TOLERANCE  = 2.0;             // the next reading must be this close to confirm a jump
 constexpr uint8_t  FAULT_AFTER        = 3;               // bad readings in a row before a probe is reported dead
 
+// Probe slots. A slot is one place in the history - the minute log, the daily summaries, Eve, the limits and the
+// offset are kept per slot, so a probe swapped into a slot carries its history on. Each slot has a role that tells
+// the furnace logic what it measures; the logic looks probes up by role (FURNACE, RETURN_WATER, ... below), never by
+// number, and whatever needs a missing role simply stays off. Set in the web app (Ustawienia -> Czujniki, flash
+// "slots"); a change restarts the ESP, as Home needs its accessories anew. A probe found at a start that no slot
+// knows takes a free slot by itself.
+// Roles do not care what kind of probe it is: the address says that - a 1-Wire ROM code (DS18B20, family 0x28) or
+// one of ours below for a probe off the 1-Wire bus.
+enum Role : uint8_t { ROLE_OTHER, ROLE_FURNACE, ROLE_RETURN, ROLE_HOPPER, ROLE_BOILER, ROLE_FLUE, ROLE_COUNT };
+const char* ROLE_KEYS[ROLE_COUNT] = { "other", "furnace", "return", "hopper", "boiler", "flue" };
+constexpr uint8_t KIND_MAX6675 = 0xF6;   // address {0xF6, CS pin, 0...}: a K thermocouple on a MAX6675 board
+
 // Names are what the Home app and the web app show; HomeKit accepts only letters, digits, spaces and apostrophes.
-struct SensorConfig {
-  const char*   name;          // temperature sensor
-  DeviceAddress address;       // {} = take the next unassigned probe found on the bus
-  bool          water;         // watched by the freeze warning
-  float         defaultLow;    // alarm limits until they are changed in the web app; NAN = off
-  float         defaultHigh;
+struct __attribute__((packed)) SlotConfig {
+  DeviceAddress address;       // all zero = an empty slot
+  char          name[32];      // UTF-8
+  uint8_t       role;          // Role
+  uint8_t       on;            // read, shown and in Home
 };
 
-// Pinned addresses: a dead or removed probe never shifts the others.
-// Identified on the bench 2026-10-22 (hand-warming test). The web app relies on this order.
-SensorConfig SENSORS[] = {
-  { "Piec",           {0x28, 0x4D, 0x83, 0x77, 0x91, 0x0C, 0x02, 0xF8}, true,  40.0, 90.0 },   // furnace; counterfeit chip, failed at ~60 C in place
-  { "Powrót",         {0x28, 0xAA, 0xEF, 0x8D, 0x4A, 0x14, 0x01, 0xAE}, true,  NAN,  NAN  },   // return water
-  { "Zasobnik węgla", {0x28, 0xAA, 0x61, 0x94, 0x4A, 0x14, 0x01, 0x6C}, false, NAN,  50.0 },   // coal hopper; high = embers creeping back
-  { "Bojler",         {0x28, 0xAA, 0xDB, 0x95, 0x4D, 0x14, 0x01, 0x6B}, true,  35.0, NAN  },   // hot water tank
+#if CONFIG_IDF_TARGET_ESP32S3
+constexpr size_t SENSOR_COUNT = 8;   // slots
+#else
+constexpr size_t SENSOR_COUNT = 4;   // the classic board keeps its 4
+#endif
+
+// The probes at dad's, identified on the bench 2026-10-22 (hand-warming test), with their first limits - the slots
+// until the web app saves others.
+struct SlotDefault {
+  SlotConfig config;
+  float      low, high;        // NAN = off
 };
-constexpr size_t SENSOR_COUNT = sizeof(SENSORS) / sizeof(SENSORS[0]);
-constexpr size_t FURNACE      = 0;   // probes the warnings and the coal estimate look at
-constexpr size_t RETURN_WATER = 1;
-constexpr size_t COAL_HOPPER  = 2;
-constexpr size_t BOILER       = 3;
+const SlotDefault DEFAULT_SLOTS[] = {
+  {{{0x28, 0x4D, 0x83, 0x77, 0x91, 0x0C, 0x02, 0xF8}, "Piec",           ROLE_FURNACE, 1}, 40.0, 90.0},   // counterfeit chip, failed at ~60 C in place
+  {{{0x28, 0xAA, 0xEF, 0x8D, 0x4A, 0x14, 0x01, 0xAE}, "Powrót",         ROLE_RETURN,  1}, NAN,  NAN },
+  {{{0x28, 0xAA, 0x61, 0x94, 0x4A, 0x14, 0x01, 0x6C}, "Zasobnik węgla", ROLE_HOPPER,  1}, NAN,  50.0},   // high = embers creeping back
+  {{{0x28, 0xAA, 0xDB, 0x95, 0x4D, 0x14, 0x01, 0x6B}, "Bojler",         ROLE_BOILER,  1}, 35.0, NAN },   // hot water tank
+};
+constexpr size_t DEFAULT_COUNT = sizeof(DEFAULT_SLOTS) / sizeof(DEFAULT_SLOTS[0]);
+SlotConfig slots[SENSOR_COUNT];
+// The slots by role, -1 = no probe in that role (mapRoles). FLUE is shown and charted; no warning uses it yet.
+int8_t FURNACE = -1, RETURN_WATER = -1, COAL_HOPPER = -1, BOILER = -1, FLUE = -1;
 
 // Warnings - each one is a contact sensor in Apple Home and a banner in the web app; tuned in the web app.
 enum WarningId : uint8_t { WARN_GOING_OUT, WARN_FREEZE, WARN_BURNBACK, WARN_LOW_COAL, WARN_STALLED, WARN_ASH, WARN_COUNT };
@@ -323,46 +351,158 @@ String formatAddress(const DeviceAddress a) {
   return buf;
 }
 
-const char* slotName(const DeviceAddress a) {
-  for (auto& s : SENSORS)
-    if (memcmp(s.address, a, 8) == 0) return s.name;
-  return nullptr;
+// "28AAEF8D4A1401AE" - how the web app shows and sends an address.
+String hexAddress(const DeviceAddress a) {
+  char buf[17];
+  for (uint8_t i = 0; i < 8; i++) sprintf(buf + 2 * i, "%02X", a[i]);
+  return buf;
 }
 
-// Gives every slot without a pinned address the next probe on the bus that no slot has pinned.
-void assignAddresses() {
-  DeviceAddress found;
-  oneWire.reset_search();
-  while (oneWire.search(found)) {
-    if (!bus.validAddress(found) || !bus.validFamily(found) || slotName(found)) continue;
-    for (auto& s : SENSORS) {
-      if (!isUnset(s.address)) continue;
-      memcpy(s.address, found, 8);
-      techLog.printf("'%s' auto-assigned %s - pin this address in SENSORS\n", s.name, formatAddress(found).c_str());
-      break;
-    }
+bool isThermocouple(const DeviceAddress a) {
+  return TC_CS_PIN >= 0 && a[0] == KIND_MAX6675 && a[1] == TC_CS_PIN;
+}
+
+// What kind of probe an address is, for the web app.
+const char* probeKind(const DeviceAddress a) {
+  return isUnset(a) ? "" : a[0] == KIND_MAX6675 ? "Termopara K" : "DS18B20";
+}
+
+// An address a slot may take: empty, a 1-Wire temperature probe (valid CRC) or our thermocouple.
+bool parseAddress(const String& hex, DeviceAddress out) {
+  memset(out, 0, 8);
+  if (hex.isEmpty()) return true;
+  if (hex.length() != 16) return false;
+  for (uint8_t i = 0; i < 8; i++) {
+    char* end;
+    out[i] = strtoul(hex.substring(2 * i, 2 * i + 2).c_str(), &end, 16);
+    if (*end) return false;
+  }
+  return isThermocouple(out) || (bus.validAddress(out) && bus.validFamily(out));
+}
+
+// One 16-bit frame from the MAX6675, SCK idling low and SO read before each falling edge: D15 is always 0, D14..D3
+// the temperature in quarter degrees, D2 = no thermocouple on the screws, D1 always 0. With no board on the pins SO
+// is pulled up and reads 0xFFFF. Pulling CS up starts the next conversion (~220 ms).
+uint16_t max6675Frame() {
+  digitalWrite(TC_CS_PIN, LOW);
+  delayMicroseconds(10);
+  uint16_t v = 0;
+  for (uint8_t b = 0; b < 16; b++) {
+    digitalWrite(TC_SCK_PIN, LOW);
+    delayMicroseconds(10);
+    v = v << 1 | digitalRead(TC_SO_PIN);
+    digitalWrite(TC_SCK_PIN, HIGH);
+    delayMicroseconds(10);
+  }
+  digitalWrite(TC_SCK_PIN, LOW);
+  digitalWrite(TC_CS_PIN, HIGH);
+  return v;
+}
+
+bool max6675Present() {
+  if (TC_CS_PIN < 0) return false;
+  uint16_t f = max6675Frame();
+  if (f == 0) {                              // right after power-up the board has no conversion yet
+    delay(250);
+    f = max6675Frame();
+  }
+  return f != 0xFFFF && f != 0 && !(f & 0x8002);
+}
+
+float readThermocouple() {
+  uint16_t f = max6675Frame();
+  return f == 0xFFFF || f == 0 || (f & 0x8006) ? NAN : (f >> 3) * 0.25f;
+}
+
+int slotOf(const DeviceAddress a) {
+  for (size_t i = 0; i < SENSOR_COUNT; i++)
+    if (!isUnset(slots[i].address) && memcmp(slots[i].address, a, 8) == 0) return i;
+  return -1;
+}
+
+bool slotUsed(size_t i) { return slots[i].on && !isUnset(slots[i].address); }
+
+// The freeze warning watches the water: the furnace, the return and the boiler.
+bool isWater(size_t i) { return slots[i].role == ROLE_FURNACE || slots[i].role == ROLE_RETURN || slots[i].role == ROLE_BOILER; }
+
+// FURNACE, RETURN_WATER, ... from the roles: the first slot in use with that role.
+void mapRoles() {
+  int8_t* byRole[ROLE_COUNT] = {nullptr, &FURNACE, &RETURN_WATER, &COAL_HOPPER, &BOILER, &FLUE};
+  FURNACE = RETURN_WATER = COAL_HOPPER = BOILER = FLUE = -1;
+  for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    uint8_t r = slots[i].role;
+    if (slotUsed(i) && r < ROLE_COUNT && byRole[r] && *byRole[r] < 0) *byRole[r] = i;
   }
 }
 
-// Every DS18B20 on the bus with its address, temperature and assigned name. Blocks ~750 ms for a fresh conversion.
+// A probe no slot knows goes into the first free slot. False when all are taken.
+bool placeProbe(const DeviceAddress found, const char* name, uint8_t role) {
+  for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    if (!isUnset(slots[i].address)) continue;
+    memcpy(slots[i].address, found, 8);
+    strlcpy(slots[i].name, name, sizeof(slots[i].name));
+    slots[i].role = role;
+    slots[i].on = 1;
+    techLog.printf("New probe %s - slot %u\n", hexAddress(found).c_str(), (unsigned)(i + 1));
+    return true;
+  }
+  techLog.printf("New probe %s - no free slot\n", hexAddress(found).c_str());
+  return false;
+}
+
+// The slots from flash (the defaults until the web app saves them), every probe found that no slot knows put into
+// a free slot - a thermocouple straight into the flue role while no slot has it - and the roles looked up.
+void loadSlots() {
+  if (TC_CS_PIN >= 0) {
+    pinMode(TC_CS_PIN, OUTPUT);
+    digitalWrite(TC_CS_PIN, HIGH);
+    pinMode(TC_SCK_PIN, OUTPUT);
+    digitalWrite(TC_SCK_PIN, LOW);
+    pinMode(TC_SO_PIN, INPUT_PULLUP);
+  }
+  if (prefs.getBytes("slots", slots, sizeof(slots)) != sizeof(slots)) {
+    memset(slots, 0, sizeof(slots));
+    for (size_t i = 0; i < DEFAULT_COUNT && i < SENSOR_COUNT; i++) slots[i] = DEFAULT_SLOTS[i].config;
+  }
+  for (auto& slot : slots) slot.name[sizeof(slot.name) - 1] = 0;
+  mapRoles();
+  bool added = false;
+  DeviceAddress found;
+  oneWire.reset_search();
+  while (oneWire.search(found)) {
+    if (!bus.validAddress(found) || !bus.validFamily(found) || slotOf(found) >= 0) continue;
+    char name[16];
+    snprintf(name, sizeof(name), "Czujnik %02X", found[7]);   // the CRC byte - tells two new probes apart
+    added |= placeProbe(found, name, ROLE_OTHER);
+  }
+  DeviceAddress tc = {KIND_MAX6675, (uint8_t)TC_CS_PIN};
+  if (max6675Present() && slotOf(tc) < 0) added |= placeProbe(tc, "Spaliny", FLUE < 0 ? ROLE_FLUE : ROLE_OTHER);
+  if (added) prefs.putBytes("slots", slots, sizeof(slots));
+  mapRoles();
+}
+
+// Every probe found with its address, temperature and slot. Blocks ~750 ms for a fresh conversion.
 String busReport() {
   bus.setWaitForConversion(true);
   bus.requestTemperatures();
   bus.setWaitForConversion(false);
 
   String out;
-  DeviceAddress a;
   uint8_t count = 0;
+  auto line = [&](const DeviceAddress a, float t) {
+    int slot = slotOf(a);
+    char buf[160];
+    snprintf(buf, sizeof(buf), "%u: %s %s  %7.2f C  %s\n", ++count, probeKind(a), formatAddress(a).c_str(), t,
+             slot >= 0 ? slots[slot].name : "(no slot)");
+    out += buf;
+  };
+  DeviceAddress a;
   oneWire.reset_search();
-  while (oneWire.search(a)) {
-    if (!bus.validAddress(a)) continue;
-    const char* name = slotName(a);
-    char line[128];
-    snprintf(line, sizeof(line), "%u: %s  %7.2f C  %s\n",
-             ++count, formatAddress(a).c_str(), bus.getTempC(a), name ? name : "(not used)");
-    out += line;
-  }
-  if (count == 0) out = "No DS18B20 found - check the wiring and the pull-up resistor\n";
+  while (oneWire.search(a))
+    if (bus.validAddress(a)) line(a, bus.getTempC(a));
+  DeviceAddress tc = {KIND_MAX6675, (uint8_t)TC_CS_PIN};
+  if (max6675Present()) line(tc, readThermocouple());
+  if (count == 0) out = "No probe found - check the wiring and the pull-up resistor\n";
   return out;
 }
 
@@ -400,7 +540,7 @@ void pushEvent(const EventRecord& e) {
   }
   String j = String("{\"t\":") + e.time + ",\"e\":" + e.type + ",\"s\":" + e.sensor + ",\"v\":" + e.value;
   if (((e.type >= EV_ALARM_HIGH && e.type <= EV_FAULT_CLEAR) || e.type == EV_HOT_WATER) && e.sensor < SENSOR_COUNT)
-    j += String(",\"n\":\"") + SENSORS[e.sensor].name + "\"";
+    j += String(",\"n\":\"") + slots[e.sensor].name + "\"";
   // Which kind it is - each phone chooses what it gets (the relay filters; it cannot read the alert itself).
   const char* kind = e.type == EV_UPDATED ? "update" : e.type == EV_POWER_CUT ? "power" : e.type == EV_HOT_WATER ? "water"
                      : e.type == EV_WARN_ON || e.type == EV_WARN_OFF ? "warn" : "alarm";
@@ -471,6 +611,7 @@ void restoreAlerts() {
   SavedAlerts a;
   if (!prefs.isKey("alerts") || prefs.getBytes("alerts", &a, sizeof(a)) != sizeof(a)) return;
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    if (!slotUsed(i)) continue;                // a slot switched off keeps no old alarm
     state[i].alarm  = constrain(a.alarm[i], -1, 1);
     state[i].faulty = a.faulty >> i & 1;
     if (state[i].faulty) state[i].badReadings = FAULT_AFTER;
@@ -487,23 +628,27 @@ void createAccessories() {
     new Service::AccessoryInformation();
       new Characteristic::Identify();
 
+  // A slot's accessory keeps its number (slot + 2) whatever else changes, so Home keeps its rooms and history.
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    if (!slotUsed(i)) continue;
     SensorState& s = state[i];
+    bool tc = isThermocouple(slots[i].address);
     snprintf(s.serial, sizeof(s.serial), "FURNACE-%u", (unsigned)(i + 1));
-    snprintf(s.historyName, sizeof(s.historyName), "%s historia", SENSORS[i].name);
+    snprintf(s.historyName, sizeof(s.historyName), "%s historia", slots[i].name);
     snprintf(s.historyPath, sizeof(s.historyPath), "/eve%u.bin", (unsigned)i);
-    new SpanAccessory();
+    new SpanAccessory(i + 2);
       new Service::AccessoryInformation();
         new Characteristic::Identify();
-        new Characteristic::Name(SENSORS[i].name);
+        new Characteristic::Name(slots[i].name);
         new Characteristic::Manufacturer("HomeSpan");
-        new Characteristic::Model("DS18B20 probe");
+        new Characteristic::Model(tc ? "MAX6675 K thermocouple" : "DS18B20 probe");
         new Characteristic::SerialNumber(s.serial);
         new Characteristic::FirmwareRevision(firmwareRevision);
       new Service::TemperatureSensor();
-        new Characteristic::Name(SENSORS[i].name);
+        new Characteristic::Name(slots[i].name);
         s.temperature = new Characteristic::CurrentTemperature(0);
-        s.temperature->setRange(-55, 125);
+        if (tc) s.temperature->setRange(0, 1000);
+        else s.temperature->setRange(-55, 125);
         s.fault = new Characteristic::StatusFault(s.faulty ? 1 : 0);
         new Characteristic::TemperatureDisplayUnits(0);   // Celsius - Eve shows a weather history only with this set
       s.history = new EveHistory(s.historyName, s.historyPath);
@@ -515,6 +660,7 @@ void createAccessories() {
 // (MQTT can hook in here later, next to HomeKit.)
 void reportSensor(size_t i) {
   SensorState& s = state[i];
+  if (!s.temperature) return;                // a slot not in Home
   // A dead probe sends no temperature at all - Home keeps the last real value and shows the fault flag
   // (the old firmware sent -127, which HomeKit clamped to the -100 you saw).
   if (!s.faulty && !isnan(s.lastGood)) {
@@ -529,9 +675,11 @@ void reportSensor(size_t i) {
 
 // Up to three scratchpad reads. The library already rejects CRC errors and all-zero frames
 // (a shorted bus reads as zeros, which is where the old "0 on every sensor" came from).
+// A thermocouple is read once (its board converts every ~220 ms on its own).
 float readSensor(size_t i) {
+  if (isThermocouple(slots[i].address)) return readThermocouple();
   for (uint8_t attempt = 0; attempt < 3; attempt++) {
-    float t = bus.getTempC(SENSORS[i].address);
+    float t = bus.getTempC(slots[i].address);
     if (t == DEVICE_DISCONNECTED_C || t < -55 || t > 125) continue;
     // 85.0 is the power-on value of a probe that reset mid-cycle - believe it only when we were already near it.
     if (t == 85.0f && !(fabsf(state[i].lastGood - 85.0f) < 10.0f)) continue;
@@ -544,14 +692,14 @@ float readSensor(size_t i) {
 void logAlarmChange(size_t i, int8_t before, float t) {
   int8_t now = state[i].alarm;
   if (now == before) return;
-  techLog.printf("%s: alarm %s\n", SENSORS[i].name, now > 0 ? "TOO HOT" : now < 0 ? "TOO COLD" : "cleared");
+  techLog.printf("%s: alarm %s\n", slots[i].name, now > 0 ? "TOO HOT" : now < 0 ? "TOO COLD" : "cleared");
   logEvent(now > 0 ? EV_ALARM_HIGH : now < 0 ? EV_ALARM_LOW : EV_ALARM_CLEAR, i, toHundredths(t));
   saveAlerts();
 }
 
 // Summer mode silences "too cold" on the furnace and the return water - they are cold on purpose then.
 float lowLimit(size_t i) {
-  return !settings.heating && (i == FURNACE || i == RETURN_WATER) ? NAN : state[i].low;
+  return !settings.heating && ((int)i == FURNACE || (int)i == RETURN_WATER) ? NAN : state[i].low;
 }
 
 void updateAlarm(size_t i, float t) {
@@ -592,9 +740,10 @@ bool registerReading(size_t i, float t) {
   SensorState& s = state[i];
 
   // A sudden jump is accepted only once the next reading agrees with it - filters one-off glitches.
-  if (!isnan(s.lastGood) && fabsf(t - s.lastGood) > MAX_JUMP && !(fabsf(t - s.unconfirmed) <= CONFIRM_TOLERANCE)) {
+  float maxJump = isThermocouple(slots[i].address) ? MAX_JUMP_FLUE : MAX_JUMP;
+  if (!isnan(s.lastGood) && fabsf(t - s.lastGood) > maxJump && !(fabsf(t - s.unconfirmed) <= CONFIRM_TOLERANCE)) {
     s.unconfirmed = t;
-    techLog.printf("%s: %.2f C looks like a glitch, waiting for confirmation\n", SENSORS[i].name, t);
+    techLog.printf("%s: %.2f C looks like a glitch, waiting for confirmation\n", slots[i].name, t);
     return false;
   }
 
@@ -614,7 +763,7 @@ bool registerReading(size_t i, float t) {
 
 void registerBadReading(size_t i) {
   SensorState& s = state[i];
-  techLog.printf("%s: no valid reading\n", SENSORS[i].name);
+  techLog.printf("%s: no valid reading\n", slots[i].name);
   if (s.badReadings < 255) s.badReadings++;
   if (s.errors < 65535) s.errors++;
   if (s.badReadings >= FAULT_AFTER && !s.faulty) {
@@ -676,7 +825,7 @@ void setWarning(WarningId w, bool condition, bool known, uint8_t holdOn, uint8_t
 }
 
 float burnThreshold() {
-  return isnan(state[FURNACE].low) ? 40 : state[FURNACE].low;
+  return FURNACE < 0 || isnan(state[FURNACE].low) ? 40 : state[FURNACE].low;
 }
 
 // A journal value is degrees x 100 in an int16 - kilograms are capped to fit; NAN stays "no value".
@@ -694,8 +843,9 @@ void evaluateWarnings(bool tick = false) {
   // alarm. A fast fall alone says nothing: hot water drawn for a bath pulls the furnace down fast and it comes back,
   // and a furnace going out need not fall fast at all. Needs the min limit; only while still above it, with one
   // degree more to clear.
-  const SensorState& f = state[FURNACE];
-  float slope = trendPerHour(FURNACE);
+  static const SensorState noProbe = [] { SensorState n; n.faulty = true; return n; }();   // a role nobody has
+  const SensorState& f = FURNACE >= 0 ? state[FURNACE] : noProbe;
+  float slope = FURNACE >= 0 ? trendPerHour(FURNACE) : NAN;
   bool burning = !f.faulty && !isnan(f.lastGood) && !isnan(f.low) && f.lastGood > f.low;
   float margin = settings.goOutMargin + (warnings[WARN_GOING_OUT].active ? 1 : 0);
   bool dying = burning && !isnan(slope) && slope < -0.5f && f.lastGood <= f.low + margin;
@@ -705,17 +855,18 @@ void evaluateWarnings(bool tick = false) {
   // Freezing: the coldest water probe, with one degree of hysteresis.
   float coldest = NAN;
   for (size_t i = 0; i < SENSOR_COUNT; i++)
-    if (SENSORS[i].water && !state[i].faulty && !isnan(state[i].lastGood))
+    if (slotUsed(i) && isWater(i) && !state[i].faulty && !isnan(state[i].lastGood))
       coldest = isnan(coldest) ? state[i].lastGood : fminf(coldest, state[i].lastGood);
   bool freezing = !isnan(coldest) && coldest < settings.freezeTemp + (warnings[WARN_FREEZE].active ? 1 : 0);
   setWarning(WARN_FREEZE, freezing, !isnan(coldest), 2, 2, settings.freezeOn, coldest, tick);
 
   // Embers creeping into the coal hopper: its temperature climbing fast. Also in summer mode (a fire for hot
   // water), and a probe that dies - embers may have destroyed it - keeps the warning as it was.
-  float hopper = trendPerHour(COAL_HOPPER);
+  const SensorState& h = COAL_HOPPER >= 0 ? state[COAL_HOPPER] : noProbe;
+  float hopper = COAL_HOPPER >= 0 ? trendPerHour(COAL_HOPPER) : NAN;
   bool burnback = !isnan(hopper) && hopper >= settings.burnbackRate;
-  setWarning(WARN_BURNBACK, burnback, !isnan(hopper) && !state[COAL_HOPPER].faulty, 3, 10, settings.burnbackOn,
-             state[COAL_HOPPER].lastGood, tick);
+  setWarning(WARN_BURNBACK, burnback, !isnan(hopper) && !h.faulty, 3, 10, settings.burnbackOn && COAL_HOPPER >= 0,
+             h.lastGood, tick);
 
   // Low coal: at the current pace the hopper estimate runs out within lowCoalHours, or is nearly empty
   // (half again as long before it clears, so a wobbling pace does not flap it). Logged with the kg left.
@@ -742,7 +893,7 @@ void evaluateWarnings(bool tick = false) {
 
   // Hot water ready: not a problem, a notification "you can shower" when the boiler is warm enough - at most one
   // an hour, as a boiler around its "ready" temperature crosses it back and forth.
-  const SensorState& b = state[BOILER];
+  const SensorState& b = BOILER >= 0 ? state[BOILER] : noProbe;
   if (!b.faulty && !isnan(b.lastGood)) {
     bool ready = b.lastGood >= settings.hotWater - (hotWaterReady ? HOT_WATER_HYSTERESIS : 0);
     if (ready != hotWaterReady) {
@@ -764,6 +915,7 @@ void evaluateWarnings(bool tick = false) {
 // to the top - between two of them the hopper burned exactly what was put in. The power cuts in the minute log
 // cost nothing, rightly: the feeder stands still without power.
 float heatOf(const MinuteRecord& r) {
+  if (FURNACE < 0 || RETURN_WATER < 0) return 0;
   int16_t f = r.v[FURNACE], w = r.v[RETURN_WATER];
   return f == NO_VALUE || w == NO_VALUE || f <= w ? 0 : (f - w) / 100.0f;
 }
@@ -773,7 +925,7 @@ float heatBetween(uint32_t from, uint32_t to, uint32_t* covered = nullptr) {
   float heat = 0;
   uint32_t n = 0;
   if (to > from) minutes.forEach(from / 60, (to - 1) / 60, [&](uint32_t, const MinuteRecord& r) {
-    if (r.v[FURNACE] != NO_VALUE && r.v[RETURN_WATER] != NO_VALUE) n++;
+    if (FURNACE >= 0 && RETURN_WATER >= 0 && r.v[FURNACE] != NO_VALUE && r.v[RETURN_WATER] != NO_VALUE) n++;
     heat += heatOf(r);
   });
   if (covered) *covered = n;
@@ -927,8 +1079,8 @@ void setHeating(bool on, bool automatic) {
   prefs.putBool("heating", on);
   logEvent(EV_SEASON, automatic, on);
   techLog.printf("Heating season %s%s\n", on ? "on" : "off (summer mode)", automatic ? " - furnace burning" : "");
-  rejudgeAlarm(FURNACE);
-  rejudgeAlarm(RETURN_WATER);
+  if (FURNACE >= 0) rejudgeAlarm(FURNACE);
+  if (RETURN_WATER >= 0) rejudgeAlarm(RETURN_WATER);
   evaluateWarnings();
 }
 
@@ -936,7 +1088,13 @@ void setHeating(bool on, bool automatic) {
 void readAll() {
   float values[SENSOR_COUNT];
   MinuteRecord rec;
+  String line = "Readings:";
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    if (!slotUsed(i)) {                      // an empty or switched-off slot: nothing read, nothing wrong
+      values[i] = NAN;
+      rec.v[i] = NO_VALUE;
+      continue;
+    }
     float t = readSensor(i);
     if (!isnan(t)) t += settings.offset[i];          // calibration: everything downstream sees the corrected value
     bool ok = !isnan(t) && registerReading(i, t);
@@ -944,8 +1102,10 @@ void readAll() {
     values[i] = ok ? t : NAN;
     rec.v[i] = toHundredths(values[i]);
     reportSensor(i);
+    line += ' ';
+    line += isnan(values[i]) ? String('-') : String(values[i], 2);
   }
-  Serial.printf("Readings: %.2f / %.2f / %.2f / %.2f C\n", values[0], values[1], values[2], values[3]);
+  Serial.println(line);
 
   time_t now = time(nullptr);
   if (clockSet(now)) {
@@ -954,7 +1114,7 @@ void readAll() {
     if (!isnan(heatSinceAsh)) heatSinceAsh += heatOf(rec);
   }
 
-  float furnace = values[FURNACE];
+  float furnace = FURNACE >= 0 ? values[FURNACE] : NAN;
   // The first reading after a power cut: was the furnace burning? Then watch whether it comes back (WARN_STALLED).
   if (stallWatch && isnan(stallFrom) && !isnan(furnace)) {
     stallFrom = furnace;
@@ -964,7 +1124,7 @@ void readAll() {
   burningMinutes = !isnan(furnace) && furnace >= burnThreshold() ? min(burningMinutes + 1, 60000) : 0;
   if (!settings.heating && burningMinutes >= SEASON_AUTO_MIN) setHeating(true, true);
   pushRecent(values);
-  if (clockSet(now) && bathWatch.feed(now, values[BOILER])) {
+  if (BOILER >= 0 && clockSet(now) && bathWatch.feed(now, values[BOILER])) {
     logEvent(EV_BATH, bathWatch.minutes, toHundredths(bathWatch.drop), bathWatch.from);
     techLog.printf("Bath: boiler -%.1f in %u min\n", bathWatch.drop, bathWatch.minutes);
   }
@@ -1002,7 +1162,7 @@ void summarizeDay(uint32_t dayStart, uint32_t dayEnd) {
       sum[i] += t;
       count[i]++;
     }
-    if (r.v[FURNACE] != NO_VALUE && r.v[FURNACE] / 100.0f >= threshold) burn++;
+    if (FURNACE >= 0 && r.v[FURNACE] != NO_VALUE && r.v[FURNACE] / 100.0f >= threshold) burn++;
     heat += heatOf(r);
   });
 
@@ -1041,7 +1201,7 @@ void logHistory() {
     lastHistorySlot = slot;
     updateCoal(now);
     for (auto& s : state) {
-      if (!s.historyCount) continue;
+      if (!s.historyCount || !s.history) continue;
       s.history->add(now, s.historySum / s.historyCount);
       s.historySum = 0;
       s.historyCount = 0;
@@ -1096,7 +1256,7 @@ void morningSummary(time_t now) {
     j += ",\"kg\":" + String(lroundf(kg));
     if (settings.coalPrice > 0) j += ",\"z\":" + String(lroundf(kg * settings.coalPrice / 1000));
   }
-  int16_t lo = d.min[FURNACE], hi = d.max[FURNACE];
+  int16_t lo = FURNACE >= 0 ? d.min[FURNACE] : NO_VALUE, hi = FURNACE >= 0 ? d.max[FURNACE] : NO_VALUE;
   if (lo != NO_VALUE) j += ",\"lo\":" + String(lo) + ",\"hi\":" + String(hi);
   relay.alert(j + ",\"pc\":" + cuts + ",\"ps\":" + cutSeconds + "}", "summary");
 }
@@ -1135,11 +1295,11 @@ void rescanHistory() {
   if (prefs.getUChar("rescan", 0)) return;
   std::vector<EventRecord> baths;
   BathWatch watch;
-  if (minutes.newest()) minutes.forEach(minutes.oldest(), minutes.newest(), [&](uint32_t m, const MinuteRecord& r) {
+  if (BOILER >= 0 && minutes.newest()) minutes.forEach(minutes.oldest(), minutes.newest(), [&](uint32_t m, const MinuteRecord& r) {
     if (watch.feed(m * 60, r.v[BOILER] == NO_VALUE ? NAN : r.v[BOILER] / 100.0f))
       baths.push_back({(uint32_t)watch.from, (uint8_t)EV_BATH, watch.minutes, toHundredths(watch.drop)});
   });
-  float low = state[FURNACE].low;
+  float low = FURNACE >= 0 ? state[FURNACE].low : NAN;
   uint16_t added = 0, dropped = 0;
   events.edit([&](std::vector<EventRecord>& all) {
     std::vector<EventRecord> keep;
@@ -1176,6 +1336,45 @@ void rescanHistory() {
   techLog.printf("History: %u baths found back, %u false going-out warnings dropped\n", added, dropped);
 }
 
+// A backup of fewer probes was restored (Backup.h, "fromProbes" - the classic board's 4 into the S3's slots): its
+// daily summaries are as wide as it was. Each record gets the missing slots as "no value"; the new file is renamed
+// over the old one, so a power cut leaves either.
+void widenDays() {
+  uint8_t from = prefs.getUChar("fromProbes", 0);
+  if (!from) return;
+  const size_t oldSize = 4 + 6 * from + 6, N = SENSOR_COUNT;
+  int16_t none[SENSOR_COUNT];
+  for (auto& v : none) v = NO_VALUE;
+  for (const char* path : {"/day0.bin", "/day1.bin"}) {
+    File f = LittleFS.open(path, "r");
+    if (!f || from >= N) continue;
+    std::vector<uint8_t> old(f.size());
+    f.read(old.data(), old.size());
+    f.close();
+    std::vector<DayRecord> wide;
+    for (size_t at = 0; at + oldSize <= old.size(); at += oldSize) {
+      const uint8_t* r = old.data() + at;
+      DayRecord d;
+      uint8_t* w = (uint8_t*)&d;
+      memcpy(w, r, 4);                                         // time
+      for (size_t k = 0; k < 3; k++) {                         // min, avg, max
+        memcpy(w + 4 + 2 * N * k, none, 2 * N);
+        memcpy(w + 4 + 2 * N * k, r + 4 + 2 * from * k, 2 * from);
+      }
+      memcpy(w + 4 + 6 * N, r + 4 + 6 * from, 6);              // burnMinutes, heat
+      wide.push_back(d);
+    }
+    String fresh = String(path) + ".new";
+    f = LittleFS.open(fresh, "w");
+    if (!f) continue;
+    f.write((const uint8_t*)wide.data(), wide.size() * sizeof(DayRecord));
+    f.close();
+    LittleFS.rename(fresh, path);
+    techLog.printf("%s: %u days widened from %u probes\n", path, (unsigned)wide.size(), from);
+  }
+  prefs.remove("fromProbes");
+}
+
 // wipe: the first start after a full reset - everything goes.
 void setupHistory(bool wipe) {
   if (!LittleFS.begin(true)) techLog.println("LittleFS mount failed - no history");
@@ -1186,6 +1385,7 @@ void setupHistory(bool wipe) {
     LittleFS.format();
     prefs.putUChar("fsLayout", FS_LAYOUT);
   }
+  widenDays();
   if (!minutes.begin()) techLog.println("No \"minutes\" partition - per-minute history disabled");
   if (wipe) minutes.clear();
   if (!alive.begin()) techLog.println("No \"alive\" partition - power cuts timed from the minute log");
@@ -1207,8 +1407,8 @@ String prefKey(const char* kind, size_t i) {
 void loadLimits() {
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
     String lo = prefKey("lo", i), hi = prefKey("hi", i);
-    state[i].low  = prefs.isKey(lo.c_str()) ? prefs.getFloat(lo.c_str()) : SENSORS[i].defaultLow;
-    state[i].high = prefs.isKey(hi.c_str()) ? prefs.getFloat(hi.c_str()) : SENSORS[i].defaultHigh;
+    state[i].low  = prefs.isKey(lo.c_str()) ? prefs.getFloat(lo.c_str()) : i < DEFAULT_COUNT ? DEFAULT_SLOTS[i].low : NAN;
+    state[i].high = prefs.isKey(hi.c_str()) ? prefs.getFloat(hi.c_str()) : i < DEFAULT_COUNT ? DEFAULT_SLOTS[i].high : NAN;
   }
 }
 
@@ -1276,7 +1476,7 @@ bool parseLimit(String v, float& out) {
     return true;
   }
   float f = parseNumber(v);
-  if (isnan(f) || f < -55 || f > 125) return false;
+  if (isnan(f) || f < -55 || f > 1000) return false;   // 1000: a thermocouple (the flue)
   out = f;
   return true;
 }
@@ -1344,14 +1544,19 @@ void handleNow() {
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
     const SensorState& s = state[i];
     if (i) j += ',';
-    j += "{\"name\":\"";  j += SENSORS[i].name;
-    j += "\",\"temp\":";  j += s.faulty ? String("null") : jsonNumber(s.lastGood);
+    j += "{\"name\":\"";  j += slots[i].name;
+    j += "\",\"role\":\""; j += ROLE_KEYS[slots[i].role < ROLE_COUNT ? slots[i].role : 0];
+    j += "\",\"addr\":\""; j += isUnset(slots[i].address) ? String() : hexAddress(slots[i].address);
+    j += "\",\"kind\":\""; j += probeKind(slots[i].address);
+    j += "\",\"on\":";     j += slotUsed(i) ? "true" : "false";
+    j += ",\"errors\":";   j += s.errors;
+    j += ",\"temp\":";  j += s.faulty ? String("null") : jsonNumber(s.lastGood);
     j += ",\"trend\":";   j += jsonNumber(trendPerHour(i), 1);
     j += ",\"low\":";     j += jsonNumber(s.low, 1);
     j += ",\"high\":";    j += jsonNumber(s.high, 1);
     j += ",\"alarm\":";   j += (int)s.alarm;
     j += ",\"fault\":";   j += s.faulty ? "true" : "false";
-    j += ",\"water\":";   j += SENSORS[i].water ? "true" : "false";
+    j += ",\"water\":";   j += isWater(i) ? "true" : "false";
     j += ",\"offset\":";  j += jsonNumber(settings.offset[i], 1);
     j += '}';
   }
@@ -1499,8 +1704,10 @@ void handleDiag() {
   r += "\nWiFi " + String(WiFi.RSSI()) + " dBm, connected " + String(networkUps) + "x; relay " + relay.state() + ", connected "
      + String(relay.connections()) + "x";
   for (size_t i = 0; i < SENSOR_COUNT; i++)
-    r += "\n" + String(SENSORS[i].name) + ": " + (state[i].faulty ? String("FAULTY") : jsonNumber(state[i].lastGood, 2)) + ", read errors "
-       + String(state[i].errors);
+    if (slotUsed(i))
+      r += "\nslot " + String(i + 1) + " " + slots[i].name + " (" + ROLE_KEYS[slots[i].role % ROLE_COUNT] + ", "
+         + probeKind(slots[i].address) + " " + hexAddress(slots[i].address) + "): "
+         + (state[i].faulty ? String("FAULTY") : jsonNumber(state[i].lastGood, 2)) + ", read errors " + String(state[i].errors);
   r += "\nupdate: " + updater.status() + ", signatures " + String(updater.signatures());
   r += "\nLittleFS " + String(LittleFS.usedBytes() / 1024) + " of " + String(LittleFS.totalBytes() / 1024) + " KB, minute log "
      + String(minutes.newest() ? (minutes.newest() - minutes.oldest() + 1) / 1440 : 0) + " days\n--- log\n";
@@ -1540,15 +1747,17 @@ void handleCsv() {
   ChunkWriter w;
   w.begin("text/csv; charset=utf-8");
   String head = "\xEF\xBB\xBF" "Czas";
-  for (auto& s : SENSORS) head += String(";") + s.name;
+  for (size_t i = 0; i < SENSOR_COUNT; i++)
+    if (slotUsed(i)) head += String(";") + slots[i].name;
   w.put(head + "\r\n");
   forEachBucket(from, to, step, [&](uint32_t t, const uint16_t* count, const int16_t*, const int32_t* sum, const int16_t*) {
     time_t tt = t;
     struct tm lt;
     localtime_r(&tt, &lt);
-    char line[96];
+    char line[192];
     size_t n = strftime(line, sizeof(line), "%Y-%m-%d %H:%M", &lt);
     for (size_t i = 0; i < SENSOR_COUNT; i++) {
+      if (!slotUsed(i)) continue;
       if (!count[i]) { n += snprintf(line + n, sizeof(line) - n, ";"); continue; }
       int32_t v = sum[i] / count[i];
       n += snprintf(line + n, sizeof(line) - n, ";%s%d,%02d", v < 0 ? "-" : "", (int)(abs(v) / 100), (int)(abs(v) % 100));
@@ -1715,6 +1924,63 @@ void emptyAsh(uint32_t now) {
 
 void handleBus() {
   server.send(200, "text/plain", busReport());
+}
+
+// GET: every probe found right now - [{"addr","kind","t","slot"}] (slot -1 = no slot has it). Blocks ~750 ms for a
+// fresh conversion; the Czujniki page asks every few seconds while it is open (warm a probe in the hand to tell
+// which is which).
+void handleProbes() {
+  bus.setWaitForConversion(true);
+  bus.requestTemperatures();
+  bus.setWaitForConversion(false);
+  String j = "[";
+  auto add = [&](const DeviceAddress a, float t) {
+    if (j.length() > 1) j += ',';
+    j += "{\"addr\":\"" + hexAddress(a) + "\",\"kind\":\"" + probeKind(a) + "\",\"t\":" + jsonNumber(t, 2)
+       + ",\"slot\":" + slotOf(a) + "}";
+  };
+  DeviceAddress a;
+  oneWire.reset_search();
+  while (oneWire.search(a)) {
+    if (!bus.validAddress(a) || !bus.validFamily(a)) continue;
+    float t = bus.getTempC(a);
+    add(a, t == DEVICE_DISCONNECTED_C ? NAN : t);
+  }
+  DeviceAddress tc = {KIND_MAX6675, (uint8_t)TC_CS_PIN};
+  if (max6675Present()) add(tc, readThermocouple());
+  server.send(200, "application/json", j + "]");
+}
+
+// POST the whole slot table: a<i> address (16 hex digits, empty = an empty slot), n<i> name, r<i> role key, o<i> 1/0
+// for every slot. A probe in one slot only, each furnace role once among the slots in use. Saved and answered, then
+// the ESP restarts (Home needs the accessories anew).
+uint32_t restartAtMs = 0;
+void handleSlots() {
+  SlotConfig next[SENSOR_COUNT] = {};
+  for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    String k = String(i), name = server.arg("n" + k);
+    SlotConfig& c = next[i];
+    if (!parseAddress(server.arg("a" + k), c.address)) return server.send(400, "text/plain", "bad address in slot " + String(i + 1));
+    name.trim();
+    if (name.isEmpty()) name = "Czujnik " + String(i + 1);
+    if (name.length() >= sizeof(c.name)) return server.send(400, "text/plain", "name too long in slot " + String(i + 1));
+    strlcpy(c.name, name.c_str(), sizeof(c.name));
+    for (uint8_t r = 0; r < ROLE_COUNT; r++)
+      if (server.arg("r" + k) == ROLE_KEYS[r]) c.role = r;
+    c.on = server.arg("o" + k) == "1";
+  }
+  for (size_t i = 0; i < SENSOR_COUNT; i++)
+    for (size_t k = 0; k < i; k++) {
+      if (!isUnset(next[i].address) && memcmp(next[i].address, next[k].address, 8) == 0)
+        return server.send(400, "text/plain", "one probe in two slots");
+      if (next[i].role != ROLE_OTHER && next[i].role == next[k].role && next[i].on && next[k].on)
+        return server.send(400, "text/plain", String("role twice: ") + ROLE_KEYS[next[i].role]);
+    }
+  memcpy(slots, next, sizeof(slots));
+  prefs.putBytes("slots", slots, sizeof(slots));
+  techLog.println("Probe slots changed - restarting");
+  server.send(200, "application/json", "{\"restart\":true}");
+  restartAtMs = millis() + 1500;
 }
 
 // The remote-access key (Relay.h): made once, renewed by "new key" in the web app and by the BOOT full reset.
@@ -1934,6 +2200,8 @@ void onNetworkUp(int count) {
   server.on("/api/limits", HTTP_POST, handleLimits);
   server.on("/api/settings", HTTP_POST, handleSettings);
   server.on("/api/bus", HTTP_GET, handleBus);
+  server.on("/api/probes", HTTP_GET, handleProbes);
+  server.on("/api/slots", HTTP_POST, handleSlots);
   server.on("/api/refills", HTTP_GET, handleRefills);
   server.on("/api/refill", HTTP_POST, handleRefill);
   server.on("/api/refill-undo", HTTP_POST, handleRefillUndo);
@@ -2011,9 +2279,9 @@ void setup() {
 
   bus.begin();
   bus.setWaitForConversion(false);
-  assignAddresses();
-  Serial.print(busReport());
   prefs.begin("furnace", false);
+  loadSlots();
+  Serial.print(busReport());
   // After a full reset with the BOOT button the new home starts empty: no history, no old problems, its own coal
   // use and ash count (limits and settings stay).
   bool wipe = prefs.getBool("wipe", false);
@@ -2072,13 +2340,14 @@ void setup() {
   homeSpan.begin(Category::Bridges, "Czujniki pieca", DEVICE_NAME);
   createAccessories();
 
-  new SpanUserCommand('a', "- list DS18B20 probes on the bus", [](const char*) { Serial.print(busReport()); });
+  new SpanUserCommand('a', "- list the probes found", [](const char*) { Serial.print(busReport()); });
   new SpanUserCommand('u', "- check for a firmware update now", [](const char*) { updater.requestCheck(); });
 
   lastRequestMs = millis() - READ_INTERVAL_MS;   // first reading right away
 }
 
 void loop() {
+  if (restartAtMs && (int32_t)(millis() - restartAtMs) >= 0) ESP.restart();   // after a slot change (handleSlots)
   homeSpan.resetWatchdog();
   homeSpan.poll();
   if (webStarted) server.handleClient();

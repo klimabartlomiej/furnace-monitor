@@ -13,6 +13,9 @@
 //   3 minutes     name "minutes", data = (minute u32 + probes x int16) per stored minute, oldest first
 //   0 end
 // The minutes go as records, not as the raw partition: the new board's ring may be of another size.
+// A backup of fewer probes (the classic board's 4 into the S3's 8 slots) is taken: its minutes get the missing
+// probes as "no value", and NVS "furnace/fromProbes" tells the sketch to widen the files it knows (daily summaries)
+// at the next start.
 
 #pragma once
 
@@ -62,6 +65,7 @@ public:
     error = "";
     erased.clear();
     formatted = cleared = false;
+    probes = N;
   }
 
   void feed(const uint8_t* p, size_t n) {
@@ -87,6 +91,12 @@ public:
   String end() {
     if (error.isEmpty() && stage != DONE) error = "the file ends too early";
     if (file) file.close();
+    nvs_handle_t h;
+    if (error.isEmpty() && probes < N && nvs_open("furnace", NVS_READWRITE, &h) == ESP_OK) {
+      nvs_set_u8(h, "fromProbes", probes);
+      nvs_commit(h);
+      nvs_close(h);
+    }
     return error;
   }
 
@@ -105,6 +115,7 @@ private:
   char     name[256];
   size_t   left = 0;          // data bytes of the current section still to come
   std::vector<uint8_t> value; // the NVS entry being read
+  uint8_t  probes = N;        // in the backup being restored
   uint8_t  record[4 + 2 * N];
   size_t   recordHave = 0;
   File     file;
@@ -203,7 +214,8 @@ private:
   void header() {
     if (stage == MAGIC) {
       if (memcmp(buf, "PDBK", 4) || buf[4] != VERSION) error = "not a backup of this device";
-      else if (buf[5] != N) error = "a backup of another number of probes";
+      else if (buf[5] > N || !buf[5]) error = "a backup of more probes than this board has";
+      probes = buf[5];
       stage = TYPE;
       need = 2;
     } else if (stage == TYPE) {
@@ -251,9 +263,10 @@ private:
     } else if (type == 3) {
       for (size_t i = 0; i < n; i++) {
         record[recordHave++] = p[i];
-        if (recordHave < sizeof(record)) continue;
+        if (recordHave < 4 + 2 * probes) continue;
         typename MinuteLog<N>::Record r;
-        memcpy(r.v, record + 4, 2 * N);
+        for (size_t k = 0; k < N; k++) r.v[k] = NO_VALUE;
+        memcpy(r.v, record + 4, 2 * probes);
         minutes.add(get32(record), r);
         recordHave = 0;
       }

@@ -282,6 +282,29 @@ body.unpaired .pair{display:block}
 .stp button{width:36px;height:36px;border-radius:50%;border:0;background:var(--card2);color:var(--text);font-size:22px;line-height:1}
 .stp input{width:64px;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:8px 4px;font:600 16px -apple-system,system-ui;text-align:center;outline:none}
 .stp input.changed{border-color:var(--blue)}
+.ptile{padding:12px 0;border-top:1px solid var(--line)}
+.ptile:first-child{border-top:0;padding-top:2px}
+.ptile.off .proles,.ptile.off .ptemp,.ptile.off .ptop .badge{opacity:.35}
+.ptop{display:flex;align-items:center;gap:10px}
+.ptop .badge{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;flex:none;background:var(--cb);color:var(--c)}
+.ptop .badge svg{width:17px;height:17px}
+.pname{flex:1;min-width:0;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:7px 9px;font:600 15px -apple-system,system-ui;outline:none}
+.pname:focus{border-color:var(--blue)}
+.ptemp{font-weight:700;font-size:17px;min-width:54px;text-align:right}
+.pmeta{color:var(--faint);font-size:12px;margin:6px 0 0 40px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pbad{display:inline-flex;align-items:center;gap:4px;color:var(--red);font-weight:600}
+.pbad svg{width:13px;height:13px}
+.proles{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0 40px}
+.rchip{display:flex;align-items:center;gap:5px;border:1px solid var(--line);background:none;color:var(--muted);border-radius:999px;padding:5px 10px 5px 7px;font-weight:600;font-size:13px}
+.rchip svg{width:14px;height:14px;color:var(--c)}
+.rchip.on{color:var(--text);border-color:var(--c);background:var(--cb)}
+.plink{background:none;border:0;color:var(--red);font-size:13px;font-weight:600;margin:8px 0 0 40px;padding:0}
+.pnew{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.pnew:nth-child(2){border-top:0}
+.pnew .pmeta{margin-left:0}
+.pnew-b{display:flex;gap:8px;align-items:center;flex:none}
+.pnew-b button{border:0;border-radius:999px;padding:7px 13px;background:var(--blue);color:#fff;font-weight:600;font-size:13px}
+.pswap{background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:7px;font-size:14px;max-width:150px}
 .warn-block{padding:14px 0;border-top:1px solid var(--line)}
 .warn-block:first-of-type{border-top:0;padding-top:2px}
 .warn-head{display:flex;align-items:center;gap:10px;font-weight:600;font-size:16px}
@@ -429,6 +452,12 @@ nav.tabs button.on{color:var(--text)}
 <section class="view" id="v-settings">
   <header class="top"><button class="back" id="setback">‹ Ustawienia</button><h1 id="settitle">Ustawienia</h1></header>
   <div id="setmenu"></div>
+  <div class="spage" data-page="probes">
+    <div class="card"><div id="probeset"></div></div>
+    <div class="card" id="probenew" style="display:none"></div>
+    <button class="btn primary" id="probesave" disabled>Zapisz i uruchom ponownie</button>
+    <p class="note">Rola mówi, co czujnik mierzy – według niej działają ostrzeżenia, węgiel i kąpiele. Każda rola może mieć tylko jeden czujnik. Ogrzej czujnik w dłoni, a jego temperatura tutaj podskoczy. Historia zostaje przy miejscu: „Użyj zamiast…” wstawia nowy czujnik na miejsce starego i wykresy idą dalej. Po zapisaniu piec uruchamia się ponownie (ok. 20 s).</p>
+  </div>
   <div class="spage" data-page="limits"><div class="card">
     <div id="limits"></div>
     <p class="note">Przekroczenie progu wysyła powiadomienie w aplikacji (Ustawienia → Powiadomienia). Puste pole wyłącza dany alarm.</p>
@@ -531,16 +560,16 @@ nav.tabs button.on{color:var(--text)}
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
-// Probe order is fixed by SENSORS in the firmware: furnace, return water, coal hopper, boiler.
-const FURNACE = 0, RETURN = 1, COAL = 2, BOILER = 3;
-const COLORS = ['#ff6b3d', '#4aa8ff', '#ffb340', '#34d1bf'];
+// Probe slots (firmware 26+): every slot has a role, and the furnace logic finds its probes by role, never by
+// number - a role no probe has is -1 and whatever needs it stays off (mapRoles, on every new `now`). Older firmware
+// sends no roles: its four probes come in this order.
+let FURNACE = 0, RETURN = 1, COAL = 2, BOILER = 3, FLUE = -1;
 const OUT = 'out', OUT_COLOR = '#9a9fab';                     // outdoor temperature series
-const ICONS = [
-  '<path d="M12 3c.9 3.2 4.9 5.6 4.9 10.1a4.9 4.9 0 0 1-9.8 0c0-2.2 1-3.7 2-4.6.1 1.7 1 2.8 2 3C10.6 8.9 11.6 5.8 12 3z"/>',
-  '<path d="M9 14 4.5 9.5 9 5"/><path d="M4.5 9.5H15a4.5 4.5 0 0 1 0 9h-2.5"/>',
-  '<path d="M4 9h16l-2.2 10.5H6.2z"/><path d="M8 9l1.6-4.5h4.8L16 9"/>',
-  '<path d="M12 3.5c3 4 6 7 6 10.5a6 6 0 0 1-12 0c0-3.5 3-6.5 6-10.5z"/>',
-];
+const I_FLAME = '<path d="M12 3c.9 3.2 4.9 5.6 4.9 10.1a4.9 4.9 0 0 1-9.8 0c0-2.2 1-3.7 2-4.6.1 1.7 1 2.8 2 3C10.6 8.9 11.6 5.8 12 3z"/>';
+const I_RETURN = '<path d="M9 14 4.5 9.5 9 5"/><path d="M4.5 9.5H15a4.5 4.5 0 0 1 0 9h-2.5"/>';
+const I_HOPPER = '<path d="M4 9h16l-2.2 10.5H6.2z"/><path d="M8 9l1.6-4.5h4.8L16 9"/>';
+const I_WATER = '<path d="M12 3.5c3 4 6 7 6 10.5a6 6 0 0 1-12 0c0-3.5 3-6.5 6-10.5z"/>';
+const I_FLUE = '<path d="M5 21V11h6v10"/><path d="M3 21h18"/><path d="M15 9c-1.3-1.3 1.3-2.7 0-4M19 10c-1.3-1.3 1.3-2.7 0-4"/>';
 const SVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const I_WARN = '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17.5v.01"/>';
 const I_OK = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';
@@ -564,8 +593,31 @@ const I_PLUSMINUS = '<path d="M12 4v8M8 8h8M8 18h8"/>';
 const I_THERMO = '<path d="M10 4.5a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0z"/><path d="M12 9.5v5.5"/>';
 const I_DROP = '<path d="M12 3c3.2 4.4 6 7.6 6 11a6 6 0 0 1-12 0c0-3.4 2.8-6.6 6-11z"/>';
 const I_SHOWER = '<path d="M5 21V9a5 5 0 0 1 9.5-2.2"/><path d="M11 9.5a5 5 0 0 1 8 0z"/><path d="M12.5 13v1.5M15 14v1.5M17.5 13v1.5M13.5 17.5V19M16.5 17.5V19"/>';
-const I_FLAME = ICONS[0];
 const I_BOILER = '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M5 9h14"/><rect x="9" y="13" width="6" height="5" rx="1"/>';
+const ROLES = {
+  furnace: { label: 'Piec', color: '#ff6b3d', icon: I_FLAME },
+  return: { label: 'Powrót', color: '#4aa8ff', icon: I_RETURN },
+  hopper: { label: 'Zasobnik węgla', color: '#ffb340', icon: I_HOPPER },
+  boiler: { label: 'Bojler', color: '#34d1bf', icon: I_WATER },
+  flue: { label: 'Spaliny', color: '#c58cff', icon: I_FLUE },
+  other: { label: 'Inny', color: null, icon: I_THERMO },
+};
+const ROLE_ORDER = ['furnace', 'return', 'hopper', 'boiler', 'flue', 'other'];
+const OLD_ROLES = ['furnace', 'return', 'hopper', 'boiler'];
+const OTHER_COLORS = ['#ff7eb6', '#9be15d', '#ffd84d', '#7d8cff', '#5ce1e6', '#d9a066', '#b0b7c3', '#ff9a8b'];
+let COLORS = ['#ff6b3d', '#4aa8ff', '#ffb340', '#34d1bf'], ICONS = [I_FLAME, I_RETURN, I_HOPPER, I_WATER];
+const roleOf = (s, i) => (s && s.role) || OLD_ROLES[i] || 'other';
+const roleColor = (r, i) => (ROLES[r] || ROLES.other).color || OTHER_COLORS[i % OTHER_COLORS.length];
+function mapRoles(n) {
+  const s = n && n.sensors;
+  if (!s) return;
+  const find = r => s.findIndex((x, i) => roleOf(x, i) === r && x.on !== false);
+  [FURNACE, RETURN, COAL, BOILER, FLUE] = ['furnace', 'return', 'hopper', 'boiler', 'flue'].map(find);
+  COLORS = s.map((x, i) => roleColor(roleOf(x, i), i));
+  ICONS = s.map((x, i) => (ROLES[roleOf(x, i)] || ROLES.other).icon);
+}
+// The slots with a probe that is switched on - what the app shows.
+const inUse = () => (now ? now.sensors.map((x, i) => i).filter(i => now.sensors[i].on !== false) : []);
 const WARNINGS = [
   { name: 'Piec wygasa', icon: I_FLAME },
   { name: 'Ryzyko zamarznięcia', icon: I_SNOW },
@@ -580,7 +632,7 @@ const CHANGES = {
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
-  26: 'Nowa płytka ESP32-S3: czterokrotnie więcej pamięci na kolejne funkcje, historia co minutę z około 3 miesięcy zamiast 31 dni i zapas RAM-u na aktualizacje przez internet.',
+  26: 'Nowa płytka ESP32-S3: więcej pamięci, historia co minutę z około 3 miesięcy zamiast 31 dni. Ustawienia → Czujniki: każdy czujnik ma kafelek z nazwą, temperaturą na żywo, włącznikiem i rolą (Piec, Powrót, Zasobnik węgla, Bojler, Spaliny, Inny) – nowy czujnik pojawia się sam, a „Użyj zamiast…” przejmuje historię starego. Termopara na spalinach od razu dostaje rolę Spaliny. Raport diagnostyczny ma dzienne liczniki (rozłączenia, błędy czujników, pamięć) i ostatnią awarię. Kod serwisowy (Dostęp zdalny): podgląd pieca dla kogoś, kto pomaga – bez możliwości zmian, wygasa sam.',
   25: 'Raport diagnostyczny (Ustawienia → Urządzenie): jednym stuknięciem plik dla serwisu ze stanem urządzenia i jego dziennikiem technicznym – także z tego, co działo się tuż przed awarią lub restartem.',
   24: 'Kąpiele także wstecz – z historii minutowej (ostatnie 31 dni), a fałszywe ostrzeżenia „Piec wygasa” z czasów starej reguły (daleko od progu min.) znikają z dziennika. Powiadomienie „Dostępna nowa wersja” przychodzi tylko wtedy, gdy piec sam ją znajdzie (sprawdza co godzinę); po stuknięciu „Sprawdź aktualizacje” wynik widać od razu w aplikacji.',
   23: 'Ostrzeżenie „Piec wygasa” dopiero, gdy temperatura spada i jest blisko progu min. (domyślnie 3°) – szybki spadek sam nie wystarczy, bo daje go np. kąpiel. Kąpiele: gdy bojler nagle traci ciepło, zapisuję to w dzienniku, pokazuję niebieską kreską na wykresach pieca i bojlera i liczę w Miesiącach.',
@@ -603,7 +655,7 @@ const CHANGES = {
 const PROBLEM_END = { 3: 5, 4: 5, 6: 7, 8: 9 };
 const EV_POWER_CUT = 11;      // time = power back, value = minutes without power
 const BOOT_REASON = ['', 'po włączeniu zasilania', 'po restarcie', 'po spadku napięcia', 'po błędzie programu'];
-const WARNING_PROBES = [[FURNACE], [FURNACE, RETURN, BOILER], [COAL], [FURNACE, RETURN], [FURNACE], [FURNACE]];
+const warningProbes = w => ([[FURNACE], [FURNACE, RETURN, BOILER], [COAL], [FURNACE, RETURN], [FURNACE], [FURNACE]][w] || []).filter(i => i >= 0);
 const EV_SEASON = 12, EV_ASH = 13, EV_HOT_WATER = 14, EV_BATH = 15;   // EV_BATH: e[2] = minutes, e[3] = boiler drop x 100
 const RANGES = { '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
 const STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200];
@@ -636,6 +688,7 @@ function loadCache() {
     const c = JSON.parse(localStorage.getItem(CACHE_KEY));
     if (!c || !c.now || Date.now() - c.at > 3 * 86400e3) return;
     ({ now, live = [], journal = [], days = [] } = c);
+    mapRoles(now);
     Object.assign(outdoor, c.outdoor);
     lastOk = c.at;
   } catch (e) {}
@@ -840,6 +893,7 @@ async function loadJournal() {
 // GitHub Pages that is ahead of a device not updated yet. Marked, so nothing is converted twice.
 const oldBucketKg = n => (n && n.fw < 22 && n.settings && n.settings.bucketKg) || 0;
 function legacyCoal(n) {
+  mapRoles(n);
   const kg = oldBucketKg(n), c = n && n.coal;
   if (!kg || n.inKg) return n;
   const x = v => (v === null || v === undefined ? v : v * kg);
@@ -1241,14 +1295,14 @@ function describe(s) {
 function warningText(w) {
   const s = now.sensors;
   if (w === 0) {
-    const f = s[FURNACE], near = f.temp !== null && f.low !== null ? `${n1(f.temp - f.low)}° nad progiem min. i spada` : 'zbliża się do progu min.';
+    const f = s[FURNACE] || { temp: null, low: null }, near = f.temp !== null && f.low !== null ? `${n1(f.temp - f.low)}° nad progiem min. i spada` : 'zbliża się do progu min.';
     return now.forecast !== null ? `${near} – za ok. ${now.forecast} min poniżej ${n1(f.low)}°` : near;
   }
   if (w === 1) {
     const cold = s.filter(x => x.water && x.temp !== null).sort((a, b) => a.temp - b.temp)[0];
     return cold ? `${esc(cold.name)}: ${n1(cold.temp)}°` : 'woda bliska zamarznięcia';
   }
-  if (w === 4) return `po zaniku prądu piec dalej stygnie${s[FURNACE].trend !== null ? ` (${n1(s[FURNACE].trend)}° na godzinę)` : ''} – sprawdź sterownik`;
+  if (w === 4) return `po zaniku prądu piec dalej stygnie${s[FURNACE] && s[FURNACE].trend !== null ? ` (${n1(s[FURNACE].trend)}° na godzinę)` : ''} – sprawdź sterownik`;
   if (w === 5) {
     const a = now.ash, d = Math.floor((tNow() - a.at) / 86400);
     return `od opróżnienia ${d} ${plural(d, 'dzień', 'dni', 'dni')}${a.kg !== null ? `, spalono ~${massText(a.kg)}` : ''}`;
@@ -1340,7 +1394,8 @@ function missedNotice() {
 function openEvent(m) {
   const [, type, i] = m.e, t = m.start;
   const end = m.end || tNow(), pad = Math.max(3600, (end - t) / 2);
-  ui.shown = (type === EV_POWER_CUT ? now.sensors.map((s, k) => k) : type === 8 ? WARNING_PROBES[i] || [FURNACE] : [i]).slice();
+  const concerned = type === 8 ? warningProbes(i) : [];
+  ui.shown = (type === EV_POWER_CUT || (type === 8 && !concerned.length) ? inUse() : type === 8 ? concerned : [i]).slice();
   saveUi();
   view = { t0: t - pad, t1: Math.min(tNow(), end + pad) };
   showTab('charts');
@@ -1355,7 +1410,7 @@ function renderBadge() {
 }
 
 function renderHome() {
-  const alarms = now ? now.sensors.filter(s => s.alarm || s.fault) : [];
+  const alarms = now ? now.sensors.filter(s => s.on !== false && (s.alarm || s.fault)) : [];
   const warns = now ? now.warnings.map((on, w) => on ? w : -1).filter(w => w >= 0) : [];
   const problems = warns.filter(w => w !== 5), count = alarms.length + problems.length;       // the ash pan is a reminder
   $('#dot').className = 'dot' + (online !== true ? ' warn' : alarms.length ? ' bad' : problems.length ? ' warn' : '');
@@ -1380,6 +1435,7 @@ function renderHome() {
 
   const t = tNow();
   $('#cards').innerHTML = now.sensors.map((s, i) => {
+    if (s.on === false) return '';
     const c = COLORS[i % COLORS.length], pts = points(live, i, false).filter(p => p[0] >= t - 6 * 3600);
     const k = s.trend, state = s.fault ? 'fault' : s.alarm ? 'alarm' : '';
     const pill = s.fault ? 'BRAK SYGNAŁU' : s.alarm > 0 ? 'ZA GORĄCO' : s.alarm < 0 ? 'ZA ZIMNO' : '';
@@ -1391,11 +1447,11 @@ function renderHome() {
   }).join('');
 
   $$('#ovRange button').forEach(b => b.classList.toggle('on', +b.dataset.h === ui.overview));
-  $('#legend').innerHTML = now.sensors.map((s, i) => `<span><i style="background:${COLORS[i]}"></i>${esc(s.name)}</span>`).join('');
+  $('#legend').innerHTML = inUse().map(i => `<span><i style="background:${COLORS[i]}"></i>${esc(now.sensors[i].name)}</span>`).join('');
   const span = ui.overview * 3600, t0 = t - span, step = ui.overview > 6 ? 300 : 60;
   const buckets = step === 60 ? live : rebucket(live, step);
   chart($('#overview'), {
-    series: now.sensors.map((s, i) => ({ color: COLORS[i], name: s.name, pts: windowed(points(buckets, i, false), t0, t) })),
+    series: inUse().map(i => ({ color: COLORS[i], name: now.sensors[i].name, pts: windowed(points(buckets, i, false), t0, t) })),
     t0, t1: t, step, bands: outages(), smooth: step === 60 ? 3 : 1, empty: 'Historia zapełni się w ciągu kilku minut',
   });
   renderCoal();
@@ -1430,6 +1486,7 @@ function renderToday() {
 const burnThreshold = () => now.sensors[FURNACE] && now.sensors[FURNACE].low !== null ? now.sensors[FURNACE].low : 40;
 function burnSeconds(from, to) {
   const thr = burnThreshold();
+  if (FURNACE < 0) return 0;
   return points(live, FURNACE, false).filter(p => p[0] >= from && p[0] < to && p[1] >= thr).length * 60;
 }
 
@@ -1753,7 +1810,7 @@ function detailData(i) {
 
 function paintDetail() {
   if (!now || !view) return;
-  const shown = ui.shown.filter(i => i === OUT ? now.settings.lat !== null : i < now.sensors.length);
+  const shown = ui.shown.filter(i => i === OUT ? now.settings.lat !== null : i < now.sensors.length && now.sensors[i].on !== false);
   const probes = shown.filter(i => i !== OUT);
   const single = probes.length === 1 && shown.length === 1, s0 = now.sensors[probes[0]];
   const lines = shown.map(i => { const d = detailData(i); return { color: colorOf(i), name: nameOf(i), agg: d.agg, step: d.step, dash: i === OUT, pts: windowed(d.pts, view.t0, view.t1) }; });
@@ -1761,7 +1818,7 @@ function paintDetail() {
   const limits = single && s0 ? [s0.high !== null && { v: s0.high, label: `maks. ${n1(s0.high)}°` }, s0.low !== null && { v: s0.low, label: `min. ${n1(s0.low)}°` }].filter(Boolean) : [];
   const MARK = { 3: '#ff453a', 4: '#ff453a', 6: '#ff453a', 8: '#ff9f0a', 5: '#30d158', 7: '#30d158', 9: '#30d158', [EV_BATH]: '#0a84ff' };
   const concerns = e => (e[1] === EV_BATH ? shown.includes(BOILER) || shown.includes(FURNACE)
-    : e[1] >= 8 ? (WARNING_PROBES[e[2]] || []).some(p => shown.includes(p)) : shown.includes(e[2]));
+    : e[1] >= 8 ? warningProbes(e[2]).some(p => shown.includes(p)) : shown.includes(e[2]));
   const marks = journal.filter(e => MARK[e[1]] && concerns(e)).map(e => { const v = eventView(e); return { t: e[0], color: MARK[e[1]], title: v[2], sub: v[3] }; });
   chart($('#detail'), { series: lines, t0: view.t0, t1: view.t1, step, limits, marks, bands: outages(), fill: single, band: single,
     smooth: step === 60 ? 2 : step <= 300 ? 1 : 0 });
@@ -1811,7 +1868,7 @@ function refreshCharts() {
 
 function renderCharts() {
   if (!now) return;
-  const keys = now.sensors.map((s, i) => i).concat(now.settings.lat !== null ? [OUT] : []);
+  const keys = inUse().concat(now.settings.lat !== null ? [OUT] : []);
   $('#chips').innerHTML = keys.map(i => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${colorOf(i)};--cb:${rgba(colorOf(i), .14)}"><i></i>${esc(nameOf(i))}</button>`).join('');
   if (!view) resetView(); else fetchForView();
   loadDays().then(() => { renderBurn(); renderCoalChart(); });
@@ -2730,12 +2787,13 @@ async function installUpdate() {
 const plural3 = n => `${n} ${plural(n, 'czujnik', 'czujniki', 'czujników')}`;
 const SET_PAGES = [
   { group: 'Piec' },
-  { id: 'limits', title: 'Progi alarmów', icon: I_THERMO, cls: 'c-red', status: () => { const n = now.sensors.filter(s => s.low !== null || s.high !== null).length; return n ? plural3(n) : 'wyłączone'; } },
+  { id: 'probes', title: 'Czujniki', icon: I_THERMO, cls: 'c-blue', status: () => (now.sensors[0] && now.sensors[0].addr !== undefined ? plural3(inUse().length) : '') },
+  { id: 'limits', title: 'Progi alarmów', icon: I_THERMO, cls: 'c-red', status: () => { const n = now.sensors.filter(s => s.on !== false && (s.low !== null || s.high !== null)).length; return n ? plural3(n) : 'wyłączone'; } },
   { id: 'warn', title: 'Ostrzeżenia', icon: I_FLAME, cls: 'c-orange', status: () => { const st = now.settings; return `${[st.goOutOn, st.freezeOn, st.burnbackOn, st.coalOn && st.lowCoalOn, st.stalledOn, st.coalOn && st.ashOn].filter(Boolean).length} z 6 włączonych`; } },
   { id: 'boiler', title: 'Dane kotła', icon: I_BOILER, cls: 'c-orange', status: () => (now.settings.hopperKg > 0 ? `zasobnik ${kgText(now.settings.hopperKg)}` : 'uzupełnij') },
   { id: 'coal', title: 'Węgiel', icon: I_COAL, cls: 'c-gray', status: () => (now.settings.coalOn ? 'liczony' : 'wyłączony') },
   { id: 'season', title: 'Sezon grzewczy', icon: I_SUN, cls: 'c-blue', status: () => (now.settings.heating ? 'sezon grzewczy' : 'tryb lato') },
-  { id: 'offsets', title: 'Korekta wskazań', icon: I_PLUSMINUS, cls: 'c-gray', status: () => { const n = now.sensors.filter(s => Math.abs(s.offset || 0) >= .05).length; return n ? plural3(n) : 'brak'; } },
+  { id: 'offsets', title: 'Korekta wskazań', icon: I_PLUSMINUS, cls: 'c-gray', status: () => { const n = now.sensors.filter(s => s.on !== false && Math.abs(s.offset || 0) >= .05).length; return n ? plural3(n) : 'brak'; } },
   { group: 'Telefon' },
   { id: 'push', title: 'Powiadomienia', icon: I_BELL, cls: 'c-red', status: () => (REMOTE ? { on: 'włączone', off: 'wyłączone', denied: 'zablokowane', install: 'najpierw ikona', none: 'niedostępne' }[pushNow] || '' : 'w aplikacji z internetu') },
   { id: 'remote', title: 'Dostęp zdalny', icon: I_GLOBE, cls: 'c-blue', status: () => (REMOTE ? 'sparowany' : !remoteInfo ? '' : !remoteInfo.host ? 'wyłączony' : remoteInfo.state === 'connected' ? 'połączony' : 'łączenie') },
@@ -2768,6 +2826,9 @@ function renderMenu() {
 
 function showSetPage(id, push = true) {
   setPage = id;
+  clearTimeout(probeTimer);
+  slotDraft = probesFound = null;
+  if (id === 'probes') setTimeout(pollProbes);
   const page = SET_PAGES.find(p => p.id === id);
   $$('.spage').forEach(p => p.classList.toggle('on', p.dataset.page === id));
   $('#setmenu').style.display = id ? 'none' : '';
@@ -2789,13 +2850,15 @@ function renderSettings() {
     + `${st.heating ? 'Sezon grzewczy' : 'Tryb lato'}<input class="sw" type="checkbox" data-k="heating" data-msg="Sezon grzewczy" ${st.heating ? 'checked' : ''}></div>`
     + `<div class="warn-desc">${st.heating ? 'Latem wyłącz – alarmy „za zimno” pieca i powrotu oraz ostrzeżenia o paleniu ucichną. Bojler i mróz działają dalej.'
       : 'Alarmy „za zimno” pieca i powrotu oraz ostrzeżenia o paleniu są wyciszone. Gdy piec będzie palić 2 godziny, sezon grzewczy włączy się sam.'}</div></div>`;
+  if (setPage === 'probes') renderProbes();
   if (!editing($('#limits')))
-    $('#limits').innerHTML = now.sensors.map((s, i) => `<div class="lim" style="--c:${COLORS[i]}"><label><span class="cd"></span>${esc(s.name)}</label>`
+    $('#limits').innerHTML = now.sensors.map((s, i) => s.on === false ? '' : `<div class="lim" style="--c:${COLORS[i]}"><label><span class="cd"></span>${esc(s.name)}</label>`
       + `<div class="f">MIN<input type="text" inputmode="decimal" data-i="${i}" data-k="low" value="${fmtNum(s.low)}" placeholder="wył."></div>`
       + `<div class="f">MAKS<input type="text" inputmode="decimal" data-i="${i}" data-k="high" value="${fmtNum(s.high)}" placeholder="wył."></div></div>`).join('');
 
   if (!editing($('#offsets')) && !offsetTimers.some(Boolean))
     $('#offsets').innerHTML = now.sensors.map((s, i) => {
+      if (s.on === false) return '';
       const raw = s.temp === null ? null : s.temp - (s.offset || 0);
       return `<div class="offr" style="--c:${COLORS[i]}"><div><label><span class="cd"></span>${esc(s.name)}</label>`
         + `<div class="s">${s.temp === null ? 'brak odczytu' : `pokazuje ${n1(s.temp)}° · sam czujnik ${n1(raw)}°`}</div></div>`
@@ -2806,13 +2869,13 @@ function renderSettings() {
 
   if (!editing($('#warnset')))
     $('#warnset').innerHTML =
-      warnBlock(0, st.goOutOn, `Gdy temperatura pieca spada i zbliża się do progu min. – zanim przyjdzie alarm „za zimno”. Sam szybki spadek (np. przy kąpieli) nie wystarczy.${now.sensors[FURNACE].low === null ? ' Wymaga progu min. pieca (Progi alarmów).' : ''}`, [['Bliżej progu min. niż', 'goOutMargin', st.goOutMargin, '°C']])
+      warnBlock(0, st.goOutOn, `Gdy temperatura pieca spada i zbliża się do progu min. – zanim przyjdzie alarm „za zimno”. Sam szybki spadek (np. przy kąpieli) nie wystarczy.${!now.sensors[FURNACE] || now.sensors[FURNACE].low === null ? ' Wymaga progu min. pieca (Progi alarmów).' : ''}`, [['Bliżej progu min. niż', 'goOutMargin', st.goOutMargin, '°C']])
       + warnBlock(1, st.freezeOn, 'Gdy woda w piecu, na powrocie lub w bojlerze robi się bardzo zimna.', [['Poniżej', 'freezeTemp', st.freezeTemp, '°C']])
       + warnBlock(2, st.burnbackOn, 'Gdy temperatura zasobnika rośnie szybko – żar może cofać się do węgla.', [['Wzrost szybszy niż', 'burnbackRate', st.burnbackRate, '°/h']])
       + warnBlock(4, st.stalledOn, 'Gdy po powrocie prądu piec dalej stygnie – sterownik mógł się sam nie uruchomić.', [])
       + (st.coalOn ? warnBlock(3, st.lowCoalOn, 'Gdy według szacunku węgla w zasobniku starczy już tylko na kilka godzin.', [['Starczy na mniej niż', 'lowCoalHours', st.lowCoalHours, 'godz.']])
         + warnBlock(5, st.ashOn, 'Przypomina o opróżnieniu popielnika – co nastąpi wcześniej. Przycisk „Wyczyściłem” jest w karcie węgla.', [['Po spaleniu', 'ashLimit', st.ashLimit, 'kg'], ['Albo po', 'ashDays', st.ashDays, 'dniach']]) : '')
-      + `<div class="warn-block"><div class="warn-head"><span class="badge c-green">${SVG(ICONS[BOILER])}</span>Ciepła woda gotowa</div>`
+      + `<div class="warn-block"><div class="warn-head"><span class="badge c-green">${SVG(I_WATER)}</span>Ciepła woda gotowa</div>`
       + `<div class="warn-desc">Czujnik „Ciepła woda gotowa” w aplikacji Dom otwiera się, gdy bojler osiągnie tę temperaturę – z powiadomieniem wiadomo, że można się kąpać.</div>`
       + fieldRows([['Od temperatury bojlera', 'hotWater', st.hotWater, '°C']]) + '</div>';
 
@@ -2856,6 +2919,125 @@ function renderSettings() {
   $('#fwup').disabled = !now.ota;
 }
 
+// ---------------------------------------------------------------- probe slots (Ustawienia -> Czujniki)
+// The page edits a draft of the whole slot table and saves it at once (/api/slots); the ESP restarts with it. While
+// the page is open the probes found are polled every few seconds - a probe warmed in the hand shows which one it is.
+// A new probe goes into a free slot, or "Użyj zamiast…" puts it into a taken one, whose history it carries on.
+let slotDraft = null, probesFound = null, probeTimer = 0;
+const slotsFromNow = () => now.sensors.map(x => ({ addr: x.addr || '', name: x.name || '', role: x.role || 'other', on: x.on !== false, kind: x.kind || '' }));
+const draftChanged = () => slotDraft && JSON.stringify(slotDraft) !== JSON.stringify(slotsFromNow());
+// Typing a name or choosing in a list - a periodic redraw would take the field away.
+const typing = el => el.contains(document.activeElement) && /^(INPUT|SELECT)$/.test(document.activeElement.tagName) && document.activeElement.type !== 'checkbox';
+const tempText = t => (t === null || t === undefined ? '–' : `${n1(t)}°`);
+
+async function pollProbes() {
+  clearTimeout(probeTimer);
+  if (setPage !== 'probes' || ui.tab !== 'settings' || document.hidden) return;
+  try { probesFound = await (await api('/api/probes', {}, 8000)).json(); } catch (e) {}
+  if (setPage !== 'probes') return;
+  renderProbes();
+  probeTimer = setTimeout(pollProbes, 4000);
+}
+
+function renderProbes(force) {
+  const page = $('.spage[data-page="probes"]'), box = $('#probeset'), fresh = $('#probenew');
+  if (!now || (!force && typing(page))) return;
+  if (!now.sensors.length || now.sensors[0].addr === undefined) {
+    box.innerHTML = '<p class="note" style="margin-top:0">Ta wersja oprogramowania pieca ma czujniki wpisane na stałe – najpierw zaktualizuj ją (Ustawienia → Oprogramowanie).</p>';
+    $('#probesave').style.display = 'none';
+    return;
+  }
+  if (!slotDraft) slotDraft = slotsFromNow();
+  const found = probesFound || [], at = a => found.find(q => q.addr === a);
+  box.innerHTML = slotDraft.map((d, i) => {
+    if (!d.addr) return '';
+    const q = at(d.addr), c = roleColor(d.role, i), role = ROLES[d.role] || ROLES.other;
+    const missing = probesFound !== null && !q;
+    return `<div class="ptile${d.on ? '' : ' off'}" style="--c:${c};--cb:${rgba(c, .16)}">`
+      + `<div class="ptop"><span class="badge">${SVG(role.icon)}</span>`
+      + `<input class="pname" type="text" data-i="${i}" value="${esc(d.name)}" autocomplete="off" aria-label="Nazwa">`
+      + `<span class="ptemp num">${tempText(q ? q.t : now.sensors[i] && now.sensors[i].addr === d.addr ? now.sensors[i].temp : null)}</span>`
+      + `<input class="sw" type="checkbox" data-on="${i}" ${d.on ? 'checked' : ''} aria-label="Włączony"></div>`
+      + `<div class="pmeta"><span>${esc(d.kind || 'czujnik')} · miejsce ${i + 1}</span>`
+      + (missing ? `<span class="pbad">${SVG('<path d="M6 6l12 12M18 6 6 18"/>')}nie odpowiada</span>` : '') + '</div>'
+      + `<div class="proles">${ROLE_ORDER.map(r => {
+        const rc = ROLES[r].color || '#a3a8b3';
+        return `<button class="rchip${d.role === r ? ' on' : ''}" data-i="${i}" data-role="${r}" style="--c:${rc};--cb:${rgba(rc, .16)}">${SVG(ROLES[r].icon)}${ROLES[r].label}</button>`;
+      }).join('')}</div>`
+      + (missing ? `<button class="plink" data-free="${i}">Zwolnij miejsce</button>` : '')
+      + '</div>';
+  }).join('') || '<p class="note" style="margin-top:0">Nie znaleziono żadnego czujnika – sprawdź podłączenie.</p>';
+
+  const extra = found.filter(q => !slotDraft.some(d => d.addr === q.addr)), free = slotDraft.some(d => !d.addr);
+  const options = slotDraft.map((d, i) => (d.addr ? `<option value="${i}">${esc(d.name)}</option>` : '')).join('');
+  fresh.style.display = extra.length ? '' : 'none';
+  fresh.innerHTML = '<div class="card-h">Nowe czujniki</div>' + extra.map(q => `<div class="pnew"><div><b>${esc(q.kind)}</b> `
+    + `<span class="ptemp num">${tempText(q.t)}</span><div class="pmeta">${esc(q.addr)}</div></div><div class="pnew-b">`
+    + (free ? `<button data-add="${esc(q.addr)}" data-kind="${esc(q.kind)}">Dodaj</button>` : '')
+    + `<select class="pswap" data-addr="${esc(q.addr)}" data-kind="${esc(q.kind)}" aria-label="Użyj zamiast"><option value="">Użyj zamiast…</option>${options}</select></div></div>`).join('');
+  $('#probesave').style.display = '';
+  $('#probesave').disabled = !draftChanged();
+}
+
+// Each furnace role belongs to one probe: choosing it here takes it from the probe that had it.
+function onProbeClick(e) {
+  const chip = e.target.closest('.rchip'), add = e.target.closest('[data-add]'), free = e.target.closest('[data-free]');
+  if (chip) {
+    const i = +chip.dataset.i, r = chip.dataset.role;
+    if (r !== 'other') slotDraft.forEach((d, k) => { if (k !== i && d.role === r) d.role = 'other'; });
+    slotDraft[i].role = r;
+  } else if (add) {
+    const i = slotDraft.findIndex(d => !d.addr), tc = add.dataset.kind === 'Termopara K';
+    if (i < 0) return;
+    const flue = tc && !slotDraft.some(d => d.addr && d.role === 'flue');
+    slotDraft[i] = { addr: add.dataset.add, name: flue ? 'Spaliny' : `Czujnik ${i + 1}`, role: flue ? 'flue' : 'other', on: true, kind: add.dataset.kind };
+  } else if (free) {
+    slotDraft[+free.dataset.free] = { addr: '', name: '', role: 'other', on: false, kind: '' };
+  } else return;
+  renderProbes(true);
+}
+
+function onProbeChange(e) {
+  const t = e.target;
+  if (t.dataset.on !== undefined) {
+    slotDraft[+t.dataset.on].on = t.checked;
+  } else if (t.classList.contains('pswap') && t.value !== '') {
+    const d = slotDraft[+t.value];
+    Object.assign(d, { addr: t.dataset.addr, kind: t.dataset.kind, on: true });
+    toast(`${d.name}: nowy czujnik, historia zostaje`);
+    t.blur();
+  } else return;
+  renderProbes(true);
+}
+
+// Home accepts only letters, digits, spaces and apostrophes in a name.
+function onProbeName(e) {
+  const t = e.target;
+  if (!t.classList.contains('pname')) return;
+  const clean = t.value.replace(/[^\p{L}\p{N} ']/gu, '');
+  if (clean !== t.value) t.value = clean;
+  slotDraft[+t.dataset.i].name = clean;
+  $('#probesave').disabled = !draftChanged();
+}
+
+async function saveSlots() {
+  const names = slotDraft.map(d => d.name.trim());
+  const bad = slotDraft.findIndex((d, i) => d.addr && (!names[i] || new TextEncoder().encode(names[i]).length > 31));
+  if (bad >= 0) return toast(`Miejsce ${bad + 1}: nazwa pusta albo za długa`);
+  if (!await confirmDialog('Zapisać czujniki?', 'Piec uruchomi się ponownie – przez ok. 20 sekund nie będzie odpowiadał.', 'Zapisz')) return;
+  const body = new URLSearchParams();
+  slotDraft.forEach((d, i) => { body.set('a' + i, d.addr); body.set('n' + i, names[i]); body.set('r' + i, d.role); body.set('o' + i, d.on ? '1' : '0'); });
+  try {
+    await api('/api/slots', { method: 'POST', body });
+    toast('Zapisano – piec uruchamia się ponownie');
+    showSetPage(null, false);
+    setTimeout(refreshNow, 20e3);
+  } catch (e) {
+    toast(/role twice/.test(e.message) ? 'Każda rola może mieć tylko jeden czujnik' : /two slots/.test(e.message) ? 'Ten sam czujnik w dwóch miejscach'
+      : 'Nie udało się zapisać – brak połączenia z piecem?');
+  }
+}
+
 // Calibration offsets: "+2,0", "−1,5", "0" - typed with a plus or minus sign, or stepped by 0.1 with the buttons
 // (the iPhone's number pad has no minus). Steps are saved 0.8 s after the last tap, not on every tap.
 const signed = v => (Math.abs(v) < .05 ? '0' : `${v > 0 ? '+' : '−'}${n1(Math.abs(v))}`);
@@ -2887,7 +3069,8 @@ async function saveLimits(i) {
   // A typo must not switch the alarm off - the ESP refuses it too.
   const fail = msg => { toast(msg); render(); };
   if ([lo, hi].some(v => v !== '' && !isFinite(+v))) return fail('Wpisz liczbę albo zostaw pole puste');
-  if ([lo, hi].some(v => v !== '' && (+v < -55 || +v > 125))) return fail('Próg musi być między −55 a 125°');
+  const top = now.sensors[i].kind === 'Termopara K' ? 1000 : 125;          // a thermocouple reads up to 1000 degrees
+  if ([lo, hi].some(v => v !== '' && (+v < -55 || +v > top))) return fail(`Próg musi być między −55 a ${top}°`);
   if (lo !== '' && hi !== '' && +lo >= +hi) return fail('MIN musi być niższy niż MAKS');
   try {
     now = legacyCoal(await (await api('/api/limits', { method: 'POST', body: new URLSearchParams({ s: i, low: lo, high: hi }) })).json());
@@ -3208,6 +3391,11 @@ function setup() {
   $('#clearhist').onclick = clearHistory;
   $('#bkup').onclick = restoreBackup;
   $('#setmenu').onclick = e => { const b = e.target.closest('.mrow'); if (b) showSetPage(b.dataset.page); };
+  const probes = $('.spage[data-page="probes"]');
+  probes.addEventListener('click', onProbeClick);
+  probes.addEventListener('change', onProbeChange);
+  probes.addEventListener('input', onProbeName);
+  $('#probesave').onclick = saveSlots;
   $('#setback').onclick = () => (history.state && history.state.setPage ? history.back() : showSetPage(null, false));
   window.addEventListener('popstate', () => { if (setPage) showSetPage(null, false); });
   $('#pushset').addEventListener('click', onRemoteClick);
@@ -3225,6 +3413,7 @@ function setup() {
       if (REMOTE) relayClose();
     } else {
       refreshNow().then(loadLive).then(() => render(true));
+      if (setPage === 'probes') pollProbes();
     }
   });
   let rt;

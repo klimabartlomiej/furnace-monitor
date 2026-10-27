@@ -64,10 +64,17 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
 
 | Part | Note |
 | --- | --- |
-| ESP32 dev board (ESP32-D0WD) | USB-serial CH340 |
-| 4 x DS18B20 (waterproof probes) | data on **D22**, 4.7 kOhm pull-up to 3.3 V, powered 3-wire |
+| ESP32-S3 N16R8 (16 MB flash, 8 MB PSRAM) | flash through the "COM/UART" USB-C port; `release/publish.ps1 -Target s3` |
+| ESP32 dev board (ESP32-D0WD), the first board | frozen at v25 (flash full) - only urgent fixes, `-Target classic` |
+| DS18B20 (waterproof probes) | data on **GPIO4** (S3) / **D22** (classic), 4.7 kOhm pull-up to 3.3 V, powered 3-wire |
+| MAX6675 + K thermocouple (the flue, S3 only) | CS **GPIO10**, SCK **GPIO12**, SO **GPIO13**, 3.3 V |
 
-Probe addresses are pinned in `SENSORS` in `PiecTemp.ino`; `diagnostics/PiecTempTest` finds and health-checks them.
+Probes sit in slots (8 on the S3, 4 on the classic board), each with a role - Piec, Powrót, Zasobnik węgla,
+Bojler, Spaliny or Inny - set in the web app (Ustawienia -> Czujniki). The furnace logic looks probes up by role;
+history stays with the slot, so a replacement probe ("Użyj zamiast…") carries it on. A probe found at a start that
+no slot knows takes a free slot by itself - a thermocouple straight into the flue role. Until the slots are saved,
+the probes at dad's (`DEFAULT_SLOTS` in `PiecTemp.ino`) are the defaults. A backup of the classic board (4 probes)
+restores into the S3's 8 slots. `diagnostics/PiecTempTest` finds and health-checks DS18B20s.
 
 ## First start
 

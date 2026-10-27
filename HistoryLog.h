@@ -13,8 +13,10 @@
 
 constexpr int16_t NO_VALUE = INT16_MIN;     // a probe without a reading in that minute / day
 
+// Degrees x 100 in an int16: a flue thermocouple can pass 327 degrees, which is kept as 327 (not wrapped around,
+// and clear of 0xFFFF, the minute log's "nothing written").
 inline int16_t toHundredths(float v) {
-  return isnan(v) ? NO_VALUE : (int16_t)lroundf(v * 100);
+  return isnan(v) ? NO_VALUE : (int16_t)lroundf(fminf(fmaxf(v, -327.0f), 327.0f) * 100);
 }
 
 // One record per minute for N probes, kept straight in its own flash partition ("minutes" in partitions.csv):
@@ -121,7 +123,9 @@ public:
   }
 
 private:
-  static constexpr uint32_t MAGIC  = 0x4D494E32;   // "MIN2"
+  // "MIN2" for 4 probes (the classic board's history stays readable); another width has its own, so a ring written
+  // with other records never reads as this one's.
+  static constexpr uint32_t MAGIC  = N == 4 ? 0x4D494E32 : 0x4D490000 | N;
   static constexpr uint32_t SECTOR = 4096;
 
   struct Header {
