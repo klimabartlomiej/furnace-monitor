@@ -115,6 +115,8 @@ public:
   // 1 = signatures demanded, 0 = the verifier failed its self-test (SHA-256 only), -1 = not checked yet.
   int8_t signatures() const { return sigCheck; }
 
+  uint16_t failures() const { return failCount; }   // failed checks and downloads since the start (diagnostics)
+
   String status() const {
     portENTER_CRITICAL(&mux);
     String s = statusText;
@@ -194,6 +196,7 @@ private:
   uint8_t     buf[1024];
 
   bool        freed          = false;    // the relay let its connection go for us
+  volatile uint16_t failCount = 0;
 
   static void task(void* self) {
     RemoteUpdate* u = static_cast<RemoteUpdate*>(self);
@@ -211,7 +214,10 @@ private:
     techLog.println("Update: " + s);
   }
 
-  void fail(const String& why) { setStatus("check failed: " + why); }
+  void fail(const String& why) {
+    failCount++;
+    setStatus("check failed: " + why);
+  }
 
   void needMemory() {
     if (freed || !onNeedMemory) return;

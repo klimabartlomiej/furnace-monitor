@@ -19,6 +19,11 @@
 // for the phones' notifications: {"t":"push","c":"<kind>","d":"<nonce | ciphertext | tag, base64url>"}, AAD 'P'
 // - the relay hands "d" to the push services as it is (only the phone's service worker opens it, web/sw.js) to
 // the phones that want that kind (alarm, warn, power, water, update).
+//
+// Support code: a second, read-only key for someone who helps (made in the web app, it expires by itself):
+// "<relay host>/<room>.<support secret>" - the same room, its own key. A request sealed with it may only GET, and
+// never the backup, the pairing code or the support code; its answer is sealed with the same key. Alerts stay on
+// the owner's key.
 
 #pragma once
 
@@ -110,6 +115,32 @@ public:
     portEXIT_CRITICAL(&mux);
     return s;
   }
+  // The support key (see the top); nullptr = none. `until` is Unix time.
+  void setSupport(const uint8_t secret[32], uint32_t until) {
+    uint8_t k[32] = {};
+    if (secret) derive("furnace-key", secret, k);
+    portENTER_CRITICAL(&mux);
+    if (secret) memcpy(supSecret, secret, 32);
+    else memset(supSecret, 0, 32);
+    memcpy(supKey, k, 32);
+    supUntil = secret ? until : 0;
+    supVersion++;
+    portEXIT_CRITICAL(&mux);
+  }
+
+  uint32_t supportUntil() const { return supUntil; }
+
+  // "<host>/<room>.<secret>", empty without one (or with remote access off).
+  String supportCode() const {
+    uint8_t s[32];
+    portENTER_CRITICAL(&mux);
+    String h = cfgHost, r = cfgRoom;
+    memcpy(s, supSecret, 32);
+    uint32_t until = supUntil;
+    portEXIT_CRITICAL(&mux);
+    return h.length() && until ? h + "/" + r + "." + base64(s, 32, true) : String();
+  }
+
   uint32_t connectedAt() const { return connectedSince; }   // Unix time, 0 = not connected
   uint16_t connections() const { return connects; }          // since the start (the diagnostic report)
   uint32_t served() const { return requests; }
@@ -145,6 +176,10 @@ private:
   String   lastEnd;                  // why the last connection ended - logged once, not on every retry
   volatile uint32_t requests = 0;
   uint16_t port = 80;
+  uint8_t  supSecret[32] = {};
+  uint8_t  supKey[32]    = {};
+  volatile uint32_t supUntil   = 0;
+  volatile uint32_t supVersion = 0;
 
   struct Alert {
     uint8_t len;
@@ -157,7 +192,11 @@ private:
   char     host_[64];
   char     room[33];
   mbedtls_gcm_context gcm;
+  mbedtls_gcm_context gcmSupport;
+  mbedtls_gcm_context* sealer = &gcm;   // the key of the request being answered
+  uint32_t supSet = 0;                  // supVersion that gcmSupport has
   uint8_t  in[MAX_REQUEST];
+  uint8_t  spare[MAX_REQUEST];          // the sealed request, for a second try with the support key
   uint8_t  out[HEAD + 12 + 10 + CHUNK + 16];
 
   static void task(void* self) { static_cast<Relay*>(self)->run(); }
@@ -185,6 +224,7 @@ private:
 
   void run() {
     mbedtls_gcm_init(&gcm);
+    mbedtls_gcm_init(&gcmSupport);
     uint32_t backoff = 0;
     for (;;) {
       uint8_t key[32];
@@ -384,7 +424,25 @@ private:
     size_t n = len - 28;
     const uint8_t aad = 'Q';
     uint8_t* p = in + 12;
-    if (mbedtls_gcm_auth_decrypt(&gcm, n, in, 12, &aad, 1, in + 12 + n, 16, p, p) != 0) return;   // not our key
+    uint32_t now = time(nullptr);
+    bool support = supUntil && now >= 1700000000 && now < supUntil, readOnly = false;
+    if (support && supSet != supVersion) {                 // a new support key: this task's context takes it
+      uint8_t k[32];
+      portENTER_CRITICAL(&mux);
+      memcpy(k, supKey, 32);
+      supSet = supVersion;
+      portEXIT_CRITICAL(&mux);
+      mbedtls_gcm_setkey(&gcmSupport, MBEDTLS_CIPHER_ID_AES, k, 256);
+    }
+    sealer = &gcm;
+    if (support) memcpy(spare, p, n);                      // a failed try wipes the buffer
+    if (mbedtls_gcm_auth_decrypt(&gcm, n, in, 12, &aad, 1, in + 12 + n, 16, p, p) != 0) {
+      if (!support) return;                                // not our key
+      memcpy(p, spare, n);
+      if (mbedtls_gcm_auth_decrypt(&gcmSupport, n, in, 12, &aad, 1, in + 12 + n, 16, p, p) != 0) return;
+      sealer = &gcmSupport;
+      readOnly = true;
+    }
     if (p[0] != 2) return;
     uint32_t id = rd32(p + 1), sent = rd32(p + 5);
     uint8_t method = p[9];
@@ -393,13 +451,27 @@ private:
     String path((const char*)p + 12, pathLen);
     String body((const char*)p + 12 + pathLen, n - 12 - pathLen);
     requests++;
-    uint32_t now = time(nullptr);
+    // The path goes into the request line to the local server as it is: a space or a line break would let it add
+    // headers or a second request (a POST behind a support code's GET).
+    bool clean = true;
+    for (char c : path) clean &= c > ' ' && c < 127;
     if (now >= 1700000000 && (sent + REQUEST_SKEW_S < now || sent > now + REQUEST_SKEW_S))
       reply(tls, id, 401, "check the phone's clock");
+    else if (!clean)
+      reply(tls, id, 400, "bad path");
     else if (!path.startsWith("/api/") || path.startsWith("/api/firmware"))
       reply(tls, id, 404, "not found");
+    else if (readOnly && (method != 0 || !supportMayRead(path)))
+      reply(tls, id, 403, "read-only");
     else
       forward(tls, id, method, path, body);
+  }
+
+  // What the support code may not read: the backup (WiFi password, keys), the pairing code and its own code.
+  static bool supportMayRead(const String& path) {
+    for (const char* no : {"/api/backup", "/api/remote", "/api/support"})
+      if (path.startsWith(no)) return false;
+    return true;
   }
 
   void reply(NetworkClientSecure& tls, uint32_t id, uint16_t status, const char* text) {
@@ -420,7 +492,7 @@ private:
     n += 10;
     esp_fill_random(nonce, 12);
     const uint8_t aad = 'R';
-    mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT, n, nonce, 12, &aad, 1, p, p, 16, p + n);
+    mbedtls_gcm_crypt_and_tag(sealer, MBEDTLS_GCM_ENCRYPT, n, nonce, 12, &aad, 1, p, p, 16, p + n);
     return sendFrame(tls, OP_BINARY, 12 + n + 16);
   }
 

@@ -76,6 +76,13 @@ no slot knows takes a free slot by itself - a thermocouple straight into the flu
 the probes at dad's (`DEFAULT_SLOTS` in `PiecTemp.ino`) are the defaults. A backup of the classic board (4 probes)
 restores into the S3's 8 slots. `diagnostics/PiecTempTest` finds and health-checks DS18B20s.
 
+Diagnostics: Ustawienia -> Urządzenie -> "Raport diagnostyczny" gives the device state, health counters per day
+(reconnects, probe errors, failed updates, least RAM, longest loop, weakest WiFi, hottest chip, starts), the last
+crash from the core dump (backtrace addresses: `xtensa-esp32s3-elf-addr2line -pfiaC -e <elf>`, the ELFs are kept in
+`%USERPROFILE%\.furnace-monitor\elf` by `publish.ps1`, named by the build SHA the report shows) and the technical
+log. A support code (Ustawienia -> Dostęp zdalny) gives someone a read-only view through the relay for 24 hours
+or 7 days: GET only, never the backup, the pairing code or the support code; revoked any time.
+
 ## First start
 
 1. Without stored WiFi the ESP opens the open hotspot **Furnace-Setup** - join it with a phone, pick the network,

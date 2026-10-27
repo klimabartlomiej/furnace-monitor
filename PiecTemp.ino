@@ -61,6 +61,8 @@
 #include <DallasTemperature.h>
 #include <algorithm>
 #include <vector>
+#include <esp_app_desc.h>
+#include <esp_core_dump.h>
 #include "TechLog.h"
 #include "Backup.h"
 #include "EveHistory.h"
@@ -97,6 +99,7 @@ constexpr uint32_t HISTORY_INTERVAL_S = 600;             // one Eve entry per 10
 constexpr uint32_t DAILY_CAPACITY     = 5 * 366;         // daily summaries kept at most (5 years; at least half)
 constexpr uint32_t EVENT_CAPACITY     = 1024;            // event journal entries (at most; at least half)
 constexpr uint32_t REFILL_CAPACITY    = 512;             // coal refills kept (at most; at least half)
+constexpr uint32_t HEALTH_CAPACITY    = 120;             // days of health counters (at most; at least half)
 constexpr uint8_t  COAL_INTERVALS     = 10;              // latest refill-to-refill intervals the kg factor averages
 constexpr float    COAL_MIN_HEAT      = 600;             // degree-minutes an interval needs to count (10 degrees, 1 h)
 constexpr float    HOT_WATER_HYSTERESIS = 3;             // degrees below "ready" before the hot-water contact closes
@@ -335,6 +338,48 @@ uint32_t offerTold         = 0;       // the newest version a notification has o
 uint32_t summaryDay        = 0;       // local midnight of the day whose morning summary went out (flash "sumDay")
 
 bool clockSet(time_t t) { return t >= 1700000000; }
+
+// ------------------------------------------------------------------ health (the diagnostic report)
+
+// A day of what tells how the device copes: reconnects, probe errors, failed update checks, the least free RAM,
+// the slowest loop pass, the weakest WiFi, the hottest chip and the starts. The day being counted lives in RTC
+// memory, so a crash or an update restart keeps it - those are the days it matters; a power cut loses its part.
+struct __attribute__((packed)) HealthRecord {
+  uint32_t time;          // local midnight of the day, 0 = counted before the clock was set
+  uint16_t wifiUps;       // WiFi connections
+  uint16_t relayUps;      // relay connections
+  uint16_t probeErrors;   // invalid readings, all probes
+  uint16_t updateFails;   // update checks and downloads that failed
+  uint16_t heapMinKB;     // least free internal RAM
+  uint16_t loopMaxMs;     // longest loop pass (a WiFi connect in HomeSpan included)
+  int8_t   rssiMin;       // weakest WiFi signal (dBm), 0 = none measured
+  int8_t   chipMax;       // hottest chip (C), -128 = not measured
+  uint16_t starts;        // starts of the ESP
+};
+
+constexpr uint32_t HEALTH_MAGIC = 0x484C5431;   // "HLT1" - change with HealthRecord
+RTC_NOINIT_ATTR HealthRecord healthToday;
+RTC_NOINIT_ATTR uint32_t     healthMagic;
+SegmentLog<HealthRecord> health("/hl", HEALTH_CAPACITY / 2);
+uint16_t relayUpsSeen = 0, updateFailsSeen = 0;
+
+void healthFresh(uint32_t day) {
+  memset(&healthToday, 0, sizeof(healthToday));
+  healthToday.time = day;
+  healthToday.heapMinKB = 0xFFFF;
+  healthToday.chipMax = -128;
+}
+
+void healthBegin() {
+  if (healthMagic != HEALTH_MAGIC) {             // a power-on: RTC memory holds noise
+    healthFresh(0);
+    healthMagic = HEALTH_MAGIC;
+  }
+  healthToday.starts++;
+}
+
+// A counter that stops at its top instead of wrapping (packed fields bind to no reference - hence by value).
+uint16_t add16(uint16_t v, uint32_t by) { return min<uint32_t>((uint32_t)v + by, 65535); }
 
 // ------------------------------------------------------------------ probes on the bus
 
@@ -688,6 +733,31 @@ float readSensor(size_t i) {
   return NAN;
 }
 
+// Once a minute: RAM, WiFi, chip, the reconnect counters - and at a new day the finished one goes to "/hl".
+void healthTick(time_t now) {
+  HealthRecord& h = healthToday;
+  h.heapMinKB = min<uint32_t>(h.heapMinKB, ESP.getFreeHeap() / 1024);
+  if (WiFi.status() == WL_CONNECTED) {
+    int8_t r = WiFi.RSSI();
+    if (r < 0 && (!h.rssiMin || r < h.rssiMin)) h.rssiMin = r;
+  }
+#if CONFIG_IDF_TARGET_ESP32S3
+  float chip = temperatureRead();
+  if (!isnan(chip) && chip > h.chipMax) h.chipMax = (int8_t)constrain(lroundf(chip), -127, 127);
+#endif
+  uint16_t ups = relay.connections(), fails = updater.failures();
+  h.relayUps = add16(h.relayUps, (uint16_t)(ups - relayUpsSeen));
+  h.updateFails = add16(h.updateFails, (uint16_t)(fails - updateFailsSeen));
+  relayUpsSeen = ups;
+  updateFailsSeen = fails;
+  if (!clockSet(now)) return;
+  uint32_t today = localMidnight(now);
+  if (!h.time) h.time = today;
+  if (h.time == today) return;
+  if (h.time < today) health.add(h);
+  healthFresh(today);
+}
+
 // Every alarm change goes to the journal - the web app pairs starts with ends from it.
 void logAlarmChange(size_t i, int8_t before, float t) {
   int8_t now = state[i].alarm;
@@ -763,6 +833,7 @@ bool registerReading(size_t i, float t) {
 
 void registerBadReading(size_t i) {
   SensorState& s = state[i];
+  healthToday.probeErrors = add16(healthToday.probeErrors, 1);
   techLog.printf("%s: no valid reading\n", slots[i].name);
   if (s.badReadings < 255) s.badReadings++;
   if (s.errors < 65535) s.errors++;
@@ -1108,6 +1179,7 @@ void readAll() {
   Serial.println(line);
 
   time_t now = time(nullptr);
+  healthTick(now);
   if (clockSet(now)) {
     minutes.add(now / 60, rec);
     if (!isnan(heatSinceFull)) heatSinceFull += heatOf(rec);
@@ -1393,6 +1465,7 @@ void setupHistory(bool wipe) {
   daily.begin();
   events.begin();
   refills.begin();
+  health.begin();
   techLog.printf("LittleFS: %u of %u KB used\n", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
   for (auto& row : recent)
     for (auto& v : row) v = NAN;
@@ -1692,12 +1765,44 @@ void handleSeries() {
   w.end();
 }
 
+// The last crash the core dump partition holds: the task, where it stopped and the backtrace - addresses to look up
+// in that build's ELF (release/publish.ps1 keeps them, named by the build's ELF SHA prefix shown here).
+String lastCrash() {
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+  if (esp_core_dump_image_check() != ESP_OK) return "none stored";
+  esp_core_dump_summary_t* s = (esp_core_dump_summary_t*)calloc(1, sizeof(esp_core_dump_summary_t));
+  if (!s) return "no memory";
+  String r = "unreadable";
+  if (esp_core_dump_get_summary(s) == ESP_OK) {
+    char line[96];
+    snprintf(line, sizeof(line), "build %s, task %s, PC 0x%08lx", (const char*)s->app_elf_sha256, s->exc_task, (unsigned long)s->exc_pc);
+    r = line;
+#if CONFIG_IDF_TARGET_ARCH_XTENSA
+    snprintf(line, sizeof(line), ", cause %lu, address 0x%08lx\nbacktrace:", (unsigned long)s->ex_info.exc_cause,
+             (unsigned long)s->ex_info.exc_vaddr);
+    r += line;
+    for (uint32_t i = 0; i < s->exc_bt_info.depth && i < 16; i++) {
+      snprintf(line, sizeof(line), " 0x%08lx", (unsigned long)s->exc_bt_info.bt[i]);
+      r += line;
+    }
+    if (s->exc_bt_info.corrupted) r += " (corrupted)";
+#endif
+  }
+  free(s);
+  return r;
+#else
+  return "not kept on this board";
+#endif
+}
+
 // GET: the diagnostic report, plain text for a support request - the device, its health since the start and the
 // technical log (TechLog.h). No passwords or keys.
 void handleDiag() {
   String r;
   r.reserve(TechLog::SIZE + 800);
-  r += "Furnace monitor v" + String(FW_VERSION) + " on " + ESP.getChipModel() + " (PSRAM " + String(ESP.getPsramSize() / 1048576)
+  char build[10];
+  esp_app_get_elf_sha256(build, sizeof(build));
+  r += "Furnace monitor v" + String(FW_VERSION) + " (build " + build + ") on " + ESP.getChipModel() + " (PSRAM " + String(ESP.getPsramSize() / 1048576)
      + " MB), up " + String(millis() / 60000) + " min, started: " + TechLog::startReason();
   r += "\nheap " + String(ESP.getFreeHeap() / 1024) + " KB, lowest " + String(ESP.getMinFreeHeap() / 1024) + " KB, largest block "
      + String(ESP.getMaxAllocHeap() / 1024) + " KB";
@@ -1709,6 +1814,24 @@ void handleDiag() {
          + probeKind(slots[i].address) + " " + hexAddress(slots[i].address) + "): "
          + (state[i].faulty ? String("FAULTY") : jsonNumber(state[i].lastGood, 2)) + ", read errors " + String(state[i].errors);
   r += "\nupdate: " + updater.status() + ", signatures " + String(updater.signatures());
+  r += "\nsupport code: " + String(relay.supportUntil() > (uint32_t)time(nullptr) ? "active" : "none");
+  r += "\nlast crash: " + lastCrash();
+  r += "\n--- days: WiFi / relay connects, probe errors, failed updates, least RAM KB, longest loop ms, weakest RSSI, hottest chip C, starts";
+  time_t now = time(nullptr);
+  auto day = [&](const HealthRecord& h, const char* label) {
+    char d[12] = "?", line[120];
+    time_t t = h.time;
+    struct tm lt;
+    if (t) {
+      localtime_r(&t, &lt);
+      strftime(d, sizeof(d), "%Y-%m-%d", &lt);
+    }
+    snprintf(line, sizeof(line), "\n%s%s  %u / %u  %u  %u  %u  %u  %d  %d  %u", d, label, h.wifiUps, h.relayUps, h.probeErrors,
+             h.updateFails, h.heapMinKB == 0xFFFF ? 0 : h.heapMinKB, h.loopMaxMs, h.rssiMin, h.chipMax, h.starts);
+    r += line;
+  };
+  health.forEach(clockSet(now) ? localMidnight(now) - 14 * 86400 : 0, [&](const HealthRecord& h) { day(h, ""); });
+  day(healthToday, " (today)");
   r += "\nLittleFS " + String(LittleFS.usedBytes() / 1024) + " of " + String(LittleFS.totalBytes() / 1024) + " KB, minute log "
      + String(minutes.newest() ? (minutes.newest() - minutes.oldest() + 1) / 1440 : 0) + " days\n--- log\n";
   r += techLog.text();
@@ -2029,6 +2152,33 @@ void handleRemote() {
   server.send(200, "application/json; charset=utf-8", j);
 }
 
+// GET: the read-only support code (Relay.h) and until when it works. POST hours = 1..168: a new one (the old one
+// stops working), revoke = 1: none. The support code itself cannot reach this (Relay.h refuses it).
+void handleSupport() {
+  if (server.method() == HTTP_POST) {
+    uint32_t now = time(nullptr);
+    if (server.arg("revoke") == "1") {
+      prefs.remove("supKey");
+      prefs.remove("supUntil");
+      relay.setSupport(nullptr, 0);
+      techLog.println("Support code revoked");
+    } else {
+      long hours = server.arg("hours").toInt();
+      if (hours < 1 || hours > 168) return server.send(400, "text/plain", "hours 1-168");
+      if (!clockSet(now)) return server.send(503, "text/plain", "no clock yet");
+      uint8_t s[32];
+      esp_fill_random(s, 32);
+      uint32_t until = now + hours * 3600;
+      prefs.putBytes("supKey", s, 32);
+      prefs.putUInt("supUntil", until);
+      relay.setSupport(s, until);
+      techLog.printf("Support code made for %ld h\n", hours);
+    }
+  }
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", "{\"until\":" + String(relay.supportUntil()) + ",\"code\":\"" + relay.supportCode() + "\"}");
+}
+
 // GET: the whole device in one file (Backup.h). Home WiFi only - it holds the WiFi password and the pairing keys.
 void handleBackup() {
   if (viaRelay()) {
@@ -2175,6 +2325,7 @@ void handleFirmwareDone() {
 // Called by HomeSpan every time WiFi comes up; the web server is started once and survives reconnects.
 void onNetworkUp(int count) {
   networkUps = count;
+  healthToday.wifiUps = add16(healthToday.wifiUps, 1);
   techLog.printf("Network up (#%d), IP %s - web app http://%s.local:%u\n",
                 count, WiFi.localIP().toString().c_str(), DEVICE_NAME, WEB_PORT);
   configTzTime(TIME_ZONE, "pool.ntp.org", "time.google.com");   // the histories need real timestamps
@@ -2211,6 +2362,8 @@ void onNetworkUp(int count) {
   server.on("/api/backup", HTTP_GET, handleBackup);
   server.on("/api/restore", HTTP_POST, handleRestoreDone, handleRestoreChunk);
   server.on("/api/remote", HTTP_POST, handleRemote);
+  server.on("/api/support", HTTP_GET, handleSupport);
+  server.on("/api/support", HTTP_POST, handleSupport);
   server.on("/api/clear-history", HTTP_POST, handleClearHistory);
   server.on("/api/firmware", HTTP_POST, handleFirmwareDone, handleFirmwareChunk);
   server.onNotFound([] { server.send(404, "text/plain", "not found"); });
@@ -2272,6 +2425,7 @@ void buttonTask(void*) {
 void setup() {
   Serial.begin(115200);
   techLog.begin();
+  healthBegin();
   setenv("TZ", TIME_ZONE, 1);     // local days from the first second - after a soft restart the clock is already set
   tzset();
   snprintf(firmwareRevision, sizeof(firmwareRevision), "%u", (unsigned)FW_VERSION);
@@ -2305,6 +2459,8 @@ void setup() {
   uint8_t secret[32];
   relaySecret(secret, false);
   relay.begin(WEB_PORT, prefs.getString("relayHost", RELAY_HOST), secret);
+  uint8_t support[32];
+  if (prefs.getBytes("supKey", support, 32) == 32) relay.setSupport(support, prefs.getUInt("supUntil", 0));
   updater.onNeedMemory = [](bool on) { relay.pause(on); };
   updater.proxyHost = [] { return relay.host(); };
   offerTold = prefs.getUInt("offerTold", 0);
@@ -2347,6 +2503,7 @@ void setup() {
 }
 
 void loop() {
+  uint32_t loopStart = millis();
   if (restartAtMs && (int32_t)(millis() - restartAtMs) >= 0) ESP.restart();   // after a slot change (handleSlots)
   homeSpan.resetWatchdog();
   homeSpan.poll();
@@ -2382,4 +2539,6 @@ void loop() {
     conversionPending = false;
     readAll();
   }
+  uint32_t took = millis() - loopStart;
+  if (took > healthToday.loopMaxMs) healthToday.loopMaxMs = min(took, (uint32_t)65535);
 }

@@ -729,7 +729,9 @@ const pickStep = span => span > 31 * 86400 ? 86400 : STEPS.find(s => span / s <=
 const colorOf = k => k === OUT ? OUT_COLOR : COLORS[k];
 const nameOf = k => k === OUT ? 'Na zewnątrz' : now.sensors[k].name;
 
+let quietUntil = 0;
 function toast(msg) {
+  if (Date.now() < quietUntil) return;
   const t = $('#toast');
   t.textContent = msg;
   t.classList.add('show');
@@ -767,6 +769,11 @@ function updateText(s) {
 
 // Every request gives up after `ms` - a hung one must not leave old data looking current.
 async function api(path, opt = {}, ms = 12000) {
+  if (readOnly() && opt.method === 'POST') {
+    toast('Kod serwisowy pozwala tylko oglądać');
+    quietUntil = Date.now() + 2500;                         // the caller's own "failed" message stays away
+    throw new Error('read-only');
+  }
   if (REMOTE) {
     const r = await relayRequest(path, opt, ms);
     if (!r.ok) throw new Error(await r.text() || r.status);
@@ -1428,6 +1435,7 @@ function renderHome() {
     notices += REMOTE
       ? `<div class="banner blue">${SVG(I_INFO)}<div><b>Dodaj do ekranu początkowego:</b> Udostępnij → „Do ekranu początkowego”, w ciągu 30 minut otwórz aplikację z ikony – będzie już połączona z piecem.<br><button class="bbtn" id="copypair">Kopiuj kod (gdyby jednak prosiła)</button></div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`
       : `<div class="banner blue">${SVG(I_INFO)}<div><b>Wskazówka:</b> stuknij Udostępnij → „Do ekranu początkowego”, a strona otworzy się jak aplikacja.</div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`;
+  if (readOnly()) notices += `<div class="banner blue">${SVG(I_INFO)}<div><b>Podgląd serwisowy</b> – widzisz wszystko, ale niczego tu nie zmienisz. Dostęp wygasa sam.</div></div>`;
   notices += missedNotice() + seasonNotice();
   notices += warns.map(w => `<div class="banner orange">${SVG(WARNINGS[w].icon)}<div><b>${WARNINGS[w].name}</b> – ${warningText(w)}</div></div>`).join('');
   notices += alarms.map(s => `<div class="banner red">${SVG(I_WARN)}<div><b>${esc(s.name)}</b> – ${describe(s)}</div></div>`).join('');
@@ -2232,22 +2240,26 @@ function warnBlock(w, on, desc, fields) {
 // "?remote" forces this mode on a local test server.
 const REMOTE = location.protocol === 'https:' || new URLSearchParams(location.search).has('remote');
 const PAGES_URL = 'https://klimabartlomiej.github.io/furnace-monitor/';
-const relay = { host: '', secret: '', key: null, room: '', ws: null, opening: null, pending: new Map(), device: null,
+const relay = { host: '', secret: '', fixed: '', key: null, room: '', ws: null, opening: null, pending: new Map(), device: null,
                 nextId: crypto.getRandomValues(new Uint32Array(1))[0] };   // ids of several phones never meet
 const AAD_REQUEST = new Uint8Array([81]), AAD_ANSWER = new Uint8Array([82]);   // 'Q', 'R'
 const b64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
 const hexOf = u => Array.from(u, b => b.toString(16).padStart(2, '0')).join('');
 
-// "<relay host>/<secret>" from the home app, alone or inside its link (...#p=<code>).
+// "<relay host>/<secret>" from the home app, alone or inside its link (...#p=<code>). A support code (read-only,
+// it expires - Relay.h) carries the room too: "<relay host>/<room>.<secret>".
 function parsePairing(text) {
   let t = String(text || '').trim();
   const link = t.match(/#p=([^&\s]+)/);
   if (link) t = decodeURIComponent(link[1]);
-  const m = t.match(/^([a-z0-9.-]+(?::\d+)?)\/([A-Za-z0-9_-]{43})$/i);
-  return m ? { host: m[1].toLowerCase(), secret: m[2] } : null;
+  const m = t.match(/^([a-z0-9.-]+(?::\d+)?)\/(?:([0-9a-f]{32})\.)?([A-Za-z0-9_-]{43})$/i);
+  return m ? { host: m[1].toLowerCase(), fixed: (m[2] || '').toLowerCase(), secret: m[3] } : null;
 }
 
-const pairingCode = () => `${relay.host}/${relay.secret}`;
+const codeOf = p => `${p.host}/${p.fixed ? p.fixed + '.' : ''}${p.secret}`;
+const pairingCode = () => codeOf(relay);
+// Paired with a support code: everything can be seen, nothing changed.
+const readOnly = () => REMOTE && !!relay.fixed;
 
 function loadPairing() {
   const p = parsePairing(recall('furnace-pair'));
@@ -2261,7 +2273,7 @@ function takePairingFromLink() {
   const p = parsePairing(location.hash);
   history.replaceState(null, '', location.pathname);
   if (!p) return;
-  store('furnace-pair', `${p.host}/${p.secret}`);
+  store('furnace-pair', codeOf(p));
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   if (!standalone && /iPhone|iPad/.test(navigator.userAgent)) handOff(p);
 }
@@ -2276,7 +2288,7 @@ async function handOff(p) {
     const id = crypto.getRandomValues(new Uint8Array(16)), k = crypto.getRandomValues(new Uint8Array(16));
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const key = await crypto.subtle.importKey('raw', k, 'AES-GCM', false, ['encrypt']);
-    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(`${p.host}/${p.secret}`)));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(codeOf(p))));
     const sealed = new Uint8Array(12 + ct.length);
     sealed.set(iv);
     sealed.set(ct, 12);
@@ -2306,7 +2318,7 @@ function showPairing() {
   const go = text => {
     const p = parsePairing(text);
     if (!p) return toast('To nie jest kod parowania');
-    store('furnace-pair', `${p.host}/${p.secret}`);
+    store('furnace-pair', codeOf(p));
     location.reload();
   };
   $('#pairgo').onclick = () => go($('#paircode').value);
@@ -2320,7 +2332,7 @@ async function relayKeys() {
   const secret = b64url(relay.secret), label = new TextEncoder();
   const hash = async name => new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array([...label.encode(name), ...secret])));
   relay.key = await crypto.subtle.importKey('raw', await hash('furnace-key'), 'AES-GCM', false, ['encrypt', 'decrypt']);
-  relay.room = hexOf((await hash('furnace-room')).slice(0, 16));
+  relay.room = relay.fixed || hexOf((await hash('furnace-room')).slice(0, 16));
 }
 
 // One WebSocket while the app is in front; closed in the background, opened again by the next request.
@@ -2453,6 +2465,7 @@ async function pushState() {
 }
 
 async function enablePush() {
+  if (readOnly()) return;                                    // see renderPush
   try {
     if ((await Notification.requestPermission()) !== 'granted') return toast('Bez zgody na powiadomienia nic nie przyjdzie');
     const reg = await navigator.serviceWorker.register('sw.js');
@@ -2497,6 +2510,11 @@ function renderPush() {
   if (editing(el)) return;
   if (!REMOTE) {
     el.innerHTML = '<p class="note" style="margin-top:0">Powiadomienia włącza się w aplikacji otwieranej z internetu: Dostęp zdalny → „Otwórz na tym telefonie”, potem tam Ustawienia → Powiadomienia.</p>';
+    return;
+  }
+  // A support code sees, it is not told: its subscription would outlive the code at the relay.
+  if (readOnly()) {
+    el.innerHTML = '<p class="note" style="margin-top:0">Podgląd serwisowy nie dostaje powiadomień.</p>';
     return;
   }
   let html = pushRows();
@@ -2602,6 +2620,32 @@ async function loadRemote(force) {
   try { remoteInfo = await (await api('/api/remote')).json(); } catch (e) { remoteAt = 0; }
 }
 
+// The read-only support code (Relay.h): made for 24 hours or 7 days, shared as a link, revoked any time.
+let supportInfo = null, supportAt = 0;
+async function loadSupport(force) {
+  if (readOnly() || (!force && Date.now() - supportAt < 10e3)) return;
+  supportAt = Date.now();
+  try { supportInfo = await (await api('/api/support')).json(); } catch (e) { supportAt = 0; }
+}
+
+function supportBlock() {
+  if (readOnly() || !supportInfo) return '';
+  const s = supportInfo, active = s.code && s.until > tNow();
+  return '<div class="card-h" style="margin:18px 0 4px">Kod serwisowy – tylko podgląd</div>'
+    + '<p class="note" style="margin-top:0">Dla kogoś, kto ma pomóc przy piecu: widzi wykresy, dziennik i raport, ale niczego nie zmieni i nie zobaczy kopii zapasowej ani kodu parowania. Wygasa sam.</p>'
+    + (active ? '<div class="rows">' + row('Ważny do', esc(when(s.until))) + '</div>'
+      + '<button class="btn primary" id="supshare">Wyślij kod serwisowy</button><button class="btn danger" id="suprevoke">Unieważnij teraz</button>'
+      : '<button class="btn" data-hours="24">Kod na 24 godziny</button><button class="btn" data-hours="168">Kod na 7 dni</button>');
+}
+
+async function postSupport(fields, message) {
+  try {
+    supportInfo = await (await api('/api/support', { method: 'POST', body: new URLSearchParams(fields) })).json();
+    toast(message);
+  } catch (e) { toast(/clock/.test(e.message) ? 'Piec nie zna jeszcze godziny – spróbuj za chwilę' : 'Nie udało się – brak połączenia z piecem?'); }
+  renderRemote();
+}
+
 async function postRemote(fields, message) {
   try {
     remoteInfo = await (await api('/api/remote', { method: 'POST', body: new URLSearchParams(fields) })).json();
@@ -2618,8 +2662,9 @@ function renderRemote() {
     const d = relay.device;
     el.innerHTML = '<div class="rows">' + row('Ten telefon', green('sparowany'), esc(relay.host))
       + (d ? row('Piec', d.online ? green('online') : '<span style="color:var(--red)">offline</span>', d.since ? `${d.online ? 'od' : 'ostatnio'} ${when(d.since / 1000)}` : '') : '') + '</div>'
-      + '<button class="btn" id="rshare">Udostępnij dostęp innej osobie</button>'
-      + '<button class="btn danger" id="runpair">Odłącz ten telefon…</button>';
+      + (readOnly() ? '<div class="rows">' + row('Dostęp', 'tylko podgląd', 'kod serwisowy') + '</div>'
+        : '<button class="btn" id="rshare">Udostępnij dostęp innej osobie</button>')
+      + '<button class="btn danger" id="runpair">Odłącz ten telefon…</button>' + supportBlock();
     return;
   }
   if (!r) { el.innerHTML = '<p class="note" style="margin-top:0">Ładowanie…</p>'; return; }
@@ -2634,14 +2679,23 @@ function renderRemote() {
   }
   html += `<input class="field" id="rhost" placeholder="Adres przekaźnika, np. furnace-relay.nazwa.workers.dev" value="${esc(r.host)}" autocomplete="off" autocapitalize="off" spellcheck="false">`
     + `<button class="btn${r.host ? '' : ' primary'}" id="rsave">${r.host ? 'Zmień adres przekaźnika' : 'Włącz dostęp zdalny'}</button>`;
-  if (r.host) html += '<button class="btn danger" id="rrenew">Nowy klucz – odłącz wszystkie telefony…</button>';
+  if (r.host) html += '<button class="btn danger" id="rrenew">Nowy klucz – odłącz wszystkie telefony…</button>' + supportBlock();
   el.innerHTML = html;
 }
 
 async function onRemoteClick(e) {
   const b = e.target.closest('button');
   if (!b) return;
-  if (b.id === 'rsave') {
+  if (b.dataset.hours) {
+    postSupport({ hours: b.dataset.hours }, 'Kod serwisowy gotowy');
+  } else if (b.id === 'supshare') {
+    const url = `${PAGES_URL}#p=${encodeURIComponent(supportInfo.code)}`;
+    if (navigator.share) navigator.share({ title: 'Piec – podgląd serwisowy', url }).catch(() => {});
+    else copyText(url);
+  } else if (b.id === 'suprevoke') {
+    if (await confirmDialog('Unieważnić kod serwisowy?', 'Osoba z tym kodem od razu straci podgląd pieca.', 'Unieważnij'))
+      postSupport({ revoke: 1 }, 'Kod serwisowy unieważniony');
+  } else if (b.id === 'rsave') {
     const host = $('#rhost').value.trim().toLowerCase().replace(/^\w+:\/\//, '').replace(/\/.*$/, '');
     if (!host && !(await confirmDialog('Wyłączyć dostęp zdalny?', 'Telefony poza domem stracą połączenie z piecem.', 'Wyłącz'))) return;
     await postRemote({ host }, host ? 'Zapisano – łączę z przekaźnikiem…' : 'Dostęp zdalny wyłączony');
@@ -2845,7 +2899,7 @@ function renderSettings() {
   renderMenu();
   renderPush();
   renderRemote();
-  loadRemote().then(() => { renderRemote(); renderMenu(); });
+  Promise.all([loadRemote(), loadSupport()]).then(() => { renderRemote(); renderMenu(); });
   $('#seasonset').innerHTML = `<div class="warn-block"><div class="warn-head"><span class="badge ${st.heating ? 'c-orange' : 'c-blue'}">${SVG(st.heating ? I_FLAME : I_SUN)}</span>`
     + `${st.heating ? 'Sezon grzewczy' : 'Tryb lato'}<input class="sw" type="checkbox" data-k="heating" data-msg="Sezon grzewczy" ${st.heating ? 'checked' : ''}></div>`
     + `<div class="warn-desc">${st.heating ? 'Latem wyłącz – alarmy „za zimno” pieca i powrotu oraz ostrzeżenia o paleniu ucichną. Bojler i mróz działają dalej.'

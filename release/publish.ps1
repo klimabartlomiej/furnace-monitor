@@ -78,6 +78,13 @@ if ($size -gt $appSlot) { throw "firmware is $size bytes, the app slot holds $ap
 # The partition table can only change over USB - warn while there is still room to slim down.
 if ($size -gt $appSlot * 0.97) { Write-Warning ("firmware uses {0:P1} of the app slot - {1:N0} bytes left" -f ($size / $appSlot), ($appSlot - $size)) }
 
+# The ELF goes next to the release keys, named by the build's ELF SHA prefix - the one /api/diag shows with a crash:
+#   xtensa-esp32s3-elf-addr2line -pfiaC -e <that file> <backtrace addresses>
+$elfDir = Join-Path $ReleaseKeyDir 'elf'
+New-Item -ItemType Directory -Force $elfDir | Out-Null
+$elfSha = (Get-FileHash "$build\PiecTemp.ino.elf" -Algorithm SHA256).Hash.ToLower().Substring(0, 9)
+Copy-Item "$build\PiecTemp.ino.elf" (Join-Path $elfDir "v$version-$Target-$elfSha.elf")
+
 Get-ChildItem $dir -Filter 'firmware-v*.bin' | Remove-Item
 $name = "firmware-v$version.bin"
 Copy-Item $bin "$dir\$name"
