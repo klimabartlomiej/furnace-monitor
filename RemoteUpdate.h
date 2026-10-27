@@ -93,6 +93,17 @@ public:
     if (crashes) techLog.printf("Update: crash restart #%u - checking for a fix soon\n", crashes);
   }
 
+  // A restart on purpose (a setting that needs one, a restore): a version on probation that got online and answered
+  // the request has shown it works - confirmed first, or the bootloader takes the restart for a failure, goes back to
+  // the old version and this one is never offered again (seen 2026-10-27: slots saved 40 s after an update).
+  void confirmBeforeRestart() {
+    if (!probation || !networkUpMs) return;
+    esp_ota_mark_app_valid_cancel_rollback();
+    probation = false;
+    store.remove("trying");
+    techLog.printf("Update: v%u confirmed before a planned restart\n", (unsigned)version);
+  }
+
   // Two crash restarts in a row: the sketch skips its heavy start-up work until a fix arrives or it settles.
   bool crashLoop() const { return crashes >= 2; }
 

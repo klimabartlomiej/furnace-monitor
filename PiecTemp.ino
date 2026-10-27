@@ -73,7 +73,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 26;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 27;                   // bump for every release (release/publish.ps1)
 // Each board has its own release channel - a firmware for the other chip must never be offered.
 #if CONFIG_IDF_TARGET_ESP32S3
 const char* UPDATE_MANIFEST_URL =
@@ -410,6 +410,20 @@ bool isThermocouple(const DeviceAddress a) {
 // What kind of probe an address is, for the web app.
 const char* probeKind(const DeviceAddress a) {
   return isUnset(a) ? "" : a[0] == KIND_MAX6675 ? "Termopara K" : "DS18B20";
+}
+
+// Well-formed UTF-8: /api/now and Home's accessory list carry the names as they are, and a broken byte (a shell in
+// another code page) makes the whole JSON unreadable.
+bool validUtf8(const String& s) {
+  for (size_t i = 0, n = s.length(); i < n;) {
+    uint8_t c = s[i];
+    size_t more = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 && c >= 0xC2 ? 1 : (c & 0xF0) == 0xE0 ? 2 : (c & 0xF8) == 0xF0 && c <= 0xF4 ? 3 : 9;
+    if (more > 3 || n - i <= more) return false;           // not a lead byte, or the sequence is cut short
+    for (size_t k = 1; k <= more; k++)
+      if (((uint8_t)s[i + k] & 0xC0) != 0x80) return false;
+    i += more + 1;
+  }
+  return true;
 }
 
 // An address a slot may take: empty, a 1-Wire temperature probe (valid CRC) or our thermocouple.
@@ -2135,8 +2149,9 @@ void handleSlots() {
     name.trim();
     if (name.isEmpty()) name = "Czujnik " + String(i + 1);
     // A quote or a backslash would break /api/now and Home's accessory list (HomeSpan writes names unescaped).
-    for (char ch : name)
-      if ((uint8_t)ch < 0x20 || ch == '"' || ch == 0x5C) return server.send(400, "text/plain", "bad name in slot " + String(i + 1));
+    bool bad = !validUtf8(name);
+    for (char ch : name) bad |= (uint8_t)ch < 0x20 || ch == '"' || ch == 0x5C;
+    if (bad) return server.send(400, "text/plain", "bad name in slot " + String(i + 1));
     if (name.length() >= sizeof(c.name)) return server.send(400, "text/plain", "name too long in slot " + String(i + 1));
     strlcpy(c.name, name.c_str(), sizeof(c.name));
     for (uint8_t r = 0; r < ROLE_COUNT; r++)
@@ -2282,6 +2297,7 @@ void handleRestoreDone() {
   }
   techLog.println("Backup restored - restarting");
   delay(500);
+  updater.confirmBeforeRestart();
   ESP.restart();
 }
 
@@ -2301,6 +2317,7 @@ void handleClearHistory() {
   delay(300);
   minutes.clear();
   LittleFS.format();
+  updater.confirmBeforeRestart();
   ESP.restart();
 }
 
@@ -2590,7 +2607,10 @@ void setup() {
 
 void loop() {
   uint32_t loopStart = millis();
-  if (restartAtMs && (int32_t)(millis() - restartAtMs) >= 0) ESP.restart();   // after a slot change (handleSlots)
+  if (restartAtMs && (int32_t)(millis() - restartAtMs) >= 0) {   // after a slot change (handleSlots)
+    updater.confirmBeforeRestart();
+    ESP.restart();
+  }
   homeSpan.resetWatchdog();
   homeSpan.poll();
   if (webStarted) server.handleClient();
