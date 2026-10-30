@@ -69,11 +69,12 @@
 #include "HistoryLog.h"
 #include "RemoteUpdate.h"
 #include "Relay.h"
+#include "GecoBus.h"
 #include "WebApp.h"
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 27;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 28;                   // bump for every release (release/publish.ps1)
 // Each board has its own release channel - a firmware for the other chip must never be offered.
 #if CONFIG_IDF_TARGET_ESP32S3
 const char* UPDATE_MANIFEST_URL =
@@ -100,6 +101,7 @@ constexpr uint32_t DAILY_CAPACITY     = 5 * 366;         // daily summaries kept
 constexpr uint32_t EVENT_CAPACITY     = 1024;            // event journal entries (at most; at least half)
 constexpr uint32_t REFILL_CAPACITY    = 512;             // coal refills kept (at most; at least half)
 constexpr uint32_t HEALTH_CAPACITY    = 120;             // days of health counters (at most; at least half)
+constexpr uint32_t GECO_CAPACITY      = 60000;           // controller work changes kept (about a week of burning)
 constexpr uint8_t  COAL_INTERVALS     = 10;              // latest refill-to-refill intervals the kg factor averages
 constexpr float    COAL_MIN_HEAT      = 600;             // degree-minutes an interval needs to count (10 degrees, 1 h)
 constexpr float    HOT_WATER_HYSTERESIS = 3;             // degrees below "ready" before the hot-water contact closes
@@ -125,12 +127,15 @@ constexpr uint8_t  ONE_WIRE_PIN       = 4;               // GPIO4 (next to 3V3 o
 constexpr int8_t   TC_CS_PIN          = 10;              // MAX6675 thermocouple board (the flue): CS, SCK and SO -
 constexpr uint8_t  TC_SCK_PIN         = 12;              // the S3's default SPI pins, driven by hand (16 bits a minute)
 constexpr uint8_t  TC_SO_PIN          = 13;
+constexpr int8_t   GECO_RX_PIN        = 18;              // TXD of the RS485 module on the Geco controller's panel bus -
+                                                         // receive only (GecoBus.h)
 #else
 constexpr uint8_t  STATUS_LED_PIN     = 2;               // blue on-board LED on most ESP32 dev boards
 constexpr uint8_t  ONE_WIRE_PIN       = 22;              // D22 - GPIO of the DQ (data) wire, 4.7k pull-up to 3.3V
 constexpr int8_t   TC_CS_PIN          = -1;              // no thermocouple on the classic board (no flash left)
 constexpr uint8_t  TC_SCK_PIN         = 0;
 constexpr uint8_t  TC_SO_PIN          = 0;
+constexpr int8_t   GECO_RX_PIN        = -1;              // no controller bus on the classic board
 #endif
 constexpr uint32_t READ_INTERVAL_MS   = 60 * 1000;       // one reading per minute (on the full minute once NTP is in)
 constexpr uint32_t CONVERSION_MS      = 800;             // 12-bit conversion takes 750 ms
@@ -152,6 +157,7 @@ constexpr uint8_t  FAULT_AFTER        = 3;               // bad readings in a ro
 enum Role : uint8_t { ROLE_OTHER, ROLE_FURNACE, ROLE_RETURN, ROLE_HOPPER, ROLE_BOILER, ROLE_FLUE, ROLE_COUNT };
 const char* ROLE_KEYS[ROLE_COUNT] = { "other", "furnace", "return", "hopper", "boiler", "flue" };
 constexpr uint8_t KIND_MAX6675 = 0xF6;   // address {0xF6, CS pin, 0...}: a K thermocouple on a MAX6675 board
+constexpr uint8_t KIND_GECO    = 0xF7;   // address {0xF7, 1..3, 0...}: a temperature the Geco controller reports
 
 // Names are what the Home app and the web app show; HomeKit accepts only letters, digits, spaces and apostrophes.
 struct __attribute__((packed)) SlotConfig {
@@ -185,9 +191,11 @@ SlotConfig slots[SENSOR_COUNT];
 int8_t FURNACE = -1, RETURN_WATER = -1, COAL_HOPPER = -1, BOILER = -1, FLUE = -1;
 
 // Warnings - each one is a contact sensor in Apple Home and a banner in the web app; tuned in the web app.
-enum WarningId : uint8_t { WARN_GOING_OUT, WARN_FREEZE, WARN_BURNBACK, WARN_LOW_COAL, WARN_STALLED, WARN_ASH, WARN_COUNT };
+enum WarningId : uint8_t { WARN_GOING_OUT, WARN_FREEZE, WARN_BURNBACK, WARN_LOW_COAL, WARN_STALLED, WARN_ASH, WARN_STANDBY,
+                          WARN_COUNT };
 const char* WARNING_NAMES[WARN_COUNT] = { "Piec wygasa", "Ryzyko zamarznięcia", "Cofanie żaru", "Mało węgla",
-                                          "Piec stoi po zaniku prądu", "Opróżnij popielnik" };
+                                          "Piec stoi po zaniku prądu", "Opróżnij popielnik",
+                                          "Sterownik nie w automacie" };
 
 struct Settings {
   bool     goOutOn      = true;   // furnace dying out: falling and closer than goOutMargin degrees to its min limit
@@ -205,6 +213,7 @@ struct Settings {
   bool     heating      = true;   // heating season; off = summer: no "too cold" on the furnace and the return, no
                                   // burning warnings (comes back by itself after SEASON_AUTO_MIN of burning)
   bool     stalledOn    = true;   // after a power cut the furnace keeps cooling - its controller did not restart
+  bool     standbyOn    = true;   // the boiler controller (Geco bus) in standby instead of automat - it needs the A key
   bool     ashOn        = true;   // ash pan reminder: after ashLimit kg burned or ashDays since emptied
   float    ashLimit     = 150;
   float    ashDays      = 7;
@@ -287,6 +296,7 @@ WebServer               server(WEB_PORT);
 Preferences             prefs;
 RemoteUpdate            updater(UPDATE_MANIFEST_URL, FW_VERSION);
 Relay                   relay;
+GecoBus                 geco;                               // the boiler controller's panel bus, read only
 MinuteLog<SENSOR_COUNT> minutes("minutes");                 // partition label in partitions.csv (31 days)
 AliveLog                alive("alive");
 SegmentLog<DayRecord>   daily("/day", DAILY_CAPACITY / 2);
@@ -361,6 +371,7 @@ constexpr uint32_t HEALTH_MAGIC = 0x484C5431;   // "HLT1" - change with HealthRe
 RTC_NOINIT_ATTR HealthRecord healthToday;
 RTC_NOINIT_ATTR uint32_t     healthMagic;
 SegmentLog<HealthRecord> health("/hl", HEALTH_CAPACITY / 2);
+SegmentLog<GecoBus::Event> gecoLog("/gw", GECO_CAPACITY / 2);   // the controller's work: every change (GecoBus.h)
 uint16_t relayUpsSeen = 0, updateFailsSeen = 0;
 
 void healthFresh(uint32_t day) {
@@ -407,9 +418,14 @@ bool isThermocouple(const DeviceAddress a) {
   return TC_CS_PIN >= 0 && a[0] == KIND_MAX6675 && a[1] == TC_CS_PIN;
 }
 
+// A temperature the Geco controller reports on its panel bus: 1 boiler, 2 feeder, 3 hot water.
+bool isGeco(const DeviceAddress a) {
+  return GECO_RX_PIN >= 0 && a[0] == KIND_GECO && a[1] >= 1 && a[1] <= 3;
+}
+
 // What kind of probe an address is, for the web app.
 const char* probeKind(const DeviceAddress a) {
-  return isUnset(a) ? "" : a[0] == KIND_MAX6675 ? "Termopara K" : "DS18B20";
+  return isUnset(a) ? "" : a[0] == KIND_MAX6675 ? "Termopara K" : a[0] == KIND_GECO ? "Sterownik Geco" : "DS18B20";
 }
 
 // Well-formed UTF-8: /api/now and Home's accessory list carry the names as they are, and a broken byte (a shell in
@@ -436,7 +452,7 @@ bool parseAddress(const String& hex, DeviceAddress out) {
     out[i] = strtoul(hex.substring(2 * i, 2 * i + 2).c_str(), &end, 16);
     if (*end) return false;
   }
-  return isThermocouple(out) || (bus.validAddress(out) && bus.validFamily(out));
+  return isThermocouple(out) || isGeco(out) || (bus.validAddress(out) && bus.validFamily(out));
 }
 
 // One 16-bit frame from the MAX6675, SCK idling low and SO read before each falling edge: D15 is always 0, D14..D3
@@ -557,6 +573,13 @@ void loadSlots() {
   }
   DeviceAddress tc;
   if (findThermocouple(tc) && slotOf(tc) < 0) added |= placeProbe(tc, "Spaliny", FLUE < 0 ? ROLE_FLUE : ROLE_OTHER);
+  // The controller's own temperatures, once its bus is heard (it speaks every ~57 ms): three more probes.
+  static const char* GECO_NAMES[] = {"", "Sterownik kocioł", "Sterownik podajnik", "Sterownik CWU"};
+  for (uint32_t waited = 0; GECO_RX_PIN >= 0 && !geco.fresh() && waited < 600; waited += 50) delay(50);
+  for (uint8_t ch = 1; ch <= 3 && geco.fresh(); ch++) {
+    DeviceAddress g = {KIND_GECO, ch};
+    if (slotOf(g) < 0) added |= placeProbe(g, GECO_NAMES[ch], ROLE_OTHER);
+  }
   if (added) prefs.putBytes("slots", slots, sizeof(slots));
   mapRoles();
 }
@@ -582,6 +605,10 @@ String busReport() {
     if (bus.validAddress(a)) line(a, bus.getTempC(a));
   DeviceAddress tc;
   if (findThermocouple(tc)) line(tc, readThermocouple());
+  for (uint8_t ch = 1; ch <= 3 && geco.fresh(); ch++) {
+    DeviceAddress g = {KIND_GECO, ch};
+    line(g, geco.temp(ch));
+  }
   if (count == 0) out = "No probe found - check the wiring and the pull-up resistor\n";
   return out;
 }
@@ -727,7 +754,7 @@ void createAccessories() {
         new Characteristic::Identify();
         new Characteristic::Name(slots[i].name);
         new Characteristic::Manufacturer("HomeSpan");
-        new Characteristic::Model(tc ? "MAX6675 K thermocouple" : "DS18B20 probe");
+        new Characteristic::Model(tc ? "MAX6675 K thermocouple" : isGeco(slots[i].address) ? "Geco controller" : "DS18B20 probe");
         new Characteristic::SerialNumber(s.serial);
         new Characteristic::FirmwareRevision(firmwareRevision);
       new Service::TemperatureSensor();
@@ -764,6 +791,7 @@ void reportSensor(size_t i) {
 // A thermocouple is read once (its board converts every ~220 ms on its own).
 float readSensor(size_t i) {
   if (isThermocouple(slots[i].address)) return readThermocouple();
+  if (isGeco(slots[i].address)) return geco.temp(slots[i].address[1]);   // NAN while the controller is not heard
   for (uint8_t attempt = 0; attempt < 3; attempt++) {
     float t = bus.getTempC(slots[i].address);
     if (t == DEVICE_DISCONNECTED_C || t < -55 || t > 125) continue;
@@ -997,8 +1025,15 @@ void evaluateWarnings(bool tick = false) {
   bool stalled;
   if (warnings[WARN_STALLED].active) stalled = !(slope >= 2) && !(f.lastGood >= stallFrom - 1);
   else stalled = stallWatch && millis() < STALL_WATCH_MS && f.lastGood <= stallFrom - STALL_DROP && slope <= STALL_SLOPE;
+  if (geco.fresh()) stalled = false;          // the controller's own word (WARN_STANDBY) replaces the guess
   setWarning(WARN_STALLED, stalled, !isnan(slope) || !stallWatch, 3, 10, heating && settings.stalledOn && FURNACE >= 0, f.lastGood,
              tick);
+
+  // The controller not in automat (Geco bus, S3 only): after every power cut it comes back in standby and the fire
+  // goes out unless someone presses A. Its own word, held two minutes (the keys in standby are someone at work);
+  // unknown while the bus is quiet.
+  setWarning(WARN_STANDBY, geco.state().mode == GecoBus::STANDBY, geco.fresh(), 2, 1, heating && settings.standbyOn,
+             f.lastGood, tick);
 
   // Ash pan: due after ashLimit kg of coal (once the coal use is learnt) or ashDays since it was emptied.
   // Unknown without a clock (right after a power cut), so it does not close and reopen.
@@ -1301,6 +1336,32 @@ void summarizeDay(uint32_t dayStart, uint32_t dayEnd) {
 }
 
 // Runs every loop once NTP has set the clock: pending events, Eve entries, daily summaries.
+// The controller's work log ("/gw"): every change of mode, fan, feeder, piston and pumps, to a tenth of a second,
+// from GecoBus's task to flash in batches - a power cut loses at most the last minute. Changes from before the clock
+// was set have no time; the state of the moment the clock is set is logged instead.
+std::vector<GecoBus::Event> gecoPending;           // changes not on flash yet; /api/geco serves them too
+
+void logGecoChanges() {
+  std::vector<GecoBus::Event>& batch = gecoPending;
+  static uint32_t flushedMs = 0;
+  static bool clockLogged = false;
+  GecoBus::Event e;
+  while (geco.nextEvent(e))
+    if (clockSet(e.time)) batch.push_back(e);
+  time_t now = time(nullptr);
+  if (!clockLogged && clockSet(now) && geco.lastFrame()) {
+    e = geco.state();
+    e.time = now;
+    e.tenths = 0;
+    batch.push_back(e);
+    clockLogged = true;
+  }
+  if (batch.empty() || (batch.size() < 64 && millis() - flushedMs < 60000)) return;
+  gecoLog.addMany(batch.data(), batch.size());
+  batch.clear();
+  flushedMs = millis();
+}
+
 void logHistory() {
   time_t now = time(nullptr);
   if (!clockSet(now)) return;
@@ -1522,6 +1583,7 @@ void setupHistory(bool wipe) {
   events.begin();
   refills.begin();
   health.begin();
+  gecoLog.begin();
   techLog.printf("LittleFS: %u of %u KB used\n", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
   for (auto& row : recent)
     for (auto& v : row) v = NAN;
@@ -1558,6 +1620,7 @@ void loadSettings() {
   settings.lowCoalHours = prefs.getFloat("lcHrs", d.lowCoalHours);
   settings.heating      = prefs.getBool("heating", d.heating);
   settings.stalledOn    = prefs.getBool("stallOn", d.stalledOn);
+  settings.standbyOn    = prefs.getBool("stbyOn", d.standbyOn);
   settings.ashOn        = prefs.getBool("ashOn", d.ashOn);
   settings.ashLimit     = prefs.getFloat("ashKg", d.ashLimit);
   settings.ashDays      = prefs.getFloat("ashDays", d.ashDays);
@@ -1582,6 +1645,7 @@ void saveSettings() {
   prefs.putFloat("lcHrs", settings.lowCoalHours);
   prefs.putBool("heating", settings.heating);
   prefs.putBool("stallOn", settings.stalledOn);
+  prefs.putBool("stbyOn", settings.standbyOn);
   prefs.putBool("ashOn", settings.ashOn);
   prefs.putFloat("ashKg", settings.ashLimit);
   prefs.putFloat("ashDays", settings.ashDays);
@@ -1690,7 +1754,21 @@ void handleNow() {
     j += ",\"offset\":";  j += jsonNumber(settings.offset[i], 1);
     j += '}';
   }
-  j += "],\"warnings\":[";
+  j += ']';
+  if (GECO_RX_PIN >= 0) {                     // the controller as its panel bus tells it (GecoBus.h)
+    GecoBus::Event g = geco.state();
+    j += ",\"geco\":{\"age\":"; j += geco.lastFrame() ? String((millis() - geco.lastFrame()) / 1000) : String(-1);
+    j += ",\"mode\":";  j += (int)g.mode;
+    j += ",\"out\":";   j += (int)g.outputs;
+    j += ",\"flags\":"; j += (int)g.flags;
+    j += ",\"since\":"; j += g.time;
+    j += ",\"t\":[";
+    for (uint8_t ch = 1; ch <= 3; ch++) j += (ch > 1 ? "," : "") + jsonNumber(geco.temp(ch), 1);
+    j += "],\"good\":"; j += geco.goodFrames();
+    j += ",\"bad\":";   j += geco.badFrames();
+    j += '}';
+  }
+  j += ",\"warnings\":[";
   for (uint8_t w = 0; w < WARN_COUNT; w++) {
     if (w) j += ',';
     j += warnings[w].active ? "true" : "false";
@@ -1727,6 +1805,7 @@ void handleNow() {
   j += ",\"lowCoalHours\":"; j += jsonNumber(settings.lowCoalHours, 0);
   j += ",\"heating\":";      j += settings.heating ? "true" : "false";
   j += ",\"stalledOn\":";    j += settings.stalledOn ? "true" : "false";
+  j += ",\"standbyOn\":";    j += settings.standbyOn ? "true" : "false";
   j += ",\"ashOn\":";        j += settings.ashOn ? "true" : "false";
   j += ",\"ashLimit\":";     j += jsonNumber(settings.ashLimit, 0);
   j += ",\"ashDays\":";      j += jsonNumber(settings.ashDays, 0);
@@ -1878,6 +1957,12 @@ void handleDiag() {
          + (state[i].faulty ? String("FAULTY") : jsonNumber(state[i].lastGood, 2)) + ", read errors " + String(state[i].errors);
   r += "\nupdate: " + updater.status() + ", signatures " + String(updater.signatures());
   r += "\nsupport code: " + String(relay.supportUntil() > (uint32_t)time(nullptr) ? "active" : "none");
+  if (GECO_RX_PIN >= 0) {
+    GecoBus::Event g = geco.state();
+    r += "\nGeco bus: " + (geco.lastFrame() ? String((millis() - geco.lastFrame()) / 1000) + " s since a frame" : String("never heard"))
+       + ", frames " + String(geco.goodFrames()) + " ok / " + String(geco.badFrames()) + " bad, mode 0x" + String(g.mode, HEX)
+       + ", outputs 0x" + String(g.outputs, HEX) + ", P3 0x" + String(g.flags, HEX);
+  }
   r += "\nlast crash: " + lastCrash();
   r += "\n--- days: WiFi / relay connects, probe errors, failed updates, least RAM KB, longest loop ms, weakest RSSI, hottest chip C, starts";
   time_t now = time(nullptr);
@@ -2000,6 +2085,7 @@ void handleSettings() {
   flag("lowCoalOn", settings.lowCoalOn);
   number("lowCoalHours", settings.lowCoalHours, 1, 96);
   flag("stalledOn", settings.stalledOn);
+  flag("standbyOn", settings.standbyOn);
   flag("ashOn", settings.ashOn);
   number("ashLimit", settings.ashLimit, 5, 2000);
   number("ashDays", settings.ashDays, 1, 60);
@@ -2109,6 +2195,22 @@ void emptyAsh(uint32_t now) {
   evaluateWarnings();
 }
 
+// GET from, to (Unix time): the controller's work log - binary, 8 bytes a change (GecoBus::Event), oldest first. The
+// first record is the state the range began in (all zero when the log holds nothing older).
+void handleGeco() {
+  uint32_t to = argOr("to", time(nullptr)) + 1, from = argOr("from", to - 86400);
+  ChunkWriter w;
+  w.begin("application/octet-stream");
+  GecoBus::Event before = gecoLog.forRange(from, from, [](const GecoBus::Event&) {});
+  for (const GecoBus::Event& e : gecoPending)
+    if (e.time < from) before = e;
+  w.put(&before, sizeof(before));
+  gecoLog.forRange(from, to, [&](const GecoBus::Event& e) { w.put(&e, sizeof(e)); });
+  for (const GecoBus::Event& e : gecoPending)       // newer than anything on flash
+    if (e.time >= from && e.time < to) w.put(&e, sizeof(e));
+  w.end();
+}
+
 void handleBus() {
   server.send(200, "text/plain", busReport());
 }
@@ -2132,6 +2234,10 @@ void handleProbes() {
   }
   DeviceAddress tc;
   if (findThermocouple(tc)) add(tc, readThermocouple());
+  for (uint8_t ch = 1; ch <= 3 && geco.fresh(); ch++) {
+    DeviceAddress g = {KIND_GECO, ch};
+    add(g, geco.temp(ch));
+  }
   if (!conversionPending) bus.requestTemperatures();        // the minute's reading has one of its own under way
   server.send(200, "application/json", j + "]");
 }
@@ -2421,6 +2527,7 @@ void onNetworkUp(int count) {
   server.on("/api/settings", HTTP_POST, handleSettings);
   server.on("/api/bus", HTTP_GET, handleBus);
   server.on("/api/probes", HTTP_GET, handleProbes);
+  server.on("/api/geco", HTTP_GET, handleGeco);
   server.on("/api/slots", HTTP_POST, handleSlots);
   server.on("/api/refills", HTTP_GET, handleRefills);
   server.on("/api/refill", HTTP_POST, handleRefill);
@@ -2535,6 +2642,7 @@ void setup() {
 
   bus.begin();
   bus.setWaitForConversion(false);
+  geco.begin(GECO_RX_PIN);                   // listens from now on; loadSlots gives it a moment to be heard
   prefs.begin("furnace", false);
   loadSlots();
   Serial.print(busReport());
@@ -2619,6 +2727,7 @@ void loop() {
     serialClosed = true;
   }
   logHistory();
+  logGecoChanges();
   updater.loop();
   if (updater.takeJustConfirmed()) logEvent(EV_UPDATED, 0, FW_VERSION);
   // A newer version found by the hourly check: once per version (also across restarts), a notification to open

@@ -79,9 +79,47 @@ never been on this bus. The safe way is to listen to a real GA01HA once while ch
 answer the same way. Blind writes are out - an unknown frame could change something else in the controller. The
 panel can set only u0 and u4 anyway; service parameters (fan, feeder, F18) stay on the controller's keypad.
 
+## In the firmware (v28, S3 only)
+
+`GecoBus.h` listens through a TTL-RS485 module (automatic direction) on the same terminals:
+
+| Module | S3 / controller |
+|---|---|
+| VCC | 3V3 |
+| GND | G |
+| TXD (what the module receives) | GPIO 18 |
+| RXD (what the module would send) | 3V3 - held idle, so it never drives the line |
+| A+ / B- | terminal 22 / 21 |
+| 120 ohm terminator (R0 jumper) | open |
+
+The UART is opened without a TX pin, so the ESP cannot send. What it hears:
+
+- `/api/now` -> `geco`: seconds since the last good frame (`age`, -1 = never heard), `mode`, `out`, `flags` (P3), `since`
+  (when that state began), `t` (the controller's three temperatures), good/bad frame counts.
+- `/api/geco?from&to`: the work log ("/gw" on flash, ~60 000 changes) - 8 bytes a change (time u32, tenths, mode,
+  outputs, P3), the first record being the state the range began in; changes not on flash yet are served too.
+- The controller's temperatures as three more probes (address `F7 0n ...`, n = 1 boiler, 2 feeder, 3 hot water), added
+  by themselves the first time the bus is heard. The app pairs each with our probe on the same water (boiler ->
+  furnace probe, feeder -> hopper, hot water -> boiler): its value on that probe's card, a dashed second line on its
+  chart (off by default, the "Sterownik" chip; drawn anyway while our probe is silent), a banner when the two differ
+  by more than 5 degrees for 15 minutes, and a one-tap auto-correction of our offsets (Ustawienia -> Korekta wskazan:
+  the middle 60 % of two hours of minute differences, shown before it is saved).
+- Warning 6 "Sterownik nie w automacie" (`WARN_STANDBY`, setting `standbyOn`): mode standby for 2 minutes while the
+  bus is heard, cleared after 1 minute in automat; pushed like every warning. While the bus is heard it replaces the
+  temperature guess of "Piec stoi po zaniku pradu".
+- The app: an animated boiler on the home screen (with the hopper's coal level) and work lanes under the charts.
+
 ## Next
 
-- The S3 listens through a TTL-RS485 module on the same terminals, with the module's transmit input left
-  unconnected (it cannot send), and shows the controller's state and temperatures in the app; a notification when
-  the controller is not in automat (after a power cut).
-- Map the DHW pump bit and the short frames from what the S3 logs.
+Proposals agreed on 2026-10-29, after the first S3 data:
+
+- Map the DHW pump bit and the short frames from what the S3 logs; then draw the hot water tank's own pump and its
+  pipes in the boiler picture.
+- Coal from the feeder's piston strokes: every stroke (P3 away -> home) pushes about the same portion. Learn kg per
+  stroke from refills to the top - coal used and the hopper level far closer than the heat model.
+- "Coal hung or ran out": burning, the feeder pushing, and the boiler not warming for 30-45 minutes - coal bridged in
+  the hopper or the hopper empty.
+- A day's work: hours burning and holding, przedmuchy, piston strokes - on "Dzisiaj" and in the months.
+- The controller's switch points on the furnace chart: u0 (to podtrzymanie) and u0 - hysteresis (back to burning),
+  read from T1 at the mode changes in the log.
+- Bus silence: no frame for over 2 minutes while the ESP runs - the controller is off or a wire came loose.

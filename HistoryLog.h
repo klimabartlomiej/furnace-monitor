@@ -253,6 +253,66 @@ public:
     last[cur] = r.time;
   }
 
+  // Several records in time order, one file open per segment they reach (a log that writes in batches).
+  void addMany(const T* r, size_t n) {
+    while (n) {
+      if (count[cur] >= per) {
+        cur ^= 1;
+        LittleFS.remove(path(cur));
+        count[cur] = last[cur] = 0;
+      }
+      size_t k = min(n, (size_t)(per - count[cur]));
+      File f = LittleFS.open(path(cur), "a");
+      if (!f) return;
+      size_t written = f.write((const uint8_t*)r, k * sizeof(T));
+      f.close();
+      if (written != k * sizeof(T)) {                     // no room: whole records only
+        rewrite(cur, count[cur] + written / sizeof(T));
+        if (count[cur]) last[cur] = at(cur, count[cur] - 1).time;
+        return;
+      }
+      count[cur] += k;
+      last[cur] = r[k - 1].time;
+      r += k;
+      n -= k;
+    }
+  }
+
+  // For a log written in time order: f(record) for since <= time < until, oldest first - the start found by a binary
+  // search, not by reading everything. Returns the newest record before `since` (all zero when none): the state the
+  // range begins in.
+  template <typename F> T forRange(uint32_t since, uint32_t until, F f) const {
+    T before = {};
+    for (uint8_t s : {(uint8_t)(cur ^ 1), cur}) {
+      if (!count[s]) continue;
+      uint32_t lo = 0, hi = count[s];
+      while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+        if (at(s, mid).time < since) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo) {
+        T b = at(s, lo - 1);
+        if (b.time >= before.time) before = b;
+      }
+      File file = LittleFS.open(path(s), "r");
+      if (!file) continue;
+      if (lo < count[s] && file.seek(lo * sizeof(T))) {
+        T buf[16];
+        for (uint32_t k = lo; k < count[s];) {
+          uint32_t n = min((uint32_t)16, count[s] - k);
+          if (file.read((uint8_t*)buf, n * sizeof(T)) != n * sizeof(T)) break;
+          uint32_t i = 0;
+          for (; i < n && buf[i].time < until; i++) f(buf[i]);
+          if (i < n) break;
+          k += n;
+        }
+      }
+      file.close();
+    }
+    return before;
+  }
+
   // Drops the record added last when its time is `time` (0 = whichever it is) - one entered by mistake.
   bool removeLast(uint32_t time = 0) {
     uint8_t s = count[cur] ? cur : cur ^ 1;

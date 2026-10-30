@@ -2,7 +2,8 @@
 // news (the ESP is offline / back, a test) or the ESP's alert sealed with the pairing key (Relay.h), opened here -
 // the pairing code is kept in IndexedDB by the page when notifications are switched on.
 
-const WARNINGS = ['Piec wygasa', 'Ryzyko zamarznięcia', 'Cofanie żaru', 'Mało węgla', 'Piec stoi po zaniku prądu', 'Opróżnij popielnik'];
+const WARNINGS = ['Piec wygasa', 'Ryzyko zamarznięcia', 'Cofanie żaru', 'Mało węgla', 'Piec stoi po zaniku prądu', 'Opróżnij popielnik',
+  'Sterownik nie w automacie'];
 const LOCALE = 'pl-PL';
 
 self.addEventListener('install', () => self.skipWaiting());
@@ -66,7 +67,8 @@ function describe(a) {
     case 5: return { title: `${name}: wróciło do normy`, body: temp, tag: `alarm-${a.s}` };
     case 6: return { title: `${name}: czujnik nie odpowiada`, body: 'Sprawdź przewód czujnika.', tag: `fault-${a.s}` };
     case 7: return { title: `${name}: czujnik znów działa`, body: temp, tag: `fault-${a.s}` };
-    case 8: return { title: warn, body: a.s === 3 ? (v !== null ? `Zostało ~${kg(v)} węgla.` : '') : a.s === 5 ? (v !== null ? `Spalono ~${kg(v)} od opróżnienia.` : '') : temp, tag: `warn-${a.s}` };
+    case 8: return { title: warn, body: a.s === 3 ? (v !== null ? `Zostało ~${kg(v)} węgla.` : '') : a.s === 5 ? (v !== null ? `Spalono ~${kg(v)} od opróżnienia.` : '')
+      : a.s === 6 ? `Naciśnij A na sterowniku – inaczej piec wygaśnie.${temp ? ` Piec ${temp}.` : ''}` : temp, tag: `warn-${a.s}` };
     case 9: return { title: `${warn} – koniec`, body: a.s === 3 ? '' : temp, tag: `warn-${a.s}` };
     case 14: return { title: 'Ciepła woda gotowa', body: `${name} ${temp} – można się kąpać.`, tag: 'water' };
     case 101: {                                         // the morning summary of the day before

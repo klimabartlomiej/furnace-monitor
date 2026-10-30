@@ -123,6 +123,59 @@ body.fsmode nav.tabs{display:none}
 .hint{color:var(--faint);font-size:12px;text-align:center;margin-top:10px}
 
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:-2px 0 10px;font-size:13px;color:var(--muted)}
+.boiler .card-h .gstate{display:flex;align-items:center;gap:7px;font-size:15px}
+.boiler .card-h .gstate i{width:10px;height:10px;border-radius:50%;background:var(--faint)}
+.boiler .card-h{margin-bottom:6px}
+.boiler .card-h small{color:var(--faint);font-weight:500;white-space:nowrap}
+.ghint{margin:0 0 6px;font-size:13px;color:var(--orange)}
+.boiler svg{display:block;width:100%;height:auto;max-height:260px}
+.bx text{font:600 12px -apple-system,system-ui;fill:var(--muted)}
+.bx .big{font:700 22px -apple-system,system-ui;fill:var(--text)}
+.bx .lbl{font:600 10px -apple-system,system-ui;fill:var(--faint);letter-spacing:.04em}
+.bx .metal{fill:#2a2f39;stroke:#3a404c;stroke-width:1.5}
+.bx .water{fill:#1b2533}
+.bx .pipe{fill:none;stroke-width:5;stroke-linecap:round}
+.bx .flow{fill:none;stroke-width:2;stroke-dasharray:5 7;stroke:rgba(255,255,255,.55);opacity:0}
+.bx .flow.on{opacity:1;animation:gflow .9s linear infinite}
+.bx .fan .blades{transform-box:fill-box;transform-origin:center}
+.bx .fan.on .blades{animation:gspin .5s linear infinite}
+.bx .fan circle{fill:#2a2f39;stroke:#3a404c;stroke-width:1.5}
+.bx .fan path{fill:#8a919e}
+.bx .fan.on path{fill:#64d2ff}
+.bx .piston{transition:transform 1.2s ease;fill:#8a919e}
+.bx .piston.away{transform:translateX(-44px)}
+.bx .piston.push{animation:gpush 1.6s ease-in-out infinite;fill:#ff9f0a}
+.bx .coal{fill:#4a505c}
+.bx .fire{opacity:0;transition:opacity .6s}
+.bx .fire.on{opacity:1}
+.bx .fire path{animation:gflick .8s ease-in-out infinite alternate;transform-box:fill-box;transform-origin:50% 100%}
+.bx .fire path:nth-child(2){animation-delay:.25s}.bx .fire path:nth-child(3){animation-delay:.5s}
+.bx .ember{opacity:0;transition:opacity .6s}
+.bx .ember.on{animation:gglow 2.4s ease-in-out infinite}
+.bx .smoke circle{fill:#8a919e;opacity:0;transform-box:fill-box;transform-origin:center}
+.bx .smoke.on circle{animation:gsmoke 3s ease-out infinite}
+.bx .smoke.on circle:nth-child(2){animation-delay:1s}.bx .smoke.on circle:nth-child(3){animation-delay:2s}
+.bx .pump circle{fill:#2a2f39;stroke:#3a404c;stroke-width:1.5}
+.bx .pump path{fill:#5d6471}
+.bx .pump.on path{fill:#30d158}
+.gchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.gchips span{display:flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:13px;font-weight:600;background:var(--card2);color:var(--faint)}
+.gchips span.on{color:var(--text)}
+.gchips span i{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.gchips span.on i{background:var(--c)}
+@keyframes gspin{to{transform:rotate(360deg)}}
+@keyframes gflow{to{stroke-dashoffset:-12}}
+@keyframes gpush{0%,100%{transform:translateX(0)}50%{transform:translateX(-44px)}}
+@keyframes gflick{from{transform:scale(.9,.82)}to{transform:scale(1.04,1.08)}}
+@keyframes gglow{0%,100%{opacity:.55}50%{opacity:.95}}
+@keyframes gsmoke{0%{opacity:.45;transform:translate(0,0) scale(.6)}100%{opacity:0;transform:translate(-6px,-26px) scale(1.6)}}
+@media (prefers-reduced-motion:reduce){.bx *{animation:none!important}}
+.lanes{margin-top:2px}
+.lanes svg{display:block}
+.lanes .ll{font:600 10px -apple-system,system-ui;fill:var(--faint)}
+.lanes .lb{fill:rgba(255,255,255,.04)}
+.lanes .lleg{display:flex;flex-wrap:wrap;gap:4px 12px;margin:4px 0 2px;font-size:12px;color:var(--muted)}
+.lanes .lleg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
 .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 
 .rows .row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
@@ -202,6 +255,11 @@ body.unpaired .pair{display:block}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{display:inline-block;width:3px;height:12px;border-radius:2px}
 .legend i.band{width:12px;background:rgba(255,159,10,.35);border-radius:3px}
+.legend .ctlt{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:none;color:var(--faint);border-radius:999px;padding:1px 9px;font:inherit}
+.legend .ctlt.on{color:var(--text);border-color:var(--faint)}
+.legend .ctlt i,.chip.ctl i{width:14px;height:0;border-radius:0;background:none;border-top:2px dashed currentColor}
+.ctlv{float:right;display:inline-flex;align-items:center;gap:4px;color:var(--muted)}
+.ctlv i{width:10px;border-top:2px dashed var(--c)}
 .legend .lg-hint{color:var(--faint)}
 .tip .tev{display:flex;align-items:flex-start;gap:6px;margin-top:5px;font-size:12px;white-space:normal;max-width:230px}
 .tip .tev i{width:3px;height:13px;border-radius:2px;flex:none;margin-top:1px}
@@ -278,6 +336,10 @@ body.unpaired .pair{display:block}
 .offr label{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px}
 .offr .cd{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}
 .offr .s{color:var(--faint);font-size:12px;font-weight:500;margin:2px 0 0 19px}
+.autooff{padding-bottom:12px}
+.autooff .btn{margin-top:0}
+.autooff .s{color:var(--faint);font-size:12px;margin-top:6px}
+#mtext{white-space:pre-line}
 .stp{display:flex;align-items:center;gap:6px}
 .stp button{width:36px;height:36px;border-radius:50%;border:0;background:var(--card2);color:var(--text);font-size:22px;line-height:1}
 .stp input{width:64px;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:8px 4px;font:600 16px -apple-system,system-ui;text-align:center;outline:none}
@@ -298,6 +360,7 @@ body.unpaired .pair{display:block}
 .rchip{display:flex;align-items:center;gap:5px;border:1px solid var(--line);background:none;color:var(--muted);border-radius:999px;padding:5px 10px 5px 7px;font-weight:600;font-size:13px}
 .rchip svg{width:14px;height:14px;color:var(--c)}
 .rchip.on{color:var(--text);border-color:var(--c);background:var(--cb)}
+.rchip:disabled{opacity:.3}
 .plink{background:none;border:0;color:var(--red);font-size:13px;font-weight:600;margin:8px 0 0 40px;padding:0}
 .pnew{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
 .pnew:nth-child(2){border-top:0}
@@ -391,6 +454,7 @@ nav.tabs button.on{color:var(--text)}
     <div class="sub"><span class="dot" id="dot"></span><span id="status">Łączenie…</span><span id="updated" style="margin-left:auto"></span></div>
   </header>
   <div id="notices"></div>
+  <div class="card boiler" id="boilercard" style="display:none"></div>
   <div class="grid" id="cards"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
   <div class="card coal" id="coalcard" style="display:none"></div>
   <div class="card">
@@ -419,6 +483,7 @@ nav.tabs button.on{color:var(--text)}
     <div class="big-now"><span class="v num" id="dnow">–</span><span class="l" id="dname"></span><span class="bn-acts"><button class="zoom" id="zoomreset">Pełny widok</button>
       <button class="fsbtn" id="fsbtn" aria-label="Pełny ekran"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button></span></div>
     <div class="chart big" id="detail"></div>
+    <div class="lanes" id="lanes"></div>
     <div class="legend" id="detaillegend"></div>
     <div class="hint">Przesuń palcem, aby przewinąć · przytrzymaj, aby odczytać · rozsuń dwoma palcami, aby powiększyć · stuknij dwa razy, aby wrócić</div>
   </div>
@@ -618,6 +683,31 @@ function mapRoles(n) {
 }
 // The slots with a probe that is switched on - what the app shows.
 const inUse = () => (now ? now.sensors.map((x, i) => i).filter(i => now.sensors[i].on !== false) : []);
+// The controller's own probes (address F7 0n, firmware 28+) measure the same water as ours, so each is drawn as a
+// dashed second line on the chart of its probe (ui.ctl switches them), not as a chart of its own: 1 boiler -> the
+// furnace probe, 2 feeder -> the hopper, 3 hot water -> the boiler. One whose probe is not in use stays on its own.
+const CTL_ROLE = { 1: 'furnace', 2: 'hopper', 3: 'boiler' };
+function ctlPartner(j) {
+  const s = now && now.sensors[j], role = s && /^F70[123]/.test(s.addr || '') ? CTL_ROLE[+s.addr[3]] : null;
+  return role ? { furnace: FURNACE, hopper: COAL, boiler: BOILER }[role] : -1;
+}
+const ctlOf = i => (now ? now.sensors.findIndex((s, j) => s.on !== false && ctlPartner(j) === i) : -1);
+const ownLine = i => !(ctlPartner(i) >= 0);
+// The dashed line is drawn when switched on - and always while our probe is silent, so the chart is not empty.
+const ctlShown = i => ui.ctl || now.sensors[i].temp === null;
+const CTL_MISMATCH = 5;      // degrees between our probe and the controller's for a quarter of an hour: worth a look
+// Controller minus our probe, minute by minute, over the last `minutes` of the live data.
+function ctlDiffs(i, c, minutes) {
+  const t0 = tNow() - minutes * 60, d = [];
+  for (const b of live) if (b.t >= t0 && b.v[i] && b.v[c]) d.push(b.v[c][1] - b.v[i][1]);
+  return d;
+}
+// The typical difference: the middle 60 % averaged, so the lag at a turn of the trend does not tip it, and many
+// minutes smooth out the controller's half degrees.
+function typicalDiff(d) {
+  const s = d.slice().sort((a, b) => a - b), k = Math.floor(s.length * .2), mid = s.slice(k, s.length - k);
+  return mid.reduce((a, v) => a + v, 0) / mid.length;
+}
 const WARNINGS = [
   { name: 'Piec wygasa', icon: I_FLAME },
   { name: 'Ryzyko zamarznięcia', icon: I_SNOW },
@@ -625,6 +715,7 @@ const WARNINGS = [
   { name: 'Mało węgla', icon: I_COAL },
   { name: 'Piec stoi po zaniku prądu', icon: I_NOPOWER },
   { name: 'Opróżnij popielnik', icon: I_ASH },
+  { name: 'Sterownik nie w automacie', icon: I_POWER },
 ];
 // Release notes: offered with a new version (release/publish.ps1 copies them into the manifest) and shown once
 // after the device updated itself. Every FW_VERSION needs its entry - the app's version is the highest key.
@@ -633,6 +724,7 @@ const CHANGES = {
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
   27: 'Pewniejsza aktualizacja: zapis czujników, przywrócenie kopii albo wyczyszczenie historii tuż po aktualizacji nie cofa już nowej wersji. Nazwy czujników z uszkodzonymi znakami są odrzucane.',
+  28: 'Sterownik kotła na żywo (z modułem RS485 przy sterowniku Geco): na górze ekranu głównego animowany kocioł – palenie, podtrzymanie i przedmuch, wentylator, podajnik z położeniem tłoka, pompa CO, temperatury sterownika i ile węgla zostało w zasobniku. Pod wykresami paski pracy: kiedy był tryb palenia, kiedy dmuchał wentylator, kiedy pchał podajnik i kiedy chodziła pompa – na tej samej osi co temperatury. Nowe ostrzeżenie „Sterownik nie w automacie” z powiadomieniem – po zaniku prądu sterownik czeka, aż ktoś naciśnie A. Odczyt sterownika na kafelkach pieca, zasobnika i bojlera, a na wykresie jako przerywana linia (przycisk „Sterownik”); gdy nasz czujnik i sterownik rozjadą się o ponad 5°, pojawi się ostrzeżenie. Auto-korekta czujników według sterownika w Ustawienia → Korekta wskazań. Aplikacja po uruchomieniu otwiera się zawsze na Przeglądzie, a w Czujnikach rola zajęta przez inny czujnik jest wyszarzona.',
   26: 'Nowa płytka ESP32-S3: więcej pamięci, historia co minutę z około 3 miesięcy zamiast 31 dni. Ustawienia → Czujniki: każdy czujnik ma kafelek z nazwą, temperaturą na żywo, włącznikiem i rolą (Piec, Powrót, Zasobnik węgla, Bojler, Spaliny, Inny) – nowy czujnik pojawia się sam, a „Użyj zamiast…” przejmuje historię starego. Termopara na spalinach od razu dostaje rolę Spaliny. Raport diagnostyczny ma dzienne liczniki (rozłączenia, błędy czujników, pamięć) i ostatnią awarię. Kod serwisowy (Dostęp zdalny): podgląd pieca dla kogoś, kto pomaga – bez możliwości zmian, wygasa sam.',
   25: 'Raport diagnostyczny (Ustawienia → Urządzenie): jednym stuknięciem plik dla serwisu ze stanem urządzenia i jego dziennikiem technicznym – także z tego, co działo się tuż przed awarią lub restartem.',
   24: 'Kąpiele także wstecz – z historii minutowej (ostatnie 31 dni), a fałszywe ostrzeżenia „Piec wygasa” z czasów starej reguły (daleko od progu min.) znikają z dziennika. Powiadomienie „Dostępna nowa wersja” przychodzi tylko wtedy, gdy piec sam ją znajdzie (sprawdza co godzinę); po stuknięciu „Sprawdź aktualizacje” wynik widać od razu w aplikacji.',
@@ -656,7 +748,7 @@ const CHANGES = {
 const PROBLEM_END = { 3: 5, 4: 5, 6: 7, 8: 9 };
 const EV_POWER_CUT = 11;      // time = power back, value = minutes without power
 const BOOT_REASON = ['', 'po włączeniu zasilania', 'po restarcie', 'po spadku napięcia', 'po błędzie programu'];
-const warningProbes = w => ([[FURNACE], [FURNACE, RETURN, BOILER], [COAL], [FURNACE, RETURN], [FURNACE], [FURNACE]][w] || []).filter(i => i >= 0);
+const warningProbes = w => ([[FURNACE], [FURNACE, RETURN, BOILER], [COAL], [FURNACE, RETURN], [FURNACE], [FURNACE], [FURNACE]][w] || []).filter(i => i >= 0);
 const EV_SEASON = 12, EV_ASH = 13, EV_HOT_WATER = 14, EV_BATH = 15;   // EV_BATH: e[2] = minutes, e[3] = boiler drop x 100
 const RANGES = { '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
 const STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200];
@@ -666,7 +758,7 @@ const LOCALE = 'pl-PL';
 let now = null, online = null, lastOk = 0, view = null;     // online: null until the first answer
 let live = [], series = null, days = [], daysAt = 0, journal = [], journalAt = 0, refills = [], refillsAt = 0;
 const outdoor = { hourly: [], ahead: [], daily: [], current: null, at: 0, dailyAt: 0, key: '' };
-const ui = Object.assign({ tab: 'home', range: '6h', shown: [FURNACE], overview: 6 }, readUi());
+const ui = Object.assign({ tab: 'home', range: '6h', shown: [FURNACE], overview: 6, ctl: false }, readUi());
 
 // The firmware version this page came with: CHANGES gets a note for every release.
 const APP_VERSION = Math.max(...Object.keys(CHANGES));
@@ -1196,6 +1288,7 @@ function scrub(el, clientX) {
   for (const b of g.o.bands || []) if (t >= b.t0 - tol && t <= b.t1 + tol) html += `<div class="tev"><i style="background:#ff9f0a"></i>${esc(b.label || 'Brak prądu')}</div>`;
   for (const m of g.o.marks || []) if (Math.abs(m.t - t) <= tol)
     html += `<div class="tev"><i style="background:${m.color}"></i><span>${hhmm(m.t)} ${esc(m.title || '')}${m.sub ? ` <span class="mm">${esc(m.sub)}</span>` : ''}</span></div>`;
+  if (el.id === 'detail') html += gecoTip(t);
   scrubbing = true;
   el.querySelector('.cg').innerHTML = `<line class="cur" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${g.T}" y2="${g.T + g.ph}"/>` + dots;
   const label = whenStep >= 86400 ? day(when) : whenStep > 60 ? `${day(when)}, ${hhmm(when)}–${hhmm(when + whenStep)}` : `${day(when)}, ${hhmm(when)}`;
@@ -1320,6 +1413,7 @@ function warningText(w) {
     return cold ? `${esc(cold.name)}: ${n1(cold.temp)}°` : 'woda bliska zamarznięcia';
   }
   if (w === 4) return `po zaniku prądu piec dalej stygnie${s[FURNACE] && s[FURNACE].trend !== null ? ` (${n1(s[FURNACE].trend)}° na godzinę)` : ''} – sprawdź sterownik`;
+  if (w === 6) return 'sterownik czeka w czuwaniu – naciśnij A na sterowniku, inaczej piec wygaśnie';
   if (w === 5) {
     const a = now.ash, d = Math.floor((tNow() - a.at) / 86400);
     return `od opróżnienia ${d} ${plural(d, 'dzień', 'dni', 'dni')}${a.kg !== null ? `, spalono ~${massText(a.kg)}` : ''}`;
@@ -1456,44 +1550,60 @@ function renderHome() {
       : `<div class="banner blue">${SVG(I_INFO)}<div><b>Wskazówka:</b> stuknij Udostępnij → „Do ekranu początkowego”, a strona otworzy się jak aplikacja.</div><button class="x" id="a2hs" aria-label="Zamknij">×</button></div>`;
   if (supportGone) notices += `<div class="banner red">${SVG(I_WARN)}<div><b>Kod serwisowy wygasł albo został unieważniony.</b> Poproś o nowy; ten telefon odłączysz w Ustawienia → Dostęp zdalny.</div></div>`;
   else if (readOnly()) notices += `<div class="banner blue">${SVG(I_INFO)}<div><b>Podgląd serwisowy</b> – widzisz wszystko, ale niczego tu nie zmienisz. Dostęp wygasa sam.</div></div>`;
-  notices += missedNotice() + seasonNotice();
+  notices += missedNotice() + seasonNotice() + ctlMismatch();
   notices += warns.map(w => `<div class="banner orange">${SVG(WARNINGS[w].icon)}<div><b>${WARNINGS[w].name}</b> – ${warningText(w)}</div></div>`).join('');
   notices += alarms.map(s => `<div class="banner red">${SVG(I_WARN)}<div><b>${esc(s.name)}</b> – ${describe(s)}</div></div>`).join('');
   $('#notices').innerHTML = notices;
 
   const t = tNow();
   $('#cards').innerHTML = now.sensors.map((s, i) => {
-    if (s.on === false) return '';
+    if (s.on === false || !ownLine(i)) return '';
     const c = COLORS[i % COLORS.length], pts = points(live, i, false).filter(p => p[0] >= t - 6 * 3600);
-    const k = s.trend, state = s.fault ? 'fault' : s.alarm ? 'alarm' : '';
+    const k = s.trend, state = s.fault ? 'fault' : s.alarm ? 'alarm' : '', ci = ctlOf(i), ct = ci >= 0 ? now.sensors[ci].temp : null;
+    const stand = s.temp === null && ct !== null;             // our probe silent: the controller's reading stands in
     const pill = s.fault ? 'BRAK SYGNAŁU' : s.alarm > 0 ? 'ZA GORĄCO' : s.alarm < 0 ? 'ZA ZIMNO' : '';
     const tr = k === null ? '' : Math.abs(k) < .5 ? '→ stabilnie' : `${k > 0 ? '↑' : '↓'} ${n1(Math.abs(k))}°/h`;
     return `<div class="sensor ${state}" data-i="${i}" style="--c:${c};--cb:${rgba(c, .16)}">`
       + `<div class="hd"><span class="ico">${SVG(ICONS[i] || ICONS[0])}</span><span class="n">${esc(s.name)}</span></div>`
-      + `<div class="val num">${s.temp === null ? '–' : n1(s.temp)}<small>°C</small></div>`
-      + `<div class="trend num ${k > .5 ? 'up' : k < -.5 ? 'down' : ''}">${pill ? `<span class="pill">${pill}</span>` : ''}${tr}</div>${sparkline(pts, c)}</div>`;
+      + `<div class="val num">${stand ? n1(ct) : s.temp === null ? '–' : n1(s.temp)}<small>°C</small></div>`
+      + `<div class="trend num ${k > .5 ? 'up' : k < -.5 ? 'down' : ''}">${pill ? `<span class="pill">${pill}</span>` : ''}${tr}`
+      + `${ct !== null ? `<span class="ctlv" title="Odczyt sterownika kotła"><i></i>${stand ? 'sterownik' : `${n1(ct)}°`}</span>` : ''}</div>${sparkline(pts, c)}</div>`;
   }).join('');
 
   $$('#ovRange button').forEach(b => b.classList.toggle('on', +b.dataset.h === ui.overview));
   // The flue (150-300 degrees) would flatten the water probes into lines - it has its card and the Wykresy tab.
-  const lines = inUse().filter(i => roleOf(now.sensors[i], i) !== 'flue'), ov = $('#overview');
-  $('#legend').innerHTML = lines.map(i => `<span><i style="background:${COLORS[i]}"></i>${esc(now.sensors[i].name)}</span>`).join('');
+  const lines = inUse().filter(i => roleOf(now.sensors[i], i) !== 'flue' && ownLine(i)), ov = $('#overview');
+  const pairs = lines.filter(i => ctlOf(i) >= 0), ctls = pairs.filter(ctlShown);
+  $('#legend').innerHTML = lines.map(i => `<span><i style="background:${COLORS[i]}"></i>${esc(now.sensors[i].name)}</span>`).join('')
+    + (pairs.length ? `<button class="ctlt${ui.ctl ? ' on' : ''}" data-ctl="1"><i></i>sterownik</button>` : '');
   // Redrawn only when something it shows changed - the minute data comes once a minute, the refresh every 15 s.
   const lastLive = live.length ? live[live.length - 1].t : 0;
-  const drawn = `${lastLive}:${live.length}:${ui.overview}:${lines.join()}:${COLORS.join()}:${ov.clientWidth}:${journal.length}`;
+  const drawn = `${lastLive}:${live.length}:${ui.overview}:${lines.join()}:${ctls.join()}:${COLORS.join()}:${ov.clientWidth}:${journal.length}`;
   if (ov.dataset.drawn !== drawn) {
     ov.dataset.drawn = drawn;
     const span = ui.overview * 3600, t0 = t - span, step = ui.overview > 6 ? 300 : 60;
     const buckets = step === 60 ? live : rebucket(live, step);
     chart(ov, {
-      series: lines.map(i => ({ color: COLORS[i], name: now.sensors[i].name, pts: windowed(points(buckets, i, false), t0, t) })),
+      series: lines.map(i => ({ color: COLORS[i], name: now.sensors[i].name, pts: windowed(points(buckets, i, false), t0, t) }))
+        .concat(ctls.map(i => ({ color: COLORS[i], name: `${now.sensors[i].name} · sterownik`, dash: true, pts: windowed(points(buckets, ctlOf(i), false), t0, t) }))),
       t0, t1: t, step, bands: outages(), smooth: step === 60 ? 3 : 1, empty: 'Historia zapełni się w ciągu kilku minut',
     });
   }
+  renderBoiler();
   renderCoal();
   renderToday();
   renderWeek();
   loadDays().then(() => { if (ui.tab === 'home') renderWeek(); });
+}
+
+// Our probe and the controller's on the same water disagree for a quarter of an hour: a probe off its pipe, or one
+// that wants a correction.
+function ctlMismatch() {
+  return inUse().filter(ownLine).map(i => {
+    const c = ctlOf(i), d = c >= 0 ? ctlDiffs(i, c, 15) : [], m = d.length >= 10 ? typicalDiff(d) : 0;
+    return Math.abs(m) <= CTL_MISMATCH ? '' : `<div class="banner orange">${SVG(I_PROBE)}<div><b>${esc(now.sensors[i].name)} i sterownik się różnią</b> – `
+      + `o ${n1(Math.abs(m))}° od kwadransa. Czujnik mógł odpaść od rury; jeśli siedzi dobrze, wyrównaj go w Ustawienia → Korekta wskazań.</div></div>`;
+  }).join('');
 }
 
 function renderToday() {
@@ -1524,6 +1634,244 @@ function burnSeconds(from, to) {
   const thr = burnThreshold();
   if (FURNACE < 0) return 0;
   return points(live, FURNACE, false).filter(p => p[0] >= from && p[0] < to && p[1] >= thr).length * 60;
+}
+
+// ---------------------------------------------------------------- the boiler controller (Geco GH11TB)
+// now.geco (firmware 28+): what the controller announces on its room-panel bus, read only (GecoBus.h) - mode, fan,
+// feeder, piston, pumps and its own temperatures. /api/geco is its work log: every change to a tenth of a second,
+// 8 bytes each (time u32, tenths, mode, outputs, flags); the first record is the state the range began in.
+const G_FAN = 0x40, G_FEEDER = 0x20, G_PUMP = 0x02, G_PISTON = 0x40;
+const G_MODE = { 0: 'brak danych', 4: 'czuwanie', 8: 'palenie', 16: 'podtrzymanie' };
+const G_COLOR = { palenie: '#ff6b3d', podtrzymanie: '#ffb340', przedmuch: '#ffd60a', czuwanie: '#8a919e', 'brak danych': '#3a404c' };
+const gecoHeard = () => !!(now && now.geco && now.geco.age >= 0);
+const gecoLive = () => gecoHeard() && now.geco.age < 10;
+// What the controller is doing: podtrzymanie with the fan or the feeder running is a przedmuch.
+function gecoWhat(mode, out) {
+  const m = G_MODE[mode] || `tryb ${mode}`;
+  return mode === 16 && out & (G_FAN | G_FEEDER) ? 'przedmuch' : m;
+}
+
+function boilerSvg() {
+  // As it stands in the boiler room: the hopper's neck on the feeder tube, which feeds the fire bed from the right,
+  // the fan blowing in under the grate; the water side - supply, hot water tank, return and CO pump - on the left.
+  const hopper = 'M196 30h84l-16 66h-10v54h-32v-54h-10z';
+  return `<svg class="bx" viewBox="0 0 336 236" role="img" aria-label="Kocioł">
+  <g class="smoke" id="gsmoke"><circle cx="109" cy="14" r="5"/><circle cx="109" cy="14" r="5"/><circle cx="109" cy="14" r="5"/></g>
+  <rect class="metal" x="98" y="16" width="22" height="26" rx="2"/>
+  <text class="lbl" x="92" y="28" text-anchor="end">SPALINY</text><text id="gflue" x="92" y="42" text-anchor="end"></text>
+  <path class="metal" d="${hopper}"/>
+  <clipPath id="ghop"><path d="${hopper}"/></clipPath>
+  <rect class="coal" id="gcoal" x="196" y="150" width="84" height="0" clip-path="url(#ghop)"/>
+  <text class="lbl" x="238" y="22" text-anchor="middle">ZASOBNIK</text>
+  <text id="ghopt" x="238" y="46" text-anchor="middle"></text>
+  <text class="big" id="gcoalp" x="238" y="82" text-anchor="middle" style="font-size:17px"></text>
+  <rect class="metal" x="180" y="150" width="90" height="22" rx="4"/>
+  <rect class="piston" id="gpiston" x="226" y="154" width="36" height="14" rx="3"/>
+  <text class="lbl" x="276" y="159">PODAJNIK</text><text id="gfeedt" x="276" y="174"></text>
+  <rect class="metal" x="180" y="194" width="30" height="12"/>
+  <g class="fan" id="gfan" transform="translate(220 200)"><circle r="15"/><g class="blades">
+    <path d="M0 -2C-3 -11 3 -13 2 -3z"/><path d="M2 0C11 -3 13 3 3 2z"/><path d="M0 2C3 11 -3 13 -2 3z"/><path d="M-2 0C-11 3 -13 -3 -3 -2z"/></g></g>
+  <text class="lbl" x="220" y="230" text-anchor="middle">WENTYLATOR</text>
+  <rect class="metal" x="90" y="40" width="98" height="176" rx="10"/>
+  <rect class="water" x="98" y="48" width="82" height="80" rx="6"/>
+  <text class="lbl" x="139" y="66" text-anchor="middle">KOCIOŁ</text>
+  <text class="big" id="gboil" x="139" y="102" text-anchor="middle">–</text>
+  <rect x="98" y="136" width="82" height="72" rx="6" fill="#111318"/>
+  <rect x="174" y="152" width="14" height="18" fill="#2a2f39"/>
+  <path d="M102 176h74" stroke="#5d6471" stroke-width="3" stroke-dasharray="4 3"/>
+  <ellipse class="ember" id="gember" cx="139" cy="172" rx="26" ry="5" fill="#ff6b3d"/>
+  <g class="fire" id="gfire"><g transform="translate(-82 -22)">
+    <path d="M204 194c-6-12 4-18 3-30 9 9 12 18 7 30z" fill="#ff9f0a"/>
+    <path d="M216 194c-8-16 6-26 4-42 12 13 15 28 8 42z" fill="#ff6b3d"/>
+    <path d="M230 194c-5-10 3-16 2-26 8 8 10 16 6 26z" fill="#ffd60a"/></g></g>
+  <path class="pipe" d="M90 60H8" stroke="#ff6b3d"/><path class="flow" id="gflow1" d="M90 60H8"/>
+  <text id="gsup" x="8" y="52"></text><text class="lbl" x="8" y="76">DO DOMU</text>
+  <rect class="metal" x="16" y="94" width="52" height="66" rx="12"/>
+  <text class="lbl" x="42" y="112" text-anchor="middle">CWU</text><text id="gcwu" x="42" y="138" text-anchor="middle" class="big" style="font-size:16px"></text>
+  <path class="pipe" d="M90 196H8" stroke="#4aa8ff"/><path class="flow" id="gflow2" d="M8 196H90"/>
+  <g class="pump" id="gpump" transform="translate(64 196)"><circle r="11"/><path d="M-5 -6L7 0L-5 6z"/></g>
+  <text id="gret" x="8" y="188"></text><text class="lbl" x="8" y="212">POWRÓT</text>
+  <text class="lbl" x="64" y="230" text-anchor="middle">POMPA CO</text>
+</svg>`;
+}
+
+// The boiler as the controller sees it, live. Drawn once; later renders only change what moved, so the animations
+// run on instead of restarting every 15 s.
+function renderBoiler() {
+  const card = $('#boilercard');
+  if (!gecoHeard()) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  if (!$('#gstate')) card.innerHTML = '<div class="card-h"><span class="gstate" id="gstate"><i></i><b></b></span><small id="gsince"></small></div>'
+    + '<div class="ghint" id="ghint"></div>' + boilerSvg() + '<div class="gchips" id="gchips"></div>';
+  const g = now.geco, live = gecoLive(), out = live ? g.out : 0, mode = live ? g.mode : 0, what = live ? gecoWhat(mode, out) : 'brak danych';
+  const fan = !!(out & G_FAN), feeder = !!(out & G_FEEDER), pump = !!(out & G_PUMP), away = live && !!(g.flags & G_PISTON);
+  const st = $('#gstate');
+  st.querySelector('i').style.background = G_COLOR[what] || '#8a919e';
+  st.querySelector('b').textContent = live ? what[0].toUpperCase() + what.slice(1) : 'Brak danych';
+  $('#gsince').textContent = live && g.since > 1.6e9 ? `od ${when(g.since)}` : g.age >= 0 ? `ostatnio ${durCut(g.age)} temu` : '';
+  const hint = !live ? 'Moduł RS485 nie słyszy sterownika – sterownik wyłączony albo luźny przewód A/B.'
+    : mode === 4 && !now.warnings[6] ? 'Sterownik nie jest w automacie – naciśnij A na sterowniku, inaczej piec wygaśnie.' : '';   // the banner says it once it holds
+  $('#ghint').textContent = hint;
+  $('#ghint').style.display = hint ? '' : 'none';
+  const sens = role => { const i = { furnace: FURNACE, return: RETURN, hopper: COAL, boiler: BOILER, flue: FLUE }[role]; return i >= 0 ? now.sensors[i] : null; };
+  const deg = v => (v === null || v === undefined ? '' : `${n1(v)}°`);
+  const tc = live ? g.t : [null, null, null];
+  $('#gboil').textContent = tc[0] !== null ? `${Math.round(tc[0])}°` : '–';
+  $('#gfeedt').textContent = tc[1] !== null ? `${Math.round(tc[1])}°` : '';
+  $('#ghopt').textContent = sens('hopper') ? deg(sens('hopper').temp) : '';
+  $('#gcwu').textContent = tc[2] !== null ? `${Math.round(tc[2])}°` : sens('boiler') ? deg(sens('boiler').temp) : '';
+  $('#gsup').textContent = sens('furnace') ? deg(sens('furnace').temp) : '';
+  $('#gret').textContent = sens('return') ? deg(sens('return').temp) : '';
+  $('#gflue').textContent = sens('flue') ? deg(sens('flue').temp) : '–';
+  // The coal as the Węgiel card counts it, coloured the same way; unknown -> half a hopper, faint, no number.
+  const c = now.coal, set = now.settings, known = !!(c && c.level !== null && set.hopperKg > 0);
+  const full = known ? clamp(c.level / set.hopperKg, 0, 1) : 0.5, h = known ? c.hoursLeft : null;
+  const low = known && (full < .15 || (h !== null && h < set.lowCoalHours)), mid = known && !low && (full < .4 || (h !== null && h < 2 * set.lowCoalHours));
+  $('#gcoal').setAttribute('y', 150 - 120 * full);
+  $('#gcoal').setAttribute('height', 120 * full);
+  $('#gcoal').style.fill = low ? 'var(--red)' : mid ? 'var(--orange)' : '';
+  $('#gcoal').style.opacity = known ? (low || mid ? .55 : 1) : .4;
+  $('#gcoalp').textContent = known ? `${Math.round(full * 100)}%` : '';
+  $('#gcoalp').style.fill = low ? 'var(--red)' : mid ? 'var(--orange)' : '';
+  $('#gfan').classList.toggle('on', fan);
+  const piston = $('#gpiston');
+  piston.classList.toggle('push', feeder);
+  piston.classList.toggle('away', !feeder && away);
+  $('#gpump').classList.toggle('on', pump);
+  $('#gflow1').classList.toggle('on', pump);
+  $('#gflow2').classList.toggle('on', pump);
+  const burning = mode === 8 || what === 'przedmuch';
+  $('#gfire').classList.toggle('on', burning);
+  $('#gember').classList.toggle('on', mode === 16 && !burning);
+  $('#gsmoke').classList.toggle('on', burning);
+  const chip = (on, color, text) => `<span class="${on ? 'on' : ''}" style="--c:${color}"><i></i>${text}</span>`;
+  $('#gchips').innerHTML = chip(fan, '#64d2ff', 'Wentylator') + chip(feeder, '#ff9f0a', 'Podajnik')
+    + chip(away, '#ffd60a', away ? 'Tłok wysunięty' : 'Tłok w pozycji') + chip(pump, '#30d158', 'Pompa CO')
+    + (live && g.out & ~(G_FAN | G_FEEDER | G_PUMP) ? chip(true, '#bf5af2', `inne 0x${(g.out & ~(G_FAN | G_FEEDER | G_PUMP)).toString(16)}`) : '');
+}
+
+// The work log of a chart's range, loaded with the chart's data (ranges up to a week). Once loaded, only what is new
+// is asked for - a day of burning is ~40 KB, a minute a few dozen bytes.
+let gecoLog = null, gecoLoading = null;
+function parseGeco(buf) {
+  if (buf.byteLength % 8) throw new Error('records of another size');
+  const v = new DataView(buf), out = [];
+  for (let o = 0; o < buf.byteLength; o += 8) out.push({ t: v.getUint32(o, true) + v.getUint8(o + 4) / 10, mode: v.getUint8(o + 5), out: v.getUint8(o + 6), flags: v.getUint8(o + 7) });
+  return out;
+}
+function loadGeco(from, to) {
+  if (!gecoHeard() || !nowFresh || to - from > 9 * 86400) return Promise.resolve();
+  if (!gecoLoading) gecoLoading = loadGecoNow(from, to).finally(() => { gecoLoading = null; });
+  return gecoLoading;
+}
+// The log for the chart's view: with a margin to pan into, for views up to a week (a week of burning is ~300 KB).
+function loadGecoForView() {
+  const span = view.t1 - view.t0, m = span > 2 * 86400 ? 0 : span / 2;
+  return span <= 8 * 86400 ? loadGeco(view.t0 - m, Math.min(tNow(), view.t1 + m)) : Promise.resolve();
+}
+async function loadGecoNow(from, to) {
+  const g = gecoLog, url = (a, b) => `/api/geco?from=${Math.floor(a)}&to=${Math.ceil(b)}`;
+  try {
+    if (g && g.from <= from && g.ev.length) {
+      if (g.to >= to - 30 || Date.now() - g.at < 60e3) return;     // covered, or asked within the minute
+      // From the second of the last change known: everything from then on comes again and replaces what was there.
+      const s = Math.floor(g.ev[g.ev.length - 1].t), ev = parseGeco(await (await api(url(s, to), {}, 30000)).arrayBuffer());
+      if (gecoLog === g) gecoLog = { from: g.from, to, ev: g.ev.filter(e => e.t < s).concat(ev.slice(1)), at: Date.now() };
+      return;
+    }
+    gecoLog = { from, to, ev: parseGeco(await (await api(url(from, to), {}, 30000)).arrayBuffer()), at: Date.now() };
+  } catch (e) {}
+}
+
+// The log and, after it, the state /api/now has just told (the device writes its log in batches, about a minute).
+function gecoEvents() {
+  const ev = gecoLog ? gecoLog.ev : [], g = now && now.geco;
+  if (!g || !gecoHeard() || g.since < 1.6e9 || (ev.length && ev[ev.length - 1].t >= g.since)) return ev;
+  return ev.concat([{ t: g.since, mode: g.mode, out: g.out, flags: g.flags }]);
+}
+
+// [start, end, record] pieces of [t0, t1]: each state from its change to the next; before the first, the state the
+// range began in.
+function gecoPieces(t0, t1) {
+  const ev = gecoEvents(), end = Math.min(t1, tNow()), out = [];
+  for (let k = 0; k < ev.length; k++) {
+    const a = Math.max(t0, ev[k].t), b = Math.min(end, k + 1 < ev.length ? ev[k + 1].t : end);
+    if (b > a) out.push([a, b, ev[k]]);
+  }
+  return out;
+}
+
+// Lanes under the detail chart, on its time axis: mode, fan, feeder, piston, CO pump. Drawn per pixel column: a
+// column shows how much of its time an output ran (faint = short pulses, like the feeder's portions while burning;
+// full = it ran throughout) and the mode that held most of it - standby and a przedmuch win any column they touch, so
+// a short one is never hidden. A week of portions stays a few hundred rectangles.
+const LANES = [
+  ['Tryb', null],
+  ['Went.', e => e.out & G_FAN, '#64d2ff'],
+  ['Podaj.', e => e.out & G_FEEDER, '#ff9f0a'],
+  ['Tłok', e => e.flags & G_PISTON, '#ffd60a'],
+  ['Pompa', e => e.out & G_PUMP, '#30d158'],
+];
+function paintLanes() {
+  const box = $('#lanes'), geo = $('#detail').geom;
+  if (!box) return;
+  if (!geo || !gecoLog || !gecoLog.ev.length || geo.o.t1 - geo.o.t0 > 9 * 86400) { box.innerHTML = ''; return; }
+  const { o, L, pw, W } = geo, cols = Math.ceil(pw), per = (o.t1 - o.t0) / pw, H = 12, gap = 4;
+  // Seconds per column: on-time of each output lane, time of each mode.
+  const on = LANES.map(() => new Float32Array(cols)), modes = {};
+  for (const [a, b, e] of gecoPieces(o.t0, o.t1)) {
+    const what = e.mode ? gecoWhat(e.mode, e.out) : null, lit = LANES.map(([, test]) => test && test(e));
+    for (let c = Math.floor((a - o.t0) / per); c < cols; c++) {
+      const c0 = o.t0 + c * per, s = Math.min(b, c0 + per) - Math.max(a, c0);
+      if (s <= 0) break;
+      lit.forEach((x, k) => { if (x) on[k][c] += s; });
+      if (what) (modes[what] || (modes[what] = new Float32Array(cols)))[c] += s;
+    }
+  }
+  let svg = '';
+  const drawn = new Set();
+  LANES.forEach(([label, test, color], k) => {
+    const y = k * (H + gap);
+    svg += `<rect class="lb" x="${L}" y="${y}" width="${pw}" height="${H}" rx="3"/><text class="ll" x="${W - 2}" y="${y + 9}" text-anchor="end">${label}</text>`;
+    // [fill, opacity] of column c
+    const look = c => {
+      if (!test) {
+        let best = ['czuwanie', 'przedmuch'].find(m => modes[m] && modes[m][c] > 0), most = 0;
+        if (!best) for (const m in modes) if (modes[m][c] > most) { most = modes[m][c]; best = m; }
+        if (best) drawn.add(best);
+        return best ? [G_COLOR[best] || '#5d6471', 1] : null;
+      }
+      const d = on[k][c] / per;
+      return d <= 0 ? null : [color, d >= 0.5 ? 1 : d >= 0.15 ? 0.6 : 0.3];
+    };
+    let run = null;
+    const flush = () => { if (run) svg += `<rect x="${(L + run[0]).toFixed(1)}" y="${y}" width="${Math.min(run[1], pw - run[0]).toFixed(1)}" height="${H}" fill="${run[2]}" fill-opacity="${run[3]}"/>`; run = null; };
+    for (let c = 0; c < cols; c++) {
+      const v = look(c);
+      if (run && v && v[0] === run[2] && v[1] === run[3]) { run[1]++; continue; }
+      flush();
+      if (v) run = [c, 1, v[0], v[1]];
+    }
+    flush();
+  });
+  const seen = Object.keys(G_COLOR).filter(m => drawn.has(m));
+  box.innerHTML = `<svg width="${W}" height="${LANES.length * (H + gap)}">${svg}</svg>`
+    + `<div class="lleg" style="padding-left:${L}px">${seen.map(m => `<span><i style="background:${G_COLOR[m]}"></i>${m}</span>`).join('')}</div>`;
+}
+
+// The controller's state at time t, for the chart's finger.
+function gecoTip(t) {
+  if (!gecoLog || !$('#lanes').innerHTML) return '';
+  const ev = gecoEvents();
+  let a = 0, b = ev.length;                      // the last change at or before t
+  while (a < b) { const m = (a + b) >> 1; if (ev[m].t <= t) a = m + 1; else b = m; }
+  const e = ev[a - 1];
+  if (!e || e.mode === 0) return '';
+  const what = gecoWhat(e.mode, e.out), parts = [];
+  if (e.out & G_FAN) parts.push('wentylator');
+  if (e.out & G_FEEDER) parts.push('podajnik');
+  if (e.out & G_PUMP) parts.push('pompa CO');
+  return `<div class="tev"><i style="background:${G_COLOR[what] || '#8a919e'}"></i><span>Sterownik: ${what}${parts.length ? ' · ' + parts.join(', ') : ''}</span></div>`;
 }
 
 // ---------------------------------------------------------------- coal and day summaries
@@ -1828,6 +2176,7 @@ async function fetchForView() {
     }
   }
   if (wantOut) await loadOutdoor(span > 31 * 86400);
+  await loadGecoForView();
   if (ticket === fetching) paintDetail();
 }
 
@@ -1851,6 +2200,10 @@ function paintDetail() {
   const single = probes.length === 1 && shown.length === 1, s0 = now.sensors[probes[0]];
   const lines = shown.map(i => { const d = detailData(i); return { color: colorOf(i), name: nameOf(i), agg: d.agg, step: d.step, dash: i === OUT, pts: windowed(d.pts, view.t0, view.t1) }; });
   const step = lines.length ? lines[0].step : 60;
+  for (const i of probes.filter(ctlShown)) {        // the controller's reading of the same water, dashed in its colour
+    const c = ctlOf(i), d = c >= 0 ? detailData(c) : null;
+    if (d) lines.push({ color: colorOf(i), name: `${nameOf(i)} · sterownik`, agg: d.agg, step: d.step, dash: true, pts: windowed(d.pts, view.t0, view.t1) });
+  }
   const limits = single && s0 ? [s0.high !== null && { v: s0.high, label: `maks. ${n1(s0.high)}°` }, s0.low !== null && { v: s0.low, label: `min. ${n1(s0.low)}°` }].filter(Boolean) : [];
   const MARK = { 3: '#ff453a', 4: '#ff453a', 6: '#ff453a', 8: '#ff9f0a', 5: '#30d158', 7: '#30d158', 9: '#30d158', [EV_BATH]: '#0a84ff' };
   const concerns = e => (e[1] === EV_BATH ? shown.includes(BOILER) || shown.includes(FURNACE)
@@ -1875,6 +2228,7 @@ function paintDetail() {
 
   const from = Math.max(view.t0, now.oldest || 0), to = Math.min(view.t1, tNow());
   $('#csv').href = `/api/csv?from=${Math.floor(from)}&to=${Math.ceil(to)}&step=${Math.min(pickStep(to - from), 3600)}`;
+  paintLanes();
 }
 
 function renderBurn() {
@@ -1900,18 +2254,21 @@ function refreshCharts() {
   const span = view.t1 - view.t0, zoomed = Math.abs(span - RANGES[ui.range]) > 60 || view.t1 < tNow() - 600;
   if (!zoomed) view = { t0: tNow() - span, t1: tNow() };
   paintDetail();
+  loadGecoForView().then(() => { if (!scrubbing) paintLanes(); });
 }
 
 // What the chart may show now: slots in use, the outdoor line with a location.
-const showable = i => (i === OUT ? now.settings.lat !== null : i < now.sensors.length && now.sensors[i].on !== false);
-const defaultShown = () => [FURNACE >= 0 ? FURNACE : inUse()[0]].filter(i => i !== undefined);
+const showable = i => (i === OUT ? now.settings.lat !== null : i < now.sensors.length && now.sensors[i].on !== false && ownLine(i));
+const defaultShown = () => [FURNACE >= 0 ? FURNACE : inUse().filter(ownLine)[0]].filter(i => i !== undefined);
 
 function renderCharts() {
   if (!now) return;
   ui.shown = ui.shown.filter(showable);
   if (!ui.shown.length) ui.shown = defaultShown();
-  const keys = inUse().concat(now.settings.lat !== null ? [OUT] : []);
-  $('#chips').innerHTML = keys.map(i => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${colorOf(i)};--cb:${rgba(colorOf(i), .14)}"><i></i>${esc(nameOf(i))}</button>`).join('');
+  const keys = inUse().filter(ownLine).concat(now.settings.lat !== null ? [OUT] : []);
+  // The controller's switch first, where it is seen without scrolling the row.
+  $('#chips').innerHTML = (keys.some(i => ctlOf(i) >= 0) ? `<button class="chip ctl ${ui.ctl ? 'on' : ''}" data-ctl="1" style="--c:#c7ccd6;--cb:rgba(199,204,214,.12)"><i></i>Sterownik</button>` : '')
+    + keys.map(i => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${colorOf(i)};--cb:${rgba(colorOf(i), .14)}"><i></i>${esc(nameOf(i))}</button>`).join('');
   if (!view) resetView(); else fetchForView();
   loadDays().then(() => { renderBurn(); renderCoalChart(); });
   loadJournal().then(() => { paintDetail(); renderPower(); });
@@ -2266,9 +2623,9 @@ const editing = el => {
 const fieldRows = fields => fields.map(f => `<div class="wrow"><span>${f[0]}</span><span><input type="text" inputmode="decimal" data-k="${f[1]}" value="${fmtNum(f[2])}"${f[4] ? ' data-empty="1" placeholder="–"' : ''}> ${f[3]}</span></div>`).join('');
 
 function warnBlock(w, on, desc, fields) {
-  const W = WARNINGS[w], color = ['c-orange', 'c-blue', 'c-red', 'c-gray', 'c-orange', 'c-gray'][w];
+  const W = WARNINGS[w], color = ['c-orange', 'c-blue', 'c-red', 'c-gray', 'c-orange', 'c-gray', 'c-orange'][w];
   return `<div class="warn-block ${on ? '' : 'off'}"><div class="warn-head"><span class="badge ${color}">${SVG(W.icon)}</span>${W.name}`
-    + `<input class="sw" type="checkbox" data-k="${['goOutOn', 'freezeOn', 'burnbackOn', 'lowCoalOn', 'stalledOn', 'ashOn'][w]}" ${on ? 'checked' : ''}></div>`
+    + `<input class="sw" type="checkbox" data-k="${['goOutOn', 'freezeOn', 'burnbackOn', 'lowCoalOn', 'stalledOn', 'ashOn', 'standbyOn'][w]}" ${on ? 'checked' : ''}></div>`
     + `<div class="warn-desc">${desc}</div>${fieldRows(fields)}</div>`;
 }
 
@@ -2534,7 +2891,7 @@ async function sendSubscription(sub) {
 
 const PUSH_KINDS = [
   ['alarm', 'Alarmy i czujniki', 'za gorąco, za zimno, czujnik nie odpowiada – i powrót do normy'],
-  ['warn', 'Ostrzeżenia', 'piec wygasa, mało węgla, cofanie żaru, popielnik…'],
+  ['warn', 'Ostrzeżenia', 'piec wygasa, sterownik nie w automacie, mało węgla, cofanie żaru, popielnik…'],
   ['power', 'Brak prądu', 'piec offline, zaniki prądu dłuższe niż minuta'],
   ['summary', 'Podsumowanie dnia', 'o 7:00: wczorajszy węgiel i koszt, godziny palenia, zaniki prądu'],
   ['water', 'Ciepła woda gotowa', 'bojler nagrzany – można się kąpać'],
@@ -2886,7 +3243,10 @@ const SET_PAGES = [
   { group: 'Piec' },
   { id: 'probes', title: 'Czujniki', icon: I_THERMO, cls: 'c-blue', status: () => (now.sensors[0] && now.sensors[0].addr !== undefined ? plural3(inUse().length) : '') },
   { id: 'limits', title: 'Progi alarmów', icon: I_THERMO, cls: 'c-red', status: () => { const n = now.sensors.filter(s => s.on !== false && (s.low !== null || s.high !== null)).length; return n ? plural3(n) : 'wyłączone'; } },
-  { id: 'warn', title: 'Ostrzeżenia', icon: I_FLAME, cls: 'c-orange', status: () => { const st = now.settings; return `${[st.goOutOn, st.freezeOn, st.burnbackOn, st.coalOn && st.lowCoalOn, st.stalledOn, st.coalOn && st.ashOn].filter(Boolean).length} z 6 włączonych`; } },
+  { id: 'warn', title: 'Ostrzeżenia', icon: I_FLAME, cls: 'c-orange', status: () => {
+    const st = now.settings, on = [st.goOutOn, st.freezeOn, st.burnbackOn, st.coalOn && st.lowCoalOn, st.stalledOn, st.coalOn && st.ashOn].concat(now.geco ? [st.standbyOn] : []);
+    return `${on.filter(Boolean).length} z ${on.length} włączonych`;
+  } },
   { id: 'boiler', title: 'Dane kotła', icon: I_BOILER, cls: 'c-orange', status: () => (now.settings.hopperKg > 0 ? `zasobnik ${kgText(now.settings.hopperKg)}` : 'uzupełnij') },
   { id: 'coal', title: 'Węgiel', icon: I_COAL, cls: 'c-gray', status: () => (now.settings.coalOn ? 'liczony' : 'wyłączony') },
   { id: 'season', title: 'Sezon grzewczy', icon: I_SUN, cls: 'c-blue', status: () => (now.settings.heating ? 'sezon grzewczy' : 'tryb lato') },
@@ -2953,16 +3313,22 @@ function renderSettings() {
       + `<div class="f">MIN<input type="text" inputmode="decimal" data-i="${i}" data-k="low" value="${fmtNum(s.low)}" placeholder="wył."></div>`
       + `<div class="f">MAKS<input type="text" inputmode="decimal" data-i="${i}" data-k="high" value="${fmtNum(s.high)}" placeholder="wył."></div></div>`).join('');
 
-  if (!editing($('#offsets')) && !offsetTimers.some(Boolean))
-    $('#offsets').innerHTML = now.sensors.map((s, i) => {
-      if (s.on === false) return '';
-      const raw = s.temp === null ? null : s.temp - (s.offset || 0);
+  if (!editing($('#offsets')) && !offsetTimers.some(Boolean)) {
+    // The controller's own probes are the reference here, not something to correct.
+    const paired = inUse().filter(i => ownLine(i) && ctlOf(i) >= 0);
+    $('#offsets').innerHTML = (paired.length ? `<div class="autooff"><button class="btn" data-auto="1">${SVG(I_CHIP)}Auto-korekta według sterownika</button>`
+      + `<div class="s">Ustawi korekty tak, żeby ${paired.map(i => esc(now.sensors[i].name)).join(', ')} pokazywały to samo co sterownik kotła – `
+      + 'ze średniej różnicy z ostatnich 2 godzin. Zanim zapisze, pokaże, co zmieni.</div></div>' : '')
+      + now.sensors.map((s, i) => {
+      if (s.on === false || !ownLine(i)) return '';
+      const raw = s.temp === null ? null : s.temp - (s.offset || 0), c = ctlOf(i), ct = c >= 0 ? now.sensors[c].temp : null;
       return `<div class="offr" style="--c:${COLORS[i]}"><div><label><span class="cd"></span>${esc(s.name)}</label>`
-        + `<div class="s">${s.temp === null ? 'brak odczytu' : `pokazuje ${n1(s.temp)}° · sam czujnik ${n1(raw)}°`}</div></div>`
+        + `<div class="s">${s.temp === null ? 'brak odczytu' : `pokazuje ${n1(s.temp)}° · sam czujnik ${n1(raw)}°`}${ct !== null ? ` · sterownik ${n1(ct)}°` : ''}</div></div>`
         + `<div class="stp"><button data-i="${i}" data-d="-0.1" aria-label="Mniej">−</button>`
         + `<input type="text" inputmode="text" data-i="${i}" value="${signed(s.offset || 0)}" autocomplete="off">`
         + `<button data-i="${i}" data-d="0.1" aria-label="Więcej">+</button></div></div>`;
     }).join('');
+  }
 
   if (!editing($('#warnset')))
     $('#warnset').innerHTML =
@@ -2970,6 +3336,7 @@ function renderSettings() {
       + warnBlock(1, st.freezeOn, 'Gdy woda w piecu, na powrocie lub w bojlerze robi się bardzo zimna.', [['Poniżej', 'freezeTemp', st.freezeTemp, '°C']])
       + warnBlock(2, st.burnbackOn, 'Gdy temperatura zasobnika rośnie szybko – żar może cofać się do węgla.', [['Wzrost szybszy niż', 'burnbackRate', st.burnbackRate, '°/h']])
       + warnBlock(4, st.stalledOn, 'Gdy po powrocie prądu piec dalej stygnie – sterownik mógł się sam nie uruchomić.', [])
+      + (now.geco ? warnBlock(6, st.standbyOn, 'Gdy sterownik kotła od 2 minut stoi w czuwaniu zamiast w automacie – tak wraca po każdym zaniku prądu i trzeba nacisnąć A. Prosto z modułu RS485 przy sterowniku.', []) : '')
       + (st.coalOn ? warnBlock(3, st.lowCoalOn, 'Gdy według szacunku węgla w zasobniku starczy już tylko na kilka godzin.', [['Starczy na mniej niż', 'lowCoalHours', st.lowCoalHours, 'godz.']])
         + warnBlock(5, st.ashOn, 'Przypomina o opróżnieniu popielnika – co nastąpi wcześniej. Przycisk „Wyczyściłem” jest w karcie węgla.', [['Po spaleniu', 'ashLimit', st.ashLimit, 'kg'], ['Albo po', 'ashDays', st.ashDays, 'dniach']]) : '')
       + `<div class="warn-block"><div class="warn-head"><span class="badge c-green">${SVG(I_WATER)}</span>Ciepła woda gotowa</div>`
@@ -3056,8 +3423,9 @@ function renderProbes(force) {
       + `<div class="pmeta"><span>${esc(d.kind || 'czujnik')} · miejsce ${i + 1}</span>`
       + (missing ? `<span class="pbad">${SVG('<path d="M6 6l12 12M18 6 6 18"/>')}nie odpowiada</span>` : '') + '</div>'
       + `<div class="proles">${ROLE_ORDER.map(r => {
-        const rc = ROLES[r].color || '#a3a8b3';
-        return `<button class="rchip${d.role === r ? ' on' : ''}" data-i="${i}" data-role="${r}" style="--c:${rc};--cb:${rgba(rc, .16)}">${SVG(ROLES[r].icon)}${ROLES[r].label}</button>`;
+        // A role another probe holds is greyed out: to move it, give that probe another role first.
+        const rc = ROLES[r].color || '#a3a8b3', taken = r !== 'other' && slotDraft.some((x, k) => k !== i && x.addr && x.role === r);
+        return `<button class="rchip${d.role === r ? ' on' : ''}" data-i="${i}" data-role="${r}" style="--c:${rc};--cb:${rgba(rc, .16)}"${taken ? ` disabled title="Ma go już inny czujnik"` : ''}>${SVG(ROLES[r].icon)}${ROLES[r].label}</button>`;
       }).join('')}</div>`
       + (missing ? `<button class="plink" data-free="${i}">Zwolnij miejsce</button>` : '')
       // A probe placed by itself at a start (a replacement put in with the power off) takes over a slot's history.
@@ -3078,13 +3446,12 @@ function renderProbes(force) {
   $('#probesave').disabled = !draftChanged();
 }
 
-// Each furnace role belongs to one probe: choosing it here takes it from the probe that had it.
+// Each furnace role belongs to one probe: one held elsewhere is greyed out (renderProbes) and cannot be chosen.
 function onProbeClick(e) {
   const chip = e.target.closest('.rchip'), add = e.target.closest('[data-add]'), free = e.target.closest('[data-free]');
   if (chip) {
-    const i = +chip.dataset.i, r = chip.dataset.role;
-    if (r !== 'other') slotDraft.forEach((d, k) => { if (k !== i && d.role === r) d.role = 'other'; });
-    slotDraft[i].role = r;
+    if (chip.disabled) return;
+    slotDraft[+chip.dataset.i].role = chip.dataset.role;
   } else if (add) {
     // A slot free on the device too - one emptied here still holds the old probe's history.
     let i = slotDraft.findIndex((d, k) => !d.addr && !(now.sensors[k] && now.sensors[k].addr));
@@ -3155,9 +3522,31 @@ async function saveOffset(i, input) {
   await saveSetting({ ['off' + i]: v.toFixed(1) }, `${now.sensors[i].name}: korekta ${signed(v)}°`);
 }
 
+// One tap: each probe on the controller's water gets the correction that makes it read what the controller reads -
+// from two hours of minutes, not one reading, as the controller tells only half degrees.
+async function autoOffsets() {
+  if (readOnly()) return toast('Kod serwisowy pozwala tylko oglądać');
+  const fields = {}, lines = [], skipped = [];
+  for (const i of inUse().filter(ownLine)) {
+    const c = ctlOf(i), s = now.sensors[i];
+    if (c < 0) continue;
+    const d = ctlDiffs(i, c, 120);
+    if (d.length < 10) { skipped.push(`${s.name}: za mało wspólnych odczytów – spróbuj za kwadrans`); continue; }
+    const v = Math.round(((s.offset || 0) + typicalDiff(d)) * 10) / 10;
+    if (Math.abs(v) > 10) { skipped.push(`${s.name}: różnica ponad 10° – sprawdź, czy czujnik siedzi na rurze`); continue; }
+    fields['off' + i] = v.toFixed(1);
+    lines.push(`${s.name}: ${signed(s.offset || 0)}° → ${signed(v)}°`);
+  }
+  if (!lines.length) return toast(skipped[0] || 'Nie ma czujników do wyrównania');
+  if (!await confirmDialog('Wyrównać do sterownika?', lines.concat(skipped).join('\n'), 'Ustaw')) return;
+  await saveSetting(fields, 'Korekty ustawione według sterownika');
+  render();
+}
+
 function onOffsetStep(e) {
   const b = e.target.closest('button');
   if (!b) return;
+  if (b.dataset.auto) return autoOffsets();
   const i = +b.dataset.i, input = $(`#offsets input[data-i="${i}"]`);
   const v = clamp(Math.round(((parseSigned(input.value) || 0) + +b.dataset.d) * 10) / 10, -10, 10);
   input.value = signed(v);
@@ -3381,9 +3770,16 @@ function setup() {
     saveUi();
     renderHome();
   };
+  $('#legend').onclick = e => {
+    if (!e.target.closest('[data-ctl]')) return;
+    ui.ctl = !ui.ctl;
+    saveUi();
+    renderHome();
+  };
   $('#chips').onclick = e => {
     const c = e.target.closest('.chip');
     if (!c) return;
+    if (c.dataset.ctl) { ui.ctl = !ui.ctl; saveUi(); renderCharts(); return; }
     const i = c.dataset.i === OUT ? OUT : +c.dataset.i;
     ui.shown = ui.shown.includes(i) ? (ui.shown.length > 1 ? ui.shown.filter(x => x !== i) : ui.shown) : ui.shown.concat(i);
     saveUi();
@@ -3533,7 +3929,8 @@ function setup() {
   }
   setup();
   loadCache();
-  try { showTab(ui.tab); } catch (e) { now = null; live = []; journal = []; days = []; showTab(ui.tab); }   // a broken cache must not block
+  // A fresh start opens at the first tab; coming back from the background keeps the tab, as nothing reloads then.
+  try { showTab('home'); } catch (e) { now = null; live = []; journal = []; days = []; showTab('home'); }   // a broken cache must not block
   await refreshNow();
   await Promise.all([loadLive(), loadJournal()]);
   render();
