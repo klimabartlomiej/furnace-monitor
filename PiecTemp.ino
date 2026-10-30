@@ -74,7 +74,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 28;                   // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 29;                  // bump for every release (release/publish.ps1)
 // Each board has its own release channel - a firmware for the other chip must never be offered.
 #if CONFIG_IDF_TARGET_ESP32S3
 const char* UPDATE_MANIFEST_URL =
@@ -129,6 +129,9 @@ constexpr uint8_t  TC_SCK_PIN         = 12;              // the S3's default SPI
 constexpr uint8_t  TC_SO_PIN          = 13;
 constexpr int8_t   GECO_RX_PIN        = 18;              // TXD of the RS485 module on the Geco controller's panel bus -
                                                          // receive only (GecoBus.h)
+// Free header pins where the bus is looked for while GPIO18 hears nothing (RO on a neighbour): no strapping pin
+// (0, 3, 45, 46), no flash/PSRAM (26-37), no USB (19, 20), no console (43, 44), none of the pins above.
+constexpr int8_t   GECO_SCAN_PINS[]   = {1, 2, 5, 6, 7, 8, 9, 11, 14, 15, 16, 17, 21, 38, 39, 40, 41, 42, 47};
 #else
 constexpr uint8_t  STATUS_LED_PIN     = 2;               // blue on-board LED on most ESP32 dev boards
 constexpr uint8_t  ONE_WIRE_PIN       = 22;              // D22 - GPIO of the DQ (data) wire, 4.7k pull-up to 3.3V
@@ -136,6 +139,7 @@ constexpr int8_t   TC_CS_PIN          = -1;              // no thermocouple on t
 constexpr uint8_t  TC_SCK_PIN         = 0;
 constexpr uint8_t  TC_SO_PIN          = 0;
 constexpr int8_t   GECO_RX_PIN        = -1;              // no controller bus on the classic board
+constexpr int8_t   GECO_SCAN_PINS[]   = {-1};
 #endif
 constexpr uint32_t READ_INTERVAL_MS   = 60 * 1000;       // one reading per minute (on the full minute once NTP is in)
 constexpr uint32_t CONVERSION_MS      = 800;             // 12-bit conversion takes 750 ms
@@ -1766,6 +1770,12 @@ void handleNow() {
     for (uint8_t ch = 1; ch <= 3; ch++) j += (ch > 1 ? "," : "") + jsonNumber(geco.temp(ch), 1);
     j += "],\"good\":"; j += geco.goodFrames();
     j += ",\"bad\":";   j += geco.badFrames();
+    j += ",\"bytes\":"; j += geco.rawBytes();             // the connection check (GecoBus.h)
+    j += ",\"pin\":";   j += (int)geco.pin();
+    j += ",\"inv\":";   j += geco.inverted() ? "true" : "false";
+    j += ",\"line\":\"";
+    if (geco.line()) j += geco.line();
+    j += "\",\"raw\":\""; j += geco.rawHex(); j += '"';
     j += '}';
   }
   j += ",\"warnings\":[";
@@ -2642,7 +2652,8 @@ void setup() {
 
   bus.begin();
   bus.setWaitForConversion(false);
-  geco.begin(GECO_RX_PIN);                   // listens from now on; loadSlots gives it a moment to be heard
+  geco.begin(GECO_RX_PIN, GECO_SCAN_PINS, sizeof(GECO_SCAN_PINS));   // listens from now on; loadSlots gives it
+                                                                     // a moment to be heard
   prefs.begin("furnace", false);
   loadSlots();
   Serial.print(busReport());

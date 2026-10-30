@@ -81,18 +81,31 @@ panel can set only u0 and u4 anyway; service parameters (fan, feeder, F18) stay 
 
 ## In the firmware (v28, S3 only)
 
-`GecoBus.h` listens through a TTL-RS485 module (automatic direction) on the same terminals:
+`GecoBus.h` listens through an RS485 breakout (pins RO, /RE DE, DI, G, VIO, 5V; terminal G, B/-, A/+; switches
+PUPD and 120 ohm) on the same terminals:
 
 | Module | S3 / controller |
 |---|---|
-| VCC | 3V3 |
-| GND | G |
-| TXD (what the module receives) | GPIO 18 |
-| RXD (what the module would send) | 3V3 - held idle, so it never drives the line |
-| A+ / B- | terminal 22 / 21 |
-| 120 ohm terminator (R0 jumper) | open |
+| RO (what the module receives) | GPIO 18 |
+| /RE DE | GND - receiver on, driver off, so it never drives the line |
+| DI | not connected |
+| G | GND |
+| VIO | 3V3 |
+| 5V | 5V (the board's 5V pin carries USB power - on some S3 clones only from one of the two USB ports) |
+| A/+ / B/- | terminal 22 / 21; the module's own G not connected |
+| PUPD (bias) | on |
+| 120 ohm | off |
 
-The UART is opened without a TX pin, so the ESP cannot send. What it hears:
+The UART is opened without a TX pin, so the ESP cannot send. Until the first good frame the firmware checks the
+connection by itself (v29): every 30 s (5 min after the first 10) it reads GPIO 18 with the pull-up and then the
+pull-down - toggling = data, held high/low = the module's receiver drives it, following the pull = nothing drives
+it (no 5V, /RE not low, or RO elsewhere). Data without frames flips the UART's RX inversion (A and B swapped); a
+silent pin makes it look for the bus on the free header pins (`GECO_SCAN_PINS`, no strapping pins) and listen
+there. `/api/now` -> `geco`: `bytes` (received at all), `pin`, `inv`, `line` ('d' / 'h' / 'l' / 'f'), `raw` (the
+last 16 bytes as received). On 2026-10-30 the first module, wired as above with PUPD off and then on, gave no byte
+in 30 minutes.
+
+What it hears:
 
 - `/api/now` -> `geco`: seconds since the last good frame (`age`, -1 = never heard), `mode`, `out`, `flags` (P3), `since`
   (when that state began), `t` (the controller's three temperatures), good/bad frame counts.
