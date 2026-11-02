@@ -91,19 +91,21 @@ PUPD and 120 ohm) on the same terminals:
 | DI | not connected |
 | G | GND |
 | VIO | 3V3 |
-| 5V | 5V (the board's 5V pin carries USB power - on some S3 clones only from one of the two USB ports) |
+| 5V | 3V3 too, bridged to VIO on the module (the module is rated for 3.3 V). Not the S3's 5V pin: it is an input only ("5V in") - wired there the transceiver got 0.69 V and heard nothing |
 | A/+ / B/- | terminal 22 / 21; the module's own G not connected |
 | PUPD (bias) | on |
 | 120 ohm | off |
 
 The UART is opened without a TX pin, so the ESP cannot send. Until the first good frame the firmware checks the
 connection by itself (v29): every 30 s (5 min after the first 10) it reads GPIO 18 with the pull-up and then the
-pull-down - toggling = data, held high/low = the module's receiver drives it, following the pull = nothing drives
-it (no 5V, /RE not low, or RO elsewhere). Data without frames flips the UART's RX inversion (A and B swapped); a
+pull-down - toggling = data, held high/low = the module drives it (an idle line, or the transceiver unpowered while
+VIO keeps its RO side alive), following the pull = nothing drives it (no VIO, or RO on another pin). Data without
+frames flips the UART's RX inversion (A and B swapped); a
 silent pin makes it look for the bus on the free header pins (`GECO_SCAN_PINS`, no strapping pins) and listen
 there. `/api/now` -> `geco`: `bytes` (received at all), `pin`, `inv`, `line` ('d' / 'h' / 'l' / 'f'), `raw` (the
-last 16 bytes as received). On 2026-10-30 the first module, wired as above with PUPD off and then on, gave no byte
-in 30 minutes.
+last 16 bytes as received). On 2026-10-30 the module, its 5V pin on the S3's 5V pin, gave no byte in 30 minutes
+(line 'h'); on the bench (2026-11-02, the ESP driving A/B itself) the same module decoded every frame as soon as
+its 5V pin went to 3V3.
 
 What it hears:
 
