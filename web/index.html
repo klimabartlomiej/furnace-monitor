@@ -770,18 +770,18 @@ function saveCache() {
   if (!now) return;
   try {
     Object.keys(localStorage).filter(k => k.startsWith('furnace-cache-') && k !== CACHE_KEY).forEach(k => localStorage.removeItem(k));
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: lastOk || Date.now(), now, live, journal, days, outdoor }));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: lastOk || Date.now(), now, live, liveTodo, journal, days, outdoor }));
   } catch (e) {}
 }
 function dropCache() {
-  live = []; series = null; days = []; daysAt = 0; journal = []; journalAt = 0; refillsAt = 0; missedMemo.key = '';
+  live = []; liveTodo = []; series = null; days = []; daysAt = 0; journal = []; journalAt = 0; refillsAt = 0; missedMemo.key = '';
   try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
 }
 function loadCache() {
   try {
     const c = JSON.parse(localStorage.getItem(CACHE_KEY));
     if (!c || !c.now || Date.now() - c.at > 3 * 86400e3) return;
-    ({ now, live = [], journal = [], days = [] } = c);
+    ({ now, live = [], liveTodo = [], journal = [], days = [] } = c);
     mapRoles(now);
     Object.assign(outdoor, c.outdoor);
     lastOk = c.at;
@@ -959,24 +959,52 @@ function parseDays(buf) {
 
 const seriesUrl = (from, to, step) => `/api/series?from=${Math.floor(from)}&to=${Math.ceil(to)}&step=${step}`;
 
-// The last 26 hours minute by minute, topped up every minute (cards, overview, today).
-// One load at a time (resume and the minute timer would otherwise append the same minutes twice), never more than
-// LIVE_SPAN back, only minutes newer than what is held.
-let liveLoading = null;
+// The last 26 hours minute by minute, topped up every minute (cards, overview, today, every chart inside that span).
+// What is missing is fetched in two-hour pieces, newest first, and drawn after each one: back after hours away, the
+// latest hours show at once and no request comes near the timeout (the ESP sends ~8 KB/s through the relay - a whole
+// day at once took ~10 s and, failing on a slow phone line, started again from scratch every minute). The ranges
+// still to fetch (liveTodo, newest first) outlive a load cut short and the cache, so the next load carries on where
+// this one stopped. One load at a time, never more than LIVE_SPAN back.
+const LIVE_PIECE = 2 * 3600;
+let liveLoading = null, liveTodo = [];
 function loadLive() {
   if (!now || !nowFresh) return Promise.resolve();
   if (!liveLoading) liveLoading = (async () => {
-    const t = tNow(), last = live.length ? live[live.length - 1].t : 0;
+    const t = tNow(), cut = t - LIVE_SPAN, top = live.length ? live[live.length - 1].t + 60 : cut;
+    liveTodo = [[top, t], ...liveTodo].map(([a, b]) => [Math.max(a, cut), b]).filter(([a, b]) => a <= b);
     try {
-      const add = parseBuckets(await (await api(seriesUrl(Math.max(last + 60, t - LIVE_SPAN), t, 60))).arrayBuffer());
-      const top = live.length ? live[live.length - 1].t : 0;
-      live = live.concat(add.filter(b => b.t > top));
-      const cut = t - LIVE_SPAN;
-      while (live.length && live[0].t < cut) live.shift();
+      while (liveTodo.length) {
+        const [a, b] = liveTodo[0], from = Math.max(a, b - LIVE_PIECE);
+        const add = parseBuckets(await (await api(seriesUrl(from, b, 60))).arrayBuffer());
+        const held = new Set(live.map(x => x.t));
+        live = live.concat(add.filter(x => !held.has(x.t))).sort((x, y) => x.t - y.t);
+        if (from > a) liveTodo[0] = [a, from - 1];
+        else liveTodo.shift();
+        if (liveTodo.length) render(true);                  // the last piece is drawn by the caller
+      }
     } catch (e) {}
+    while (live.length && live[0].t < cut) live.shift();
     liveLoading = null;
   })();
   return liveLoading;
+}
+
+// The minutes held in `live` folded into buckets of `step`, exactly as the ESP folds them (bucket start, min of the
+// minutes, their mean, max): a view inside the last 26 hours is drawn from the phone with no request.
+function folded(i, step) {
+  const out = [];
+  for (const b of live) {
+    const x = b.v[i];
+    if (!x) continue;
+    const t = b.t - b.t % step, last = out[out.length - 1];
+    if (last && last[0] === t) {
+      last[1] = Math.min(last[1], x[0]);
+      last[2] += x[1];
+      last[3] = Math.max(last[3], x[2]);
+      last[4]++;
+    } else out.push([t, x[0], x[1], x[2], 1]);
+  }
+  return out.map(p => [p[0], p[1], p[2] / p[4], p[3]]);
 }
 
 // Daily records: all once, then only the new ones; sooner when the newest is older than yesterday (after midnight).
@@ -2166,12 +2194,12 @@ async function fetchForView() {
   const span = view.t1 - view.t0, step = pickStep(span), ticket = ++fetching;
   const wantOut = ui.shown.includes(OUT);
   if (step === 86400) await loadDays();
-  else if (nowFresh && !(step === 60 && view.t0 >= tNow() - LIVE_SPAN + 60)) {
+  else if (nowFresh && !inLive()) {
     const fresh = series && series.step === step && series.from <= view.t0 && series.to >= Math.min(view.t1, tNow() - 90) && Date.now() - series.at < 60e3;
     if (!fresh) {
       const from = view.t0 - span / 2, to = Math.min(tNow(), view.t1 + span / 2);
       try {
-        const b = parseBuckets(await (await api(seriesUrl(from, to, step))).arrayBuffer());
+        const b = parseBuckets(await (await api(seriesUrl(from, to, step), {}, 30000)).arrayBuffer());
         if (ticket === fetching) series = { step, from, to, b, at: Date.now() };
       } catch (e) {}
     }
@@ -2181,6 +2209,9 @@ async function fetchForView() {
   if (ticket === fetching) paintDetail();
 }
 
+// The view lies inside the last 26 hours, which `live` holds minute by minute.
+const inLive = () => view.t0 >= tNow() - LIVE_SPAN + 60;
+
 function detailData(i) {
   const span = view.t1 - view.t0, step = pickStep(span);
   if (i === OUT) {
@@ -2188,7 +2219,7 @@ function detailData(i) {
     return { agg: pts === outdoor.daily, step: pts === outdoor.daily ? 86400 : 3600, pts };
   }
   if (step === 86400) return { agg: true, step, pts: days.map(d => d.v[i] ? [d.t, d.v[i][0], d.v[i][1], d.v[i][2]] : null).filter(Boolean) };
-  if (step === 60 && view.t0 >= tNow() - LIVE_SPAN + 60) return { agg: false, step, pts: points(live, i, false) };
+  if (inLive()) return step === 60 ? { agg: false, step, pts: points(live, i, false) } : { agg: true, step, pts: folded(i, step) };
   if (series) return { agg: series.step > 60, step: series.step, pts: points(series.b, i, series.step > 60) };
   return { agg: false, step: 60, pts: points(live, i, false) };
 }
