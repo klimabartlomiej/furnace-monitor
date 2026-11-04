@@ -442,6 +442,12 @@ nav.tabs svg{width:27px;height:27px}
 nav.tabs button.on{color:var(--text)}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 86px);transform:translate(-50%,16px);opacity:0;background:rgba(52,56,66,.96);padding:11px 18px;border-radius:999px;font-weight:600;font-size:14px;transition:all .25s;z-index:40;pointer-events:none;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.4)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
+.ptr{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 8px);transform:translate(-50%,-64px);opacity:0;display:flex;align-items:center;gap:8px;background:rgba(52,56,66,.96);color:var(--text);padding:9px 16px 9px 13px;border-radius:999px;font-weight:600;font-size:14px;z-index:45;pointer-events:none;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.ptr svg{width:18px;height:18px;transition:transform .2s}
+.ptr.armed svg{transform:rotate(180deg)}
+.ptr.busy svg{animation:spin .9s linear infinite}
+.ptr.settle{transition:transform .25s,opacity .25s}
+@keyframes spin{to{transform:rotate(360deg)}}
 .sk{border-radius:var(--r);height:164px;background:linear-gradient(90deg,#15181e 25%,#1d2129 50%,#15181e 75%);background-size:200% 100%;animation:sk 1.3s infinite}
 @keyframes sk{to{background-position:-200% 0}}
 </style>
@@ -619,6 +625,7 @@ nav.tabs button.on{color:var(--text)}
   </div>
 </section>
 <div class="toast" id="toast"></div>
+<div class="ptr" id="ptr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5.5 12.5 12 19l6.5-6.5"/></svg><span id="ptrt"></span></div>
 
 <script>
 'use strict';
@@ -724,6 +731,7 @@ const CHANGES = {
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
   27: 'Pewniejsza aktualizacja: zapis czujników, przywrócenie kopii albo wyczyszczenie historii tuż po aktualizacji nie cofa już nowej wersji. Nazwy czujników z uszkodzonymi znakami są odrzucane.',
+  30: 'Węgiel liczony z pracy podajnika: gdy piec słyszy sterownik, zużycie, stan zasobnika i „Starczy na…” idą z czasu pracy podajnika, nie z temperatur – skalę uczy się z dosypań do pełna (do tego czasu bierze ją z temperatur). Sterownik dzień po dniu: w „Dzisiaj” godziny palenia i podtrzymania, przedmuchy, cykle tłoka i praca podajnika, w Miesiącach to samo za miesiąc, a paski pracy pod wykresem także dla 30 dni i roku. Piec pamięta każdy ruch sterownika przez ok. 2 miesiące zimą (było ok. tygodnia), a godzinowe podsumowania przez lata. Pociągnij ekran w dół, aby odświeżyć. Wykres po powrocie do aplikacji nie zatrzymuje się już na starych danych.',
   29: 'Moduł RS485 przy sterowniku: dopóki piec nie usłyszy sterownika, sam sprawdza podłączenie – czy z modułu cokolwiek dochodzi, czy przewody A i B nie są zamienione (wtedy odwraca je programowo) i czy sygnał nie trafił na inny pin płytki (wtedy słucha tam).',
   28: 'Sterownik kotła na żywo (z modułem RS485 przy sterowniku Geco): na górze ekranu głównego animowany kocioł – palenie, podtrzymanie i przedmuch, wentylator, podajnik z położeniem tłoka, pompa CO, temperatury sterownika i ile węgla zostało w zasobniku. Pod wykresami paski pracy: kiedy był tryb palenia, kiedy dmuchał wentylator, kiedy pchał podajnik i kiedy chodziła pompa – na tej samej osi co temperatury. Nowe ostrzeżenie „Sterownik nie w automacie” z powiadomieniem – po zaniku prądu sterownik czeka, aż ktoś naciśnie A. Odczyt sterownika na kafelkach pieca, zasobnika i bojlera, a na wykresie jako przerywana linia (przycisk „Sterownik”); gdy nasz czujnik i sterownik rozjadą się o ponad 5°, pojawi się ostrzeżenie. Auto-korekta czujników według sterownika w Ustawienia → Korekta wskazań. Aplikacja po uruchomieniu otwiera się zawsze na Przeglądzie, a w Czujnikach rola zajęta przez inny czujnik jest wyszarzona.',
   26: 'Nowa płytka ESP32-S3: więcej pamięci, historia co minutę z około 3 miesięcy zamiast 31 dni. Ustawienia → Czujniki: każdy czujnik ma kafelek z nazwą, temperaturą na żywo, włącznikiem i rolą (Piec, Powrót, Zasobnik węgla, Bojler, Spaliny, Inny) – nowy czujnik pojawia się sam, a „Użyj zamiast…” przejmuje historię starego. Termopara na spalinach od razu dostaje rolę Spaliny. Raport diagnostyczny ma dzienne liczniki (rozłączenia, błędy czujników, pamięć) i ostatnią awarię. Kod serwisowy (Dostęp zdalny): podgląd pieca dla kogoś, kto pomaga – bez możliwości zmian, wygasa sam.',
@@ -770,18 +778,22 @@ function saveCache() {
   if (!now) return;
   try {
     Object.keys(localStorage).filter(k => k.startsWith('furnace-cache-') && k !== CACHE_KEY).forEach(k => localStorage.removeItem(k));
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: lastOk || Date.now(), now, live, liveTodo, journal, days, outdoor }));
+    const keep = tNow() - 40 * 86400 - (tNow() - 40 * 86400) % 3600, hours = work.filter(w => w.t >= keep).map(w => WORK_KEYS.map(k => w[k]));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: lastOk || Date.now(), now, live, liveTodo, journal, days, outdoor, work: hours,
+      workFrom: workFrom && Math.max(workFrom, keep) }));
   } catch (e) {}
 }
 function dropCache() {
   live = []; liveTodo = []; series = null; days = []; daysAt = 0; journal = []; journalAt = 0; refillsAt = 0; missedMemo.key = '';
+  work = []; workFrom = 0; workAt = 0;
   try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
 }
 function loadCache() {
   try {
     const c = JSON.parse(localStorage.getItem(CACHE_KEY));
     if (!c || !c.now || Date.now() - c.at > 3 * 86400e3) return;
-    ({ now, live = [], liveTodo = [], journal = [], days = [] } = c);
+    ({ now, live = [], liveTodo = [], journal = [], days = [], workFrom = 0 } = c);
+    work = (c.work || []).map(a => Object.fromEntries(WORK_KEYS.map((k, i) => [k, a[i]])));
     mapRoles(now);
     Object.assign(outdoor, c.outdoor);
     lastOk = c.at;
@@ -861,7 +873,8 @@ function updateText(s) {
 
 // ---------------------------------------------------------------- data
 
-// Every request gives up after `ms` - a hung one must not leave old data looking current.
+// Every request gives up after `ms` - a hung one must not leave old data looking current. The body is read under the
+// same timeout: the ESP sends its headers first and then does the work, so a stall comes after them.
 async function api(path, opt = {}, ms = 12000) {
   if (readOnly() && opt.method === 'POST') {
     toast('Kod serwisowy pozwala tylko oglądać');
@@ -875,9 +888,9 @@ async function api(path, opt = {}, ms = 12000) {
   }
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
   try {
-    const r = await fetch(path, Object.assign({ cache: 'no-store', signal: ctl.signal }, opt));
-    if (!r.ok) throw new Error(await r.text() || r.status);
-    return r;
+    const r = await fetch(path, Object.assign({ cache: 'no-store', signal: ctl.signal }, opt)), body = await r.arrayBuffer();
+    if (!r.ok) throw new Error(new TextDecoder().decode(body) || r.status);
+    return new Response(body, { status: r.status, headers: r.headers });
   } finally {
     clearTimeout(timer);
   }
@@ -963,30 +976,53 @@ const seriesUrl = (from, to, step) => `/api/series?from=${Math.floor(from)}&to=$
 // What is missing is fetched in two-hour pieces, newest first, and drawn after each one: back after hours away, the
 // latest hours show at once and no request comes near the timeout (the ESP sends ~8 KB/s through the relay - a whole
 // day at once took ~10 s and, failing on a slow phone line, started again from scratch every minute). The ranges
-// still to fetch (liveTodo, newest first) outlive a load cut short and the cache, so the next load carries on where
-// this one stopped. One load at a time, never more than LIVE_SPAN back.
+// still to fetch (liveTodo, newest first, overlaps merged) outlive a load cut short and the cache, so the next load
+// carries on where this one stopped. One load at a time, never more than LIVE_SPAN back - but a load still running
+// after 30 s (a request cut off while the phone slept never comes back) is let go: a new one takes over, and the old
+// one, should it wake, changes nothing. Coming back to the app forces a new one; after a failure one more try comes
+// in 5 s (then the minute's own).
 const LIVE_PIECE = 2 * 3600;
-let liveLoading = null, liveTodo = [];
-function loadLive() {
+let liveLoading = null, liveGen = 0, liveSince = 0, liveRetry = 0, liveFails = 0, liveTodo = [];
+function loadLive(force) {
   if (!now || !nowFresh) return Promise.resolve();
-  if (!liveLoading) liveLoading = (async () => {
+  if (liveLoading && !force && Date.now() - liveSince < 30e3) return liveLoading;
+  const gen = ++liveGen;
+  liveSince = Date.now();
+  clearTimeout(liveRetry);
+  liveLoading = (async () => {
     const t = tNow(), cut = t - LIVE_SPAN, top = live.length ? live[live.length - 1].t + 60 : cut;
-    liveTodo = [[top, t], ...liveTodo].map(([a, b]) => [Math.max(a, cut), b]).filter(([a, b]) => a <= b);
+    liveTodo = mergeRanges([[top, t], ...liveTodo].map(([a, b]) => [Math.max(a, cut), b]).filter(([a, b]) => a <= b));
+    let failed = false;
     try {
       while (liveTodo.length) {
         const [a, b] = liveTodo[0], from = Math.max(a, b - LIVE_PIECE);
         const add = parseBuckets(await (await api(seriesUrl(from, b, 60))).arrayBuffer());
+        if (gen !== liveGen) return;                        // a newer load took over
         const held = new Set(live.map(x => x.t));
         live = live.concat(add.filter(x => !held.has(x.t))).sort((x, y) => x.t - y.t);
         if (from > a) liveTodo[0] = [a, from - 1];
         else liveTodo.shift();
         if (liveTodo.length) render(true);                  // the last piece is drawn by the caller
       }
-    } catch (e) {}
+    } catch (e) { failed = true; }
+    if (gen !== liveGen) return;
     while (live.length && live[0].t < cut) live.shift();
     liveLoading = null;
+    liveFails = failed ? liveFails + 1 : 0;
+    if (liveFails === 1 && !document.hidden) liveRetry = setTimeout(() => loadLive().then(() => render(true)), 5000);
   })();
   return liveLoading;
+}
+
+// [from, to] ranges newest first, those that overlap or touch made one.
+function mergeRanges(list) {
+  const out = [];
+  for (const [a, b] of list.slice().sort((x, y) => y[1] - x[1])) {
+    const last = out[out.length - 1];
+    if (last && b >= last[0] - 60) last[0] = Math.min(last[0], a);
+    else out.push([a, b]);
+  }
+  return out;
 }
 
 // The minutes held in `live` folded into buckets of `step`, exactly as the ESP folds them (bucket start, min of the
@@ -1623,6 +1659,7 @@ function renderHome() {
   renderToday();
   renderWeek();
   loadDays().then(() => { if (ui.tab === 'home') renderWeek(); });
+  loadWork(tNow() - 31 * 86400).then(() => { if (ui.tab === 'home') { renderCoal(); renderToday(); renderWeek(); } });
 }
 
 // Our probe and the controller's on the same water disagree for a quarter of an hour: a probe off its pipe, or one
@@ -1641,6 +1678,13 @@ function renderToday() {
   if (s[FURNACE] && s[RETURN] && s[FURNACE].temp !== null && s[RETURN].temp !== null)
     rows.push(['Piec → powrót', 'ciepło oddawane do domu', `${n1(s[FURNACE].temp - s[RETURN].temp)}°`, '']);
   if (FURNACE >= 0) rows.push(['Piec pracuje', `dziś powyżej ${n1(burnThreshold())}°`, dur(burnSeconds(m, tNow())), '']);
+  const w = gecoHeard() ? workSum(m, tNow() + 1) : null;      // the controller's own day
+  if (w) {
+    rows.push(['Palenie', 'sterownik, dziś', dur(w.burning), '']);
+    rows.push(['Podtrzymanie', `przedmuchy: ${w.blows}`, dur(w.holding), '']);
+    rows.push(['Podajnik', `${w.strokes} ${plural(w.strokes, 'cykl', 'cykle', 'cykli')} tłoka`, durShort(Math.round(w.feed)), '']);
+    if (w.standby >= 60) rows.push(['Czuwanie', 'sterownik nie w automacie', dur(w.standby), '']);
+  }
   const cuts = outages().filter(c => c.t1 >= m);
   rows.push(['Zaniki prądu', 'dziś', cuts.length ? `${cuts.length} · ${durShort(cuts.reduce((a, c) => a + c.sec, 0))}` : 'brak', cuts.length ? '' : 'good']);
   const b = s[BOILER];
@@ -1798,6 +1842,11 @@ function loadGecoForView() {
   const span = view.t1 - view.t0, m = span > 2 * 86400 ? 0 : span / 2;
   return span <= 8 * 86400 ? loadGeco(view.t0 - m, Math.min(tNow(), view.t1 + m)) : Promise.resolve();
 }
+// The lanes' data for the view: the log up to 8 days, the hours beyond.
+function loadLanesForView() {
+  return view.t1 - view.t0 <= 8 * 86400 ? loadGecoForView() : loadWork(view.t0);
+}
+
 async function loadGecoNow(from, to) {
   const g = gecoLog, url = (a, b) => `/api/geco?from=${Math.floor(a)}&to=${Math.ceil(b)}`;
   try {
@@ -1833,7 +1882,9 @@ function gecoPieces(t0, t1) {
 // Lanes under the detail chart, on its time axis: mode, fan, feeder, piston, CO pump. Drawn per pixel column: a
 // column shows how much of its time an output ran (faint = short pulses, like the feeder's portions while burning;
 // full = it ran throughout) and the mode that held most of it - standby and a przedmuch win any column they touch, so
-// a short one is never hidden. A week of portions stays a few hundred rectangles.
+// a short one is never hidden. A week of portions stays a few hundred rectangles. Views up to 8 days come from the
+// log, longer ones from the hours (each hour's seconds spread evenly over it - no przedmuch or piston there, and a
+// column shows the mode that held most of it).
 const LANES = [
   ['Tryb', null],
   ['Went.', e => e.out & G_FAN, '#64d2ff'],
@@ -1844,18 +1895,36 @@ const LANES = [
 function paintLanes() {
   const box = $('#lanes'), geo = $('#detail').geom;
   if (!box) return;
-  if (!geo || !gecoLog || !gecoLog.ev.length || geo.o.t1 - geo.o.t0 > 9 * 86400) { box.innerHTML = ''; return; }
+  const fromLog = geo && gecoLog && gecoLog.ev.length && geo.o.t1 - geo.o.t0 <= 8 * 86400;
+  const hours = geo && !fromLog ? work.filter(w => w.t + 3600 > geo.o.t0 && w.t < geo.o.t1) : [];
+  if (!fromLog && !hours.length) { box.innerHTML = ''; return; }
   const { o, L, pw, W } = geo, cols = Math.ceil(pw), per = (o.t1 - o.t0) / pw, H = 12, gap = 4;
-  // Seconds per column: on-time of each output lane, time of each mode.
+  // Seconds per column: on-time of each output lane, time of each mode. spread: f(column, seconds) for every column
+  // [a, b) reaches into.
   const on = LANES.map(() => new Float32Array(cols)), modes = {};
-  for (const [a, b, e] of gecoPieces(o.t0, o.t1)) {
-    const what = e.mode ? gecoWhat(e.mode, e.out) : null, lit = LANES.map(([, test]) => test && test(e));
-    for (let c = Math.floor((a - o.t0) / per); c < cols; c++) {
+  const addMode = (m, c, s) => { (modes[m] || (modes[m] = new Float32Array(cols)))[c] += s; };
+  const spread = (a, b, f) => {
+    for (let c = Math.max(0, Math.floor((a - o.t0) / per)); c < cols; c++) {
       const c0 = o.t0 + c * per, s = Math.min(b, c0 + per) - Math.max(a, c0);
       if (s <= 0) break;
-      lit.forEach((x, k) => { if (x) on[k][c] += s; });
-      if (what) (modes[what] || (modes[what] = new Float32Array(cols)))[c] += s;
+      f(c, s);
     }
+  };
+  if (fromLog) for (const [a, b, e] of gecoPieces(o.t0, o.t1)) {
+    const what = e.mode ? gecoWhat(e.mode, e.out) : null, lit = LANES.map(([, test]) => test && test(e));
+    spread(a, b, (c, s) => {
+      lit.forEach((x, k) => { if (x) on[k][c] += s; });
+      if (what) addMode(what, c, s);
+    });
+  } else for (const w of hours) {
+    const len = Math.max(1, Math.min(3600, tNow() - w.t)), ran = [0, w.fan, w.feed, 0, w.pump];
+    spread(w.t, w.t + len, (c, s) => {
+      const f = s / len;
+      ran.forEach((v, k) => { if (v) on[k][c] += v * f; });
+      if (w.burning) addMode('palenie', c, w.burning * f);
+      if (w.holding) addMode('podtrzymanie', c, w.holding * f);
+      if (w.standby) addMode('czuwanie', c, w.standby * f);
+    });
   }
   let svg = '';
   const drawn = new Set();
@@ -1865,7 +1934,7 @@ function paintLanes() {
     // [fill, opacity] of column c
     const look = c => {
       if (!test) {
-        let best = ['czuwanie', 'przedmuch'].find(m => modes[m] && modes[m][c] > 0), most = 0;
+        let best = fromLog ? ['czuwanie', 'przedmuch'].find(m => modes[m] && modes[m][c] > 0) : null, most = 0;
         if (!best) for (const m in modes) if (modes[m][c] > most) { most = modes[m][c]; best = m; }
         if (best) drawn.add(best);
         return best ? [G_COLOR[best] || '#5d6471', 1] : null;
@@ -1903,14 +1972,73 @@ function gecoTip(t) {
   return `<div class="tev"><i style="background:${G_COLOR[what] || '#8a919e'}"></i><span>Sterownik: ${what}${parts.length ? ' · ' + parts.join(', ') : ''}</span></div>`;
 }
 
+// The controller's work hour by hour (firmware 30+, /api/work): seconds heard, in each mode and of each output, the
+// feeder's seconds, the heat model's degree-minutes while heard, piston cycles and przedmuchy - the hour running now
+// last, with its part so far. Kept from the earliest hour a view asked for: later loads fetch the newest hours, and
+// older ones in 30-day pieces, newest first. Loads queue one after another.
+const WORK_KEYS = ['t', 'heard', 'burning', 'holding', 'standby', 'fan', 'pump', 'feed', 'heatHeard', 'strokes', 'blows'];
+let work = [], workFrom = 0, workAt = 0, workLoading = Promise.resolve();
+function parseWork(buf) {
+  if (buf.byteLength % 22) throw new Error('records of another size');
+  const v = new DataView(buf), out = [];
+  for (let o = 0; o < buf.byteLength; o += 22)
+    out.push({ t: v.getUint32(o, true), heard: v.getUint16(o + 4, true), burning: v.getUint16(o + 6, true), holding: v.getUint16(o + 8, true),
+      standby: v.getUint16(o + 10, true), fan: v.getUint16(o + 12, true), pump: v.getUint16(o + 14, true), feed: v.getUint16(o + 16, true) / 10,
+      heatHeard: v.getUint16(o + 18, true), strokes: v.getUint8(o + 20), blows: v.getUint8(o + 21) });
+  return out;
+}
+function loadWork(from) {
+  if (!now || !nowFresh || !(now.fw >= 30)) return Promise.resolve();
+  return workLoading = workLoading.then(() => loadWorkNow(from - from % 3600));
+}
+async function loadWorkNow(from) {
+  const t = tNow(), get = async (a, b) => parseWork(await (await api(`/api/work?from=${a}&to=${b}`, {}, 20000)).arrayBuffer());
+  try {
+    if (!workFrom) {                                             // nothing yet: the hour running now first
+      work = await get(t - t % 3600, t);
+      workFrom = t - t % 3600;
+      workAt = Date.now();
+    } else if (Date.now() - workAt >= 60e3) {                    // the newest hours (the last one ran on)
+      const s = work.length ? work[work.length - 1].t : workFrom, add = await get(s, t);
+      work = work.filter(w => w.t < s).concat(add);
+      workAt = Date.now();
+    }
+    while (workFrom > from) {
+      const a = Math.max(from, workFrom - 30 * 86400), older = await get(a, workFrom - 1);
+      work = older.filter(w => w.t < workFrom).concat(work);
+      workFrom = a;
+    }
+  } catch (e) {}
+}
+
+// The controller's work in [t0, t1) summed from the hours; null when it was not heard then.
+function workSum(t0, t1) {
+  const s = { heard: 0, burning: 0, holding: 0, standby: 0, fan: 0, pump: 0, feed: 0, heatHeard: 0, strokes: 0, blows: 0 };
+  for (const w of work) if (w.t >= t0 && w.t < t1) for (const k in s) s[k] += w[k] || 0;
+  return s.heard > 0 ? s : null;
+}
+
 // ---------------------------------------------------------------- coal and day summaries
 // Coal is counted in kilograms. The firmware learns coal.k - kg per degree-minute of furnace minus return water -
-// from refills to the top; coal used = k x heat, for every day with the same k, so the history stays consistent
-// as k improves. A refill is typed in kg or counted in shovels and buckets of about SHOVEL_KG / BUCKET_KG.
+// and, where the boiler controller is heard, coal.kf - kg per second of the feeder - from refills to the top (kf is
+// scaled from k until then, kfN = 0); coal used = kf x feeder seconds for the share of a day the controller was heard,
+// k x heat for the rest - for every day with the same factors, so the history stays consistent as they improve. A
+// refill is typed in kg or counted in shovels and buckets of about SHOVEL_KG / BUCKET_KG.
 
 const SHOVEL_KG = 3.2, BUCKET_KG = 9.6;
 const coalOn = () => now.settings.coalOn;
 const coalKg = heat => (now.coal.k !== null && heat !== null ? heat * now.coal.k : null);
+const coalKnown = () => now.coal.k !== null || now.coal.kf != null;
+// Coal of [t0, t1) with its heat (degree-minutes), counted as the firmware counts it: the feeder's seconds, and the
+// heat the controller was not heard through; null when nothing is known.
+function coalOf(t0, t1, heat) {
+  const c = now.coal, w = c.kf != null ? workSum(t0, t1) : null;
+  if (!w) return coalKg(heat);
+  return c.kf * w.feed + (c.k !== null && heat !== null ? c.k * Math.max(0, heat - w.heatHeard) : 0);
+}
+const dayEnd = t => midnight(t + 36 * 3600);
+const kgOf = d => coalOf(d.t, d.today ? tNow() : dayEnd(d.t), d.heat);     // a day of lastDays / dayList / days
+const seasonStart = () => { const d = new Date(); return new Date(d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1, 8, 1) / 1000; };
 const coalCost = kg => (kg !== null && now.settings.coalPrice > 0 ? kg * now.settings.coalPrice / 1000 : null);
 // 2,5 kg below 10, whole kilograms above, tonnes from one.
 const kgText = kg => (kg < 10 && Math.round(kg * 10) % 10 ? `${n1(kg)} kg` : `${Math.round(kg).toLocaleString(LOCALE)} kg`);
@@ -1952,8 +2080,7 @@ function outdoorMean(ds, src = outdoor.hourly) {
 // Buckets a day as a straight line of the day's mean outdoor temperature, fitted to the last 30 full days.
 // Colder has to mean more coal: with the wrong slope or too little spread in temperature, the average day.
 function coalModel() {
-  const pts = lastDays(31).filter(x => !x.today && x.heat !== null).map(x => [outdoorMean(x.t), coalKg(x.heat)])
-    .filter(p => p[0] !== null && p[1] !== null);
+  const pts = lastDays(31).filter(x => !x.today).map(x => [outdoorMean(x.t), kgOf(x)]).filter(p => p[0] !== null && p[1] !== null);
   if (pts.length < 7) return null;
   const n = pts.length, xs = pts.map(p => p[0]), mx = xs.reduce((a, v) => a + v, 0) / n, my = pts.reduce((a, p) => a + p[1], 0) / n;
   const sxx = pts.reduce((a, p) => a + (p[0] - mx) ** 2, 0), sxy = pts.reduce((a, p) => a + (p[0] - mx) * (p[1] - my), 0);
@@ -1965,7 +2092,7 @@ function coalModel() {
 function coalTomorrow() {
   const d = new Date(midnight(tNow()) * 1000);
   d.setDate(d.getDate() + 1);
-  const temp = outdoorMean(d / 1000, outdoor.ahead), model = temp !== null && now.coal.k !== null ? coalModel() : null;
+  const temp = outdoorMean(d / 1000, outdoor.ahead), model = temp !== null && coalKnown() ? coalModel() : null;
   return model ? { temp, kg: model(temp) } : null;
 }
 
@@ -1995,19 +2122,24 @@ function renderCoal() {
       + `<div class="gauge"><i style="width:${(p * 100).toFixed(1)}%;background:var(--${low ? 'red' : mid ? 'orange' : 'green'})"></i></div>`
       + (h !== null ? `<div class="left ${low ? 'low' : mid ? 'mid' : ''}">Starczy ${leftText(h)}</div>` : '');
   }
-  if (c.k !== null) {
-    const kg = coalKg(heatSince(midnight(tNow()), tNow()));
+  if (coalKnown()) {
+    const m = midnight(tNow()), kg = coalOf(m, tNow(), heatSince(m, tNow()));
     const next = coalTomorrow();
     html += `<div class="rows">${row('Dziś', coalText(kg))}`
       + `${c.rate !== null ? row('Tempo', `~${kgText(c.rate * 24)} na dobę`, 'z ostatnich 24 godzin') : ''}`
       + `${next ? row('Jutro', coalText(next.kg), `prognoza: średnio ${n1(next.temp)}° na zewnątrz`) : ''}</div>`;
   }
   const hints = [];
-  if (c.k === null) hints.push(c.lastFull ? 'Po następnym dosypaniu do pełna będę wiedzieć, ile węgla schodzi – pokażę zużycie i stan zasobnika.'
+  if (c.kf != null) {
+    const w = workSum(tNow() - 7 * 86400, tNow() + 1), stroke = w && w.strokes >= 10 ? c.kf * w.feed / w.strokes : null;
+    hints.push(`Liczę z pracy podajnika${stroke !== null ? ` – jeden cykl tłoka to ~${kgText(stroke)} węgla` : ''}. `
+      + (c.kfN ? 'Skala nauczona z dosypań do pełna.' : 'Skala na razie z temperatur – dokładna po dwóch dosypaniach do pełna.'));
+  }
+  if (!coalKnown()) hints.push(c.lastFull ? 'Po następnym dosypaniu do pełna będę wiedzieć, ile węgla schodzi – pokażę zużycie i stan zasobnika.'
     : 'Przy każdym dosypaniu stuknij „Dosypałem”. Po dwóch dosypaniach do pełna pokażę zużycie i stan zasobnika.');
   else if (c.level === null) hints.push(st.hopperKg > 0 ? 'Stan zasobnika pojawi się po najbliższym dosypaniu do pełna.'
     : 'Wpisz w Ustawieniach → Dane kotła, ile kg mieści zasobnik, a pokażę, ile zostało i na ile starczy.');
-  if (c.k !== null && !(st.coalPrice > 0)) hints.push('Wpisz cenę węgla w Ustawieniach, a pokażę koszty.');
+  if (coalKnown() && !(st.coalPrice > 0)) hints.push('Wpisz cenę węgla w Ustawieniach, a pokażę koszty.');
   el.innerHTML = html + hints.map(t => `<div class="hint">${t}</div>`).join('')
     + `<button class="btn primary" id="refill">${SVG(I_PLUS)}Dosypałem węgiel</button>` + ashRow();
 }
@@ -2036,9 +2168,9 @@ function renderWeek() {
   const rows = [];
   const bh = sum(cur, x => x.burn) / 60, pbh = sum(prev, x => x.burn) / 60;
   rows.push(row('Piec pracował', `${Math.round(bh)} godz.${delta(avg(cur, x => x.burn), avg(prev, x => x.burn), false)}`));
-  if (coalOn() && now.coal.k !== null) {
-    const kg = coalKg(sum(cur, x => x.heat));
-    rows.push(row('Węgiel', `${coalText(kg)}${delta(avg(cur, x => x.heat), avg(prev, x => x.heat), true)}`, `średnio ${kgText(kg / have(cur))} dziennie`));
+  if (coalOn() && coalKnown()) {
+    const kg = sum(cur, kgOf);
+    rows.push(row('Węgiel', `${coalText(kg)}${delta(avg(cur, kgOf), avg(prev, kgOf), true)}`, `średnio ${kgText(kg / have(cur))} dziennie`));
   }
   const outs = cur.map(x => outdoorMean(x.t)).filter(v => v !== null), pouts = prev.map(x => outdoorMean(x.t)).filter(v => v !== null);
   if (outs.length) {
@@ -2056,8 +2188,8 @@ function renderCoalChart() {
   const card = $('#coalchartcard');
   if (!coalOn()) { card.style.display = 'none'; return; }
   card.style.display = '';
-  if (now.coal.k === null) { $('#coalchart').innerHTML = '<div class="empty">Wykres pojawi się po dwóch dosypaniach do pełna</div>'; return; }
-  const list = lastDays(30).map(x => Object.assign(x, { kg: coalKg(x.heat), out: outdoorMean(x.t) }));
+  if (!coalKnown()) { $('#coalchart').innerHTML = '<div class="empty">Wykres pojawi się po dwóch dosypaniach do pełna</div>'; return; }
+  const list = lastDays(30).map(x => Object.assign(x, { kg: kgOf(x), out: outdoorMean(x.t) }));
   const full = list.filter(x => !x.today && x.kg !== null);
   if (!list.some(x => x.kg)) { $('#coalchart').innerHTML = '<div class="empty">Zużycie pojawi się po pierwszej dobie</div>'; return; }
   const total = list.reduce((a, x) => a + (x.kg || 0), 0), max = Math.max(5, ...list.map(x => x.kg || 0));
@@ -2078,10 +2210,10 @@ function renderCoalChart() {
   }
 
   // Heating season from 1 September, against the same stretch of the last season when the history has it.
-  const d = new Date(), start = new Date(d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1, 8, 1) / 1000;
-  const season = coalKg(days.filter(x => x.t >= start && x.t < midnight(tNow())).reduce((a, x) => a + x.heat, 0) + heatSince(midnight(tNow()), tNow()));
+  const start = seasonStart(), m = midnight(tNow());
+  const season = days.filter(x => x.t >= start && x.t < m).reduce((a, x) => a + (kgOf(x) || 0), 0) + (coalOf(m, tNow(), heatSince(m, tNow())) || 0);
   const lastYear = days.filter(x => x.t >= start - 365 * 86400 && x.t < tNow() - 365 * 86400);
-  const before = lastYear.length >= 7 ? coalKg(lastYear.reduce((a, x) => a + x.heat, 0)) : null;
+  const before = lastYear.length >= 7 ? lastYear.reduce((a, x) => a + (kgOf(x) || 0), 0) : null;
   html += `<div class="rows" style="margin-top:12px">${row('Sezon od 1 września', coalText(season), before !== null ? `rok wcześniej w tym czasie ~${massText(before)}` : '')}</div>`;
   $('#coalchart').innerHTML = html;
   $('#coalchart .bars').onclick = e => {
@@ -2205,7 +2337,7 @@ async function fetchForView() {
     }
   }
   if (wantOut) await loadOutdoor(span > 31 * 86400);
-  await loadGecoForView();
+  await loadLanesForView();
   if (ticket === fetching) paintDetail();
 }
 
@@ -2286,7 +2418,7 @@ function refreshCharts() {
   const span = view.t1 - view.t0, zoomed = Math.abs(span - RANGES[ui.range]) > 60 || view.t1 < tNow() - 600;
   if (!zoomed) view = { t0: tNow() - span, t1: tNow() };
   paintDetail();
-  loadGecoForView().then(() => { if (!scrubbing) paintLanes(); });
+  loadLanesForView().then(() => { if (!scrubbing) paintLanes(); });
 }
 
 // What the chart may show now: slots in use, the outdoor line with a location.
@@ -2302,7 +2434,7 @@ function renderCharts() {
   $('#chips').innerHTML = (keys.some(i => ctlOf(i) >= 0) ? `<button class="chip ctl ${ui.ctl ? 'on' : ''}" data-ctl="1" style="--c:#c7ccd6;--cb:rgba(199,204,214,.12)"><i></i>Sterownik</button>` : '')
     + keys.map(i => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${colorOf(i)};--cb:${rgba(colorOf(i), .14)}"><i></i>${esc(nameOf(i))}</button>`).join('');
   if (!view) resetView(); else fetchForView();
-  loadDays().then(() => { renderBurn(); renderCoalChart(); });
+  Promise.all([loadDays(), loadWork(seasonStart() - 366 * 86400)]).then(() => { renderBurn(); renderCoalChart(); });
   loadJournal().then(() => { paintDetail(); renderPower(); });
 }
 
@@ -2409,16 +2541,19 @@ function dayList() {
 // Totals of some days: coal in kg (null without the coal count), burning minutes, days with an hour or more of
 // burning, the day with the most coal, the furnace at its hottest.
 function totals(list) {
-  const s = { n: list.length, heat: 0, burn: 0, burnDays: 0, top: null, hot: null };
+  const s = { n: list.length, heat: 0, burn: 0, burnDays: 0, top: null, topKg: 0, hot: null }, coal = coalOn() && coalKnown();
+  let kg = 0;
   for (const d of list) {
     s.heat += d.heat || 0;
     s.burn += d.burn || 0;
     if (d.burn >= 60) s.burnDays++;
-    if (d.heat && (!s.top || d.heat > s.top.heat)) s.top = d;
+    const k = coal ? kgOf(d) : null;
+    kg += k || 0;
+    if (k && k > s.topKg) { s.top = d; s.topKg = k; }
     const f = d.v && d.v[FURNACE];
     if (f && (!s.hot || f[2] > s.hot.v)) s.hot = { v: f[2], t: d.t };
   }
-  s.coal = coalOn() ? coalKg(s.heat) : null;
+  s.coal = coal ? kg : null;
   return s;
 }
 
@@ -2452,7 +2587,7 @@ function perWeek(v) {
 function renderMonths() {
   if (!now) return;
   paintMonths();
-  Promise.all([loadDays(), loadAllJournal(), loadRefills()]).then(paintMonths);
+  Promise.all([loadDays(), loadAllJournal(), loadRefills(), loadWork(seasonStart() - 366 * 86400)]).then(paintMonths);
   loadMonthsOutdoor();
 }
 
@@ -2471,7 +2606,7 @@ function paintMonths() {
   if (!now || ui.tab !== 'months') return;
   const list = dayList(), cur = monthOf(tNow()), first = list[0].m;
   monthSel = clamp(monthSel === null ? cur : monthSel, first, cur);
-  const s0 = seasonOf(monthSel), y = Math.floor(s0 / 12), coal = coalOn() && now.coal.k !== null;
+  const s0 = seasonOf(monthSel), y = Math.floor(s0 / 12), coal = coalOn() && coalKnown();
   const metric = coal && ui.mMetric !== 'burn' ? 'coal' : 'burn';
   const val = s => (metric === 'coal' ? s.coal || 0 : s.burn / 60);
   const valText = v => (metric === 'coal' ? `~${massText(v)}` : `${Math.round(v)} godz.`);
@@ -2523,7 +2658,7 @@ function paintMonths() {
     const ds = d / 1000;
     monthDays.push(own.find(x => Math.abs(x.t - ds) < 3 * 3600) || { t: ds, none: true });
   }
-  const dv = d => (d.none ? 0 : metric === 'coal' ? coalKg(d.heat) || 0 : (d.burn || 0) / 60);
+  const dv = d => (d.none ? 0 : metric === 'coal' ? kgOf(d) || 0 : (d.burn || 0) / 60);
   const dmax = Math.max(metric === 'coal' ? 5 : 1, ...monthDays.map(dv));
   mh += `<div class="bars mdays ${metric === 'coal' ? 'coalb' : ''}">${monthDays.map((d, k) => `<button data-k="${k}" class="${d.today ? 'today' : ''}" style="height:${dv(d) ? Math.max(2, dv(d) / dmax * 100) : 0}%"></button>`).join('')}</div>`
     + `<div class="bars-x"><span>1</span><span>${dim}</span></div><div class="caption" id="mdaycap">Stuknij słupek, aby zobaczyć dzień</div>`;
@@ -2536,12 +2671,15 @@ function paintMonths() {
     if (coalCost(ms.coal) !== null) rows.push(row('Koszt', zlText(coalCost(ms.coal)), `średnio ${zlText(coalCost(ms.coal) / ms.n)} dziennie`));
     if (ms.top) {
       const o = outDay(ms.top.t);
-      rows.push(row('Najwięcej w jeden dzień', `~${kgText(coalKg(ms.top.heat))}`, `${day(ms.top.t)}${o ? ` · na zewnątrz ${n1(o[1])}°` : ''}`));
+      rows.push(row('Najwięcej w jeden dzień', `~${kgText(ms.topKg)}`, `${day(ms.top.t)}${o ? ` · na zewnątrz ${n1(o[1])}°` : ''}`));
     }
     const fills = refills.filter(r => r[0] >= t0 && r[0] < t1);
     if (fills.length) rows.push(row('Dosypano', `${fills.length} ${plural(fills.length, 'raz', 'razy', 'razy')}`, `razem ${massText(fills.reduce((a, r) => a + r[1] / 10, 0))}`));
   }
   rows.push(row('Piec pracował', `${Math.round(ms.burn / 60)} godz.${coal ? '' : yearAgo(ms.burn, ys.burn, false)}`, `palił ${ms.burnDays} z ${ms.n} ${plural(ms.n, 'dnia', 'dni', 'dni')}`));
+  const mw = workSum(t0, t1);
+  if (mw) rows.push(row('Sterownik', `palenie ${Math.round(mw.burning / 3600)} godz.`,
+    `podtrzymanie ${Math.round(mw.holding / 3600)} godz. · przedmuchy ${mw.blows} · cykle tłoka ${mw.strokes}`));
   if (ms.hot) rows.push(row('Piec najwyżej', `${n1(ms.hot.v)}°`, day(ms.hot.t)));
   const o = outdoorOf(own);
   if (o) rows.push(row('Na zewnątrz', `śr. ${n1(o.mean)}°`, `najzimniej ${n1(o.min)}° · ${day(o.t)}`));
@@ -2564,9 +2702,9 @@ function showMonthDay(k) {
   const d = monthDays[k];
   if (!d) return;
   $$('#monthcard .mdays button').forEach(q => q.classList.toggle('sel', +q.dataset.k === k));
-  const o = d.none ? null : outDay(d.t), coal = coalOn() && now.coal.k !== null;
+  const o = d.none ? null : outDay(d.t), coal = coalOn() && coalKnown();
   $('#mdaycap').textContent = d.none ? `${day(d.t)}: brak danych`
-    : `${day(d.t)}: ${coal ? `${coalText(coalKg(d.heat))} · ` : ''}palenie ${dur((d.burn || 0) * 60)}${o ? ` · na zewnątrz ${n1(o[1])}°` : ''}${d.today ? ' (do teraz)' : ''}`;
+    : `${day(d.t)}: ${coal ? `${coalText(kgOf(d))} · ` : ''}palenie ${dur((d.burn || 0) * 60)}${o ? ` · na zewnątrz ${n1(o[1])}°` : ''}${d.today ? ' (do teraz)' : ''}`;
 }
 
 // ---------------------------------------------------------------- journal
@@ -3767,8 +3905,74 @@ function showTab(tab) {
   render();
 }
 
+// Everything fetched anew: the readings, the minutes, the journal, the days, the controller's log and hours - pull to
+// refresh. Then the tab is drawn again as if opened. Remotely over a new connection to the relay: one the phone kept
+// through a sleep may look open and carry nothing.
+async function refreshAll() {
+  if (REMOTE) relayClose();
+  journalAt = daysAt = workAt = 0;
+  if (gecoLog) gecoLog.at = 0;
+  await refreshNow();
+  await Promise.all([loadLive(true), loadJournal(), loadDays(true), loadWork(workFrom || tNow() - 31 * 86400),
+    view && ui.tab === 'charts' ? loadLanesForView() : null]);
+  render();
+}
+
+// A finger pulling the page down from its very top: "Pociągnij, aby odświeżyć", past PULL_PX "Puść, aby odświeżyć",
+// let go there and refreshAll runs under a spinning arrow. Not on the charts (their own gestures), dialogs or the
+// full-screen chart.
+const PULL_PX = 64;
+function pullToRefresh() {
+  const el = $('#ptr'), text = $('#ptrt');
+  let y0 = null, pulled = 0, busy = false;
+  const place = (dy, settle) => {
+    el.classList.toggle('settle', settle);
+    el.style.transform = `translate(-50%,${Math.min(dy, PULL_PX + 16) - 64}px)`;
+    el.style.opacity = Math.min(1, dy / 36);
+  };
+  const reset = () => { y0 = null; pulled = 0; el.classList.remove('armed'); place(0, true); };
+  document.addEventListener('touchstart', e => {
+    y0 = null;
+    if (busy || fullScreen || e.touches.length !== 1 || window.scrollY > 0 || e.target.closest('.chart, .modal, input, textarea, select')) return;
+    y0 = e.touches[0].clientY;
+    pulled = 0;
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (y0 === null) return;
+    const dy = (e.touches[0].clientY - y0) * 0.5;               // the page gives way slower than the finger
+    if (dy <= 0 || window.scrollY > 0) {
+      if (pulled) reset();
+      return;
+    }
+    pulled = dy;
+    const armed = pulled >= PULL_PX;
+    el.classList.toggle('armed', armed);
+    text.textContent = armed ? 'Puść, aby odświeżyć' : 'Pociągnij, aby odświeżyć';
+    place(pulled, false);
+  }, { passive: true });
+  const release = async () => {
+    if (y0 === null) return;
+    if (pulled < PULL_PX) return reset();
+    y0 = null;
+    pulled = 0;
+    busy = true;
+    el.classList.remove('armed');
+    el.classList.add('busy');
+    text.textContent = 'Odświeżam…';
+    place(PULL_PX, true);
+    try { await Promise.race([refreshAll(), new Promise(r => setTimeout(r, 40000))]); } catch (e) {}
+    busy = false;
+    el.classList.remove('busy');
+    place(0, true);
+    if (online === false) toast('Piec nie odpowiada');
+  };
+  document.addEventListener('touchend', release);
+  document.addEventListener('touchcancel', reset);
+}
+
 function setup() {
   $$('nav.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  pullToRefresh();
   $('#v-months').onclick = e => {
     const go = e.target.closest('[data-go]'), metric = e.target.closest('[data-metric]'), dayBar = e.target.closest('.mdays button');
     if (go && !go.disabled) goMonth(+go.dataset.go);
@@ -3944,7 +4148,7 @@ function setup() {
       saveCache();
       if (REMOTE) relayClose();
     } else {
-      refreshNow().then(loadLive).then(() => render(true));
+      refreshNow().then(() => loadLive(true)).then(() => render(true));
       if (setPage === 'probes') pollProbes();
     }
   });
@@ -3963,13 +4167,8 @@ function setup() {
   loadCache();
   // A fresh start opens at the first tab; coming back from the background keeps the tab, as nothing reloads then.
   try { showTab('home'); } catch (e) { now = null; live = []; journal = []; days = []; showTab('home'); }   // a broken cache must not block
-  await refreshNow();
-  await Promise.all([loadLive(), loadJournal()]);
-  render();
-  saveCache();
-  loadOutdoor().then(render);
   // Hidden, the app does nothing: coming back refreshes it (visibilitychange). The cache is written every 10 minutes
-  // and when the app goes to the background.
+  // and when the app goes to the background. The timers start first, so a first load that hangs stops nothing.
   let minutesRun = 0;
   setInterval(() => { if (!document.hidden) refreshNow(); }, 15000);
   setInterval(() => {
@@ -3977,6 +4176,11 @@ function setup() {
     loadLive().then(loadJournal).then(() => { if (++minutesRun % 10 === 0) saveCache(); render(true); });
   }, 60000);
   setInterval(() => loadOutdoor().then(() => { if (ui.tab === 'home') render(); }), 20 * 60e3);
+  await refreshNow();
+  await Promise.all([loadLive(), loadJournal()]);
+  render();
+  saveCache();
+  loadOutdoor().then(render);
 })();
 </script>
 </body>

@@ -111,8 +111,16 @@ What it hears:
 
 - `/api/now` -> `geco`: seconds since the last good frame (`age`, -1 = never heard), `mode`, `out`, `flags` (P3), `since`
   (when that state began), `t` (the controller's three temperatures), good/bad frame counts.
-- `/api/geco?from&to`: the work log ("/gw" on flash, ~60 000 changes) - 8 bytes a change (time u32, tenths, mode,
-  outputs, P3), the first record being the state the range began in; changes not on flash yet are served too.
+- `/api/geco?from&to`: the work log ("/gw" on flash, 390 000 changes = 3 MB: about 2 months of winter burning, 5 of
+  autumn - burning makes ~6 changes a minute, the feeder's 1-1.5 s portions every ~19.5 s; holding almost none) - 8
+  bytes a change (time u32, tenths, mode, outputs, P3), the first record being the state the range began in; changes
+  not on flash yet are served too. Every start closes the log at the last "still alive" mark before it (a NO_DATA
+  record), so the state before a power cut or an update does not run on through it (v30).
+- `/api/work?from&to` (v30): the same work hour by hour ("/wh", 22 bytes an hour, kept 2.5-5 years), worked out from
+  the log - seconds heard, burning, holding, standby, fan, CO pump, the feeder in tenths, the heat model's
+  degree-minutes while heard, piston cycles completed (away -> home) and przedmuchy begun (holding, then the fan or the
+  feeder on); the hour running now last, its part so far. Written as each hour ends; at the first start of v30 for the
+  whole log back, after v29's power cuts got their NO_DATA records from the journal.
 - The controller's temperatures as three more probes (address `F7 0n ...`, n = 1 boiler, 2 feeder, 3 hot water), added
   by themselves the first time the bus is heard. The app pairs each with our probe on the same water (boiler ->
   furnace probe, feeder -> hopper, hot water -> boiler): its value on that probe's card, a dashed second line on its
@@ -122,7 +130,14 @@ What it hears:
 - Warning 6 "Sterownik nie w automacie" (`WARN_STANDBY`, setting `standbyOn`): mode standby for 2 minutes while the
   bus is heard, cleared after 1 minute in automat; pushed like every warning. While the bus is heard it replaces the
   temperature guess of "Piec stoi po zaniku pradu".
-- The app: an animated boiler on the home screen (with the hopper's coal level) and work lanes under the charts.
+- Coal from the feeder (v30): coal leaves the hopper only through the feeder, so while the bus is heard coal = kg per
+  feeder second (`coal.kf`) x the feeder's seconds, the heat model only for the time it is not. `kf` is learnt like
+  the heat factor, from intervals between refills to the top in which the controller was heard at least 70 % of the
+  time (and the feeder ran 10 minutes or more); until two such refills it is scaled from the heat model over the
+  last two weeks the bus was heard (`coal.kfN` = 0). Measured 2026-11-04: a full piston cycle is ~31 s of the motor.
+- The app: an animated boiler on the home screen (with the hopper's coal level), work lanes under the charts (from
+  the log up to 9 days, from the hours beyond), the controller's day on "Dzisiaj" (burning, holding, przedmuchy,
+  piston cycles, feeder time) and its month in Miesiace.
 
 ## Next
 
@@ -130,11 +145,8 @@ Proposals agreed on 2026-10-29, after the first S3 data:
 
 - Map the DHW pump bit and the short frames from what the S3 logs; then draw the hot water tank's own pump and its
   pipes in the boiler picture.
-- Coal from the feeder's piston strokes: every stroke (P3 away -> home) pushes about the same portion. Learn kg per
-  stroke from refills to the top - coal used and the hopper level far closer than the heat model.
 - "Coal hung or ran out": burning, the feeder pushing, and the boiler not warming for 30-45 minutes - coal bridged in
-  the hopper or the hopper empty.
-- A day's work: hours burning and holding, przedmuchy, piston strokes - on "Dzisiaj" and in the months.
+  the hopper or the hopper empty. (It also makes the feeder count too much coal for that time.)
 - The controller's switch points on the furnace chart: u0 (to podtrzymanie) and u0 - hysteresis (back to burning),
   read from T1 at the mode changes in the log.
 - Bus silence: no frame for over 2 minutes while the ESP runs - the controller is off or a wire came loose.

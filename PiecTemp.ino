@@ -5,8 +5,9 @@
 // when the probe stops answering and an Eve history. Alarms, warnings and "hot water ready" are notifications of
 // the app (Relay.h -> relay -> Web Push), not Home accessories - the phone words them (web/sw.js).
 // Coal: the web app records refills in kilograms (shovels and buckets are its shortcuts); the coal burned is taken
-// as proportional to the furnace's heat output and the factor is learnt from refills "to the top" (see
-// recomputeCoal) - daily use, costs, hopper level, time left.
+// as proportional to the feeder's running time while the boiler controller is heard, otherwise to the furnace's heat
+// output, and both factors are learnt from refills "to the top" (see recomputeCoal) - daily use, costs, hopper level,
+// time left.
 // Pairing: Home app -> Add Accessory -> More options -> "Czujniki pieca", setup code 466-37-726.
 // Eve app: every temperature sensor carries an Eve history (EveHistory.h).
 //
@@ -61,6 +62,7 @@
 #include <DallasTemperature.h>
 #include <algorithm>
 #include <vector>
+#include <functional>
 #include <esp_app_desc.h>
 #include <esp_core_dump.h>
 #include "TechLog.h"
@@ -74,7 +76,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 29;                  // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 30;                  // bump for every release (release/publish.ps1)
 // Each board has its own release channel - a firmware for the other chip must never be offered.
 #if CONFIG_IDF_TARGET_ESP32S3
 const char* UPDATE_MANIFEST_URL =
@@ -101,9 +103,13 @@ constexpr uint32_t DAILY_CAPACITY     = 5 * 366;         // daily summaries kept
 constexpr uint32_t EVENT_CAPACITY     = 1024;            // event journal entries (at most; at least half)
 constexpr uint32_t REFILL_CAPACITY    = 512;             // coal refills kept (at most; at least half)
 constexpr uint32_t HEALTH_CAPACITY    = 120;             // days of health counters (at most; at least half)
-constexpr uint32_t GECO_CAPACITY      = 60000;           // controller work changes kept (about a week of burning)
+constexpr uint32_t GECO_CAPACITY      = 390000;          // controller work changes kept (3 MB: ~2 months of winter
+                                                         // burning, ~5 of autumn; at least half)
+constexpr uint32_t WORK_CAPACITY      = 5 * 8784;        // hours of the controller's work summary (5 years; at least half)
 constexpr uint8_t  COAL_INTERVALS     = 10;              // latest refill-to-refill intervals the kg factor averages
 constexpr float    COAL_MIN_HEAT      = 600;             // degree-minutes an interval needs to count (10 degrees, 1 h)
+constexpr float    FEED_MIN_SECONDS   = 600;             // feeder seconds an interval needs to teach the feed factor
+constexpr float    FEED_MIN_HEARD     = 0.7;             // ... and the share of it the controller has to be heard in
 constexpr float    HOT_WATER_HYSTERESIS = 3;             // degrees below "ready" before the hot-water contact closes
 constexpr float    BATH_DROP          = 2;               // boiler degrees lost within BATH_WINDOW = hot water drawn
 constexpr uint8_t  BATH_WINDOW        = 10;              // minutes (standing, the boiler loses well under 1 degree/h)
@@ -292,6 +298,30 @@ struct __attribute__((packed)) RefillRecord {
   uint8_t  reserved;
 };
 
+// An hour of the boiler controller's work, worked out from its log (countWork) and kept for years: the charts
+// beyond the log's reach, the day summaries and the coal counted from the feeder.
+struct __attribute__((packed)) WorkHour {
+  uint32_t time;                      // the hour's start (Unix, a multiple of 3600 - a whole hour in Polish time too)
+  uint16_t heard;                     // seconds the controller was heard
+  uint16_t burning;                   // ... of them in each mode
+  uint16_t holding;
+  uint16_t standby;
+  uint16_t fan;                       // seconds each output ran
+  uint16_t pump;
+  uint16_t feed10;                    // the feeder, in tenths of a second
+  uint16_t heatHeard;                 // the heat model's degree-minutes while the controller was heard (by the hour's
+                                      // heard share) - what the feeder counts instead (heatHeardOf)
+  uint8_t  strokes;                   // piston cycles completed (away from home, then back)
+  uint8_t  blows;                     // przedmuchy begun (podtrzymanie, then the fan or the feeder on)
+};
+
+// What a stretch of time took, both ways (useBetween): the heat model's degree-minutes - all of them, and those while
+// the controller was heard (by its hour's share) - and the feeder's seconds. `covered` = seconds either way saw: the
+// controller heard, or a minute with both readings while it was not.
+struct CoalUse {
+  float heat = 0, heatHeard = 0, feed = 0, heard = 0, covered = 0, span = 0;
+};
+
 using MinuteRecord = MinuteLog<SENSOR_COUNT>::Record;
 
 OneWire                 oneWire(ONE_WIRE_PIN);
@@ -327,16 +357,17 @@ int      networkUps        = 0;                 // WiFi connections since the st
 // Coal is counted in kilograms - what goes into the hopper; costs are the web app's (x price per tonne).
 float    coalK             = NAN;               // kg of coal per degree-minute, learnt from refills (flash "coalK")
 uint16_t coalSamples       = 0;                 // refill-to-refill intervals it was learnt from (flash "coalN")
+float    feedK             = NAN;               // kg of coal per second of the feeder: learnt from refills (flash
+                                                // "feedK"), until then scaled from coalK (scaleFeed)
+uint16_t feedSamples       = 0;                 // refill-to-refill intervals it was learnt from (flash "feedN"), 0 = scaled
 uint32_t lastFullAt        = 0;                 // last refill to the top, 0 = none
 float    addedSinceFull    = 0;                 // kg put in since then without filling up
-float    heatSinceFull     = NAN;               // degree-minutes since then, NAN = beyond the minute log
 RefillRecord lastRefill    = {};                // the newest refill (time 0 = none)
 float    coalLevel         = NAN;               // kg in the hopper (estimate)
 float    coalRate          = NAN;               // kg per hour over the last day
 float    coalHoursLeft     = NAN;               // at that pace; INFINITY when the furnace hardly burns
 uint32_t ashAt             = 0;                 // ash pan last emptied (flash "ashAt"); counting starts with the clock
-float    heatSinceAsh      = NAN;               // degree-minutes since then, NAN = beyond the minute log
-float    ashBurned         = NAN;               // coal burned since then, kg (once coalK is known)
+float    ashBurned         = NAN;               // coal burned since then, kg (once the coal use is known)
 uint16_t burningMinutes    = 0;                 // in a row - ends summer mode at SEASON_AUTO_MIN
 bool     stallWatch        = false;             // started from a power cut: watch whether the furnace comes back
 float    stallFrom         = NAN;               // furnace temperature at the first reading after that cut
@@ -376,6 +407,9 @@ RTC_NOINIT_ATTR HealthRecord healthToday;
 RTC_NOINIT_ATTR uint32_t     healthMagic;
 SegmentLog<HealthRecord> health("/hl", HEALTH_CAPACITY / 2);
 SegmentLog<GecoBus::Event> gecoLog("/gw", GECO_CAPACITY / 2);   // the controller's work: every change (GecoBus.h)
+std::vector<GecoBus::Event> gecoPending;                        // changes not on flash yet (logGecoChanges)
+SegmentLog<WorkHour> workLog("/wh", WORK_CAPACITY / 2);         // ... and hour by hour (countWork)
+uint32_t workDone = 0;                          // the newest hour in workLog (its start), 0 = none yet
 uint16_t relayUpsSeen = 0, updateFailsSeen = 0;
 
 void healthFresh(uint32_t day) {
@@ -1019,7 +1053,7 @@ void evaluateWarnings(bool tick = false) {
   float lowHours = settings.lowCoalHours * (warnings[WARN_LOW_COAL].active ? 1.5f : 1);
   // Unknown while there is a model but no estimate yet (after a power cut, before the clock).
   bool lowCoal = !isnan(coalLevel) && (coalHoursLeft < lowHours || coalLevel < settings.hopperKg * 0.05f);
-  bool coalKnown = !isnan(coalLevel) || isnan(coalK) || settings.hopperKg <= 0;
+  bool coalKnown = !isnan(coalLevel) || !coalCounted() || settings.hopperKg <= 0;
   setWarning(WARN_LOW_COAL, lowCoal, coalKnown, 2, 5, heating && settings.coalOn && settings.lowCoalOn, upTo320(coalLevel),
              tick);
 
@@ -1066,45 +1100,235 @@ void evaluateWarnings(bool tick = false) {
   }
 }
 
+// ------------------------------------------------------------------ the controller's work, hour by hour
+
+// The controller's work from the hour `from` (its start) up to `until`, worked out from its log on flash and the
+// changes not there yet: hour(w) for every hour that ends by `until`, then - when `partial` - the hour `until` falls
+// in with its part so far. One pass over the log however many hours (all of it at the first start). A state lasts
+// until the next change; every start closes the log (closeGecoLog), so no state runs on through a power cut.
+void countWork(uint32_t from, uint32_t until, bool partial, const std::function<void(const WorkHour&)>& hour) {
+  if (until <= from) return;
+  enum { HEARD, BURNING, HOLDING, STANDBY, FAN, PUMP, FEED, SUMS };
+  uint32_t sum[SUMS] = {}, at = 0, start = from;            // at: tenths of a second into the hour `start`
+  uint8_t strokes = 0, blows = 0;
+  GecoBus::Event st = gecoLog.forRange(from, from, [](const GecoBus::Event&) {});
+  auto blowing = [](const GecoBus::Event& e) {
+    return e.mode == GecoBus::HOLDING && (e.outputs & (GecoBus::FAN | GecoBus::FEEDER));
+  };
+  auto run = [&](uint32_t to) {                              // the state so far, up to `to` tenths into the hour
+    if (to <= at) return;
+    uint32_t d = to - at;
+    at = to;
+    if (st.mode == GecoBus::NO_DATA) return;
+    sum[HEARD] += d;
+    if (st.mode == GecoBus::BURNING) sum[BURNING] += d;
+    else if (st.mode == GecoBus::HOLDING) sum[HOLDING] += d;
+    else if (st.mode == GecoBus::STANDBY) sum[STANDBY] += d;
+    if (st.outputs & GecoBus::FAN) sum[FAN] += d;
+    if (st.outputs & GecoBus::CO_PUMP) sum[PUMP] += d;
+    if (st.outputs & GecoBus::FEEDER) sum[FEED] += d;
+  };
+  auto close = [&]() {
+    auto sec = [&](uint8_t k) { return (uint16_t)min<uint32_t>((sum[k] + 5) / 10, 3600); };
+    WorkHour w = {start, sec(HEARD), sec(BURNING), sec(HOLDING), sec(STANDBY), sec(FAN), sec(PUMP),
+                  (uint16_t)min<uint32_t>(sum[FEED], 36000), 0, strokes, blows};
+    hour(w);
+    memset(sum, 0, sizeof(sum));
+    strokes = blows = 0;
+    at = 0;
+    start += 3600;
+  };
+  auto take = [&](const GecoBus::Event& e) {
+    if (e.time < start) {                                    // before the hour being counted: newer than the state found
+      st = e;                                                // on flash, or the clock stepped back
+      return;
+    }
+    while (e.time >= start + 3600) {
+      run(36000);
+      close();
+    }
+    run((e.time - start) * 10 + e.tenths);
+    if (st.mode != GecoBus::NO_DATA && e.mode != GecoBus::NO_DATA) {
+      if ((st.flags & GecoBus::PISTON_AWAY) && !(e.flags & GecoBus::PISTON_AWAY) && strokes < 255) strokes++;
+      if (blowing(e) && !blowing(st) && blows < 255) blows++;
+    }
+    st = e;
+  };
+  gecoLog.forRange(from, until, take);
+  for (const GecoBus::Event& e : gecoPending)
+    if (e.time < until) take(e);
+  while (start + 3600 <= until) {
+    run(36000);
+    close();
+  }
+  if (partial && start < until) {
+    run((until - start) * 10);
+    close();
+  }
+}
+
+// The first hour not in workLog yet: the one after the newest stored, or the hour the controller's log begins in;
+// 0 = the controller has never been heard.
+uint32_t workFrom() {
+  if (workDone) return workDone + 3600;
+  uint32_t first = gecoLog.oldestTime();
+  if (!first && !gecoPending.empty()) first = gecoPending.front().time;
+  return first ? first - first % 3600 : 0;
+}
+
+// The heat model's degree-minutes of an hour while the controller was heard, by the hour's heard share - stored with
+// the hour, so the app can take the feeder's share off a day's heat exactly as useBetween does. span: the seconds the
+// hour covers (the one running now: so far).
+uint16_t heatHeardOf(const WorkHour& w, uint32_t span) {
+  if (!w.heard || !span || FURNACE < 0 || RETURN_WATER < 0 || !minutes.newest()) return 0;
+  float h = 0;
+  minutes.forEach(w.time / 60, (w.time + span - 1) / 60, [&](uint32_t, const MinuteRecord& r) { h += heatOf(r); });
+  return (uint16_t)min(65535L, lroundf(h * fminf(1, w.heard / (float)span)));
+}
+
+// Once (v30): v29 did not close the log at a start, so the state before a power cut ran on through it. Each power cut
+// in the journal gets the NO_DATA record closeGecoLog writes now, where the log has none.
+void closeOldCuts() {
+  if (GECO_RX_PIN < 0 || prefs.getUChar("gwCuts", 0)) return;
+  std::vector<GecoBus::Event> cuts;
+  uint32_t first = gecoLog.oldestTime();
+  if (first) events.forEach(first, [&](const EventRecord& e) {
+    uint32_t off = (uint32_t)(e.sensor & 0x7F) << 16 | (uint16_t)e.value;
+    if (e.type == EV_POWER_CUT && off < e.time) cuts.push_back({e.time - off, 0, GecoBus::NO_DATA, 0, 0});
+  });
+  if (!cuts.empty()) gecoLog.edit([&](std::vector<GecoBus::Event>& all) {
+    for (const GecoBus::Event& c : cuts) {
+      auto at = std::upper_bound(all.begin(), all.end(), c.time, [](uint32_t t, const GecoBus::Event& e) { return t < e.time; });
+      if (at != all.begin() && (at - 1)->mode != GecoBus::NO_DATA) all.insert(at, c);
+    }
+  });
+  prefs.putUChar("gwCuts", 1);
+}
+
+// Every start closes the controller's log at the last "still alive" mark before it (a power cut, an update, a
+// crash): the state the log ended in must not run on through the time nobody listened. The first frame heard after
+// the clock is set opens it again (logGecoChanges).
+void closeGecoLog() {
+  if (GECO_RX_PIN < 0) return;
+  GecoBus::Event last = gecoLog.newest();
+  if (!last.time || last.mode == GecoBus::NO_DATA) return;
+  uint32_t seen = alive.newest() ? alive.newest() + ALIVE_INTERVAL_S / 2 : minutes.newest() ? minutes.newest() * 60 + 30 : 0;
+  GecoBus::Event closed = {max(seen, last.time + 1), 0, GecoBus::NO_DATA, 0, 0};
+  gecoLog.add(closed);
+}
+
+// Stores the hours the controller's log has finished: at the first pass all of them since the newest stored (or
+// since the log began), then each hour as it ends. The first pass with the clock recounts the coal - the count made
+// at boot had no clock and missed these hours - and every new hour scales the feed factor anew while it is not
+// learnt yet.
+void logWorkHours(time_t now) {
+  static bool counted = false;
+  if (GECO_RX_PIN < 0 || !clockSet(now) || updater.crashLoop()) return;
+  uint32_t hour = now - now % 3600, from = workFrom();
+  bool added = from && from < hour;
+  if (added) {
+    logGecoChanges();                                       // the changes still queued belong to the hours being closed
+    std::vector<WorkHour> done;
+    countWork(from, hour, false, [&](const WorkHour& w) {
+      done.push_back(w);
+      done.back().heatHeard = heatHeardOf(w, 3600);
+    });
+    workLog.addMany(done.data(), done.size());
+    workDone = hour - 3600;
+  }
+  if (!counted) {
+    counted = true;
+    recountCoal();
+  } else if (added && !feedSamples) {
+    scaleFeed(now);
+    updateCoal(now);
+  }
+}
+
 // ------------------------------------------------------------------ coal
 
 // Heat the furnace gives off in one minute, in degrees: furnace minus return water (0 without both readings).
-// Coal burned is taken as proportional to its sum, the degree-minutes; the factor coalK is learnt from refills
-// to the top - between two of them the hopper burned exactly what was put in. The power cuts in the minute log
-// cost nothing, rightly: the feeder stands still without power.
+// The heat model takes coal burned as proportional to its sum, the degree-minutes; the factor coalK is learnt from
+// refills to the top - between two of them the hopper burned exactly what was put in. Where the boiler controller is
+// heard, the feeder's seconds count instead (feedK, learnt the same way): coal leaves the hopper only through the
+// feeder, whatever the house takes. The power cuts cost nothing, rightly: the feeder stands still without power.
 float heatOf(const MinuteRecord& r) {
   if (FURNACE < 0 || RETURN_WATER < 0) return 0;
   int16_t f = r.v[FURNACE], w = r.v[RETURN_WATER];
   return f == NO_VALUE || w == NO_VALUE || f <= w ? 0 : (f - w) / 100.0f;
 }
 
-// Degree-minutes in [from, to) as far as the minute log goes; `covered` gets the minutes with both readings.
-float heatBetween(uint32_t from, uint32_t to, uint32_t* covered = nullptr) {
-  float heat = 0;
-  uint32_t n = 0;
-  if (to > from) minutes.forEach(from / 60, (to - 1) / 60, [&](uint32_t, const MinuteRecord& r) {
-    if (FURNACE >= 0 && RETURN_WATER >= 0 && r.v[FURNACE] != NO_VALUE && r.v[RETURN_WATER] != NO_VALUE) n++;
-    heat += heatOf(r);
-  });
-  if (covered) *covered = n;
-  return heat;
-}
-
-// Degree-minutes from `from` to the newest minute: the minute log where it reaches (from logStart), the daily
-// summaries before that - a share of a day by the hours it overlaps. A hopper last filled more than 31 days ago
-// still has a level.
-float heatSince(uint32_t from, uint32_t logStart) {
-  float heat = 0;
-  if (from < logStart) {
+// What [from, to) took, both ways (CoalUse) - see there.
+CoalUse useBetween(uint32_t from, uint32_t to) {
+  CoalUse u;
+  if (to <= from) return u;
+  u.span = min(to, (uint32_t)time(nullptr)) > from ? min(to, (uint32_t)time(nullptr)) - from : to - from;
+  // The hours: those stored, then those not stored yet - the hour running now with its part so far.
+  std::vector<WorkHour> hours;
+  uint32_t h0 = from - from % 3600, now = time(nullptr), next = workFrom(), limit = min(to, now);
+  workLog.forRange(h0, to, [&](const WorkHour& w) { hours.push_back(w); });
+  size_t stored = hours.size();
+  if (next && clockSet(now) && max(h0, next) < limit)
+    countWork(max(h0, next), limit, true, [&](const WorkHour& w) { hours.push_back(w); });
+  // Seconds an hour covers (the one running now: so far) and the share of them the controller was heard.
+  auto span = [&](size_t k) -> uint32_t { return k < stored ? 3600 : min<uint32_t>(3600, limit - hours[k].time); };
+  auto share = [&](size_t k) { uint32_t s = span(k); return s ? fminf(1, hours[k].heard / (float)s) : 0.0f; };
+  // The heard seconds of [a, b), each hour by the part of it inside.
+  auto heardIn = [&](uint32_t a, uint32_t b) {
+    float s = 0;
+    for (size_t k = 0; k < hours.size(); k++) {
+      uint32_t t = hours[k].time, lo = max(a, t), hi = min(b, t + span(k));
+      if (hi > lo) s += share(k) * (hi - lo);
+    }
+    return s;
+  };
+  for (size_t k = 0; k < hours.size(); k++) {
+    uint32_t t = hours[k].time, lo = max(from, t), hi = min(to, t + span(k));
+    if (hi <= lo) continue;
+    float part = (float)(hi - lo) / span(k);
+    u.heard += hours[k].heard * part;
+    u.feed += hours[k].feed10 / 10.0f * part;
+  }
+  // The heat: the daily summaries before the minute log (a share of a day by the hours it overlaps), then the minutes.
+  uint32_t logStart = minutes.newest() ? minutes.oldest() * 60 : UINT32_MAX;
+  if (from < logStart)
     daily.forEach(0, [&](const DayRecord& d) {
       uint32_t dayStart = d.time, dayEnd = nextMidnight(dayStart);   // copies: a packed field binds to no reference
-      uint32_t a = max(dayStart, from), b = min(dayEnd, logStart);
-      if (b > a) heat += d.heat * (float)(b - a) / (dayEnd - dayStart);
+      uint32_t a = max(dayStart, from), b = min(min(dayEnd, logStart), to);
+      if (b <= a) return;
+      float h = d.heat * (float)(b - a) / (dayEnd - dayStart);
+      u.heat += h;
+      u.heatHeard += h * fminf(1, heardIn(a, b) / (b - a));
     });
-    from = logStart;
+  uint32_t m0 = max(from, logStart);
+  if (m0 < to && minutes.newest()) {
+    size_t k = 0;
+    minutes.forEach(m0 / 60, (to - 1) / 60, [&](uint32_t m, const MinuteRecord& r) {
+      if (FURNACE < 0 || RETURN_WATER < 0 || r.v[FURNACE] == NO_VALUE || r.v[RETURN_WATER] == NO_VALUE) return;
+      uint32_t t = m * 60;
+      while (k < hours.size() && hours[k].time + 3600 <= t) k++;
+      float s = k < hours.size() && hours[k].time <= t ? share(k) : 0, h = heatOf(r);
+      u.heat += h;
+      u.heatHeard += h * s;
+      u.covered += 60 * (1 - s);
+    });
   }
-  if (minutes.newest()) heat += heatBetween(from, (minutes.newest() + 1) * 60);
-  return heat;
+  u.covered += u.heard;
+  return u;
+}
+
+// Either factor known, so coal can be counted.
+bool coalCounted() {
+  return !isnan(feedK) || (!isnan(coalK) && FURNACE >= 0 && RETURN_WATER >= 0);
+}
+
+// Kilograms a CoalUse stands for: the feeder's seconds while the controller was heard, the heat model for the rest;
+// without feedK the heat model alone. NAN when neither factor is known - or, with no heat model (no furnace and return
+// probes), when the controller was not heard through most of the time: what went then is not known.
+float burnedOf(const CoalUse& u) {
+  bool heat = !isnan(coalK) && FURNACE >= 0 && RETURN_WATER >= 0;
+  if (!isnan(feedK) && (heat || u.heard >= 0.8f * u.span)) return feedK * u.feed + (heat ? coalK * (u.heat - u.heatHeard) : 0);
+  return heat ? coalK * u.heat : NAN;
 }
 
 // All refills, oldest first - one entered later for an earlier hour lands in its place.
@@ -1115,14 +1339,19 @@ std::vector<RefillRecord> sortedRefills() {
   return v;
 }
 
-// Learns coalK from the latest COAL_INTERVALS intervals between refills to the top that the minute log still
-// covers (burned = everything put in after the first, the closing refill included), and finds where the
-// hopper stands since the last refill to the top. Reads up to the whole minute log - at boot and per refill.
-// A learnt coalK outlives its intervals (summer, a long gap) in flash; without two refills to the top it goes.
+// Learns both factors from the latest COAL_INTERVALS intervals between refills to the top (burned = everything put
+// in after the first, the closing refill included): coalK per degree-minute where the minute log covers the
+// interval, feedK per feeder second where the controller was heard through most of it (the rest of it at coalK).
+// Finds the last refill to the top and what went in since. The intervals are weighed newest first and only until
+// both factors have their COAL_INTERVALS - a refill is answered in time however long the history - at boot and per
+// refill. A learnt factor outlives its intervals (summer, a long gap) in flash; without two refills to the top both
+// go. Until feedK is learnt, it is scaled from coalK (scaleFeed).
 void recomputeCoal() {
-  uint32_t logStart = minutes.newest() ? minutes.oldest() * 60 : UINT32_MAX;
-  float put[COAL_INTERVALS], heat[COAL_INTERVALS];
-  uint16_t found = 0, fulls = 0;
+  uint32_t logStart = minutes.newest() ? minutes.oldest() * 60 : UINT32_MAX, hoursStart = workLog.oldestTime();
+  if (!hoursStart) hoursStart = workFrom() ? workFrom() : UINT32_MAX;
+  struct Span { uint32_t from, to; float put; };
+  std::vector<Span> spans;                                  // between refills to the top, oldest first
+  uint16_t fulls = 0;
   uint32_t prevFull = 0;
   float added = 0;
   lastRefill = {};
@@ -1131,22 +1360,37 @@ void recomputeCoal() {
     added += r.kg10 / 10.0f;
     if (!r.full) continue;
     fulls++;
-    if (prevFull >= logStart) {
-      float h = heatBetween(prevFull, r.time);
-      if (h >= COAL_MIN_HEAT) {
-        put[found % COAL_INTERVALS] = added;
-        heat[found % COAL_INTERVALS] = h;
-        found++;
-      }
-    }
+    if (prevFull) spans.push_back({prevFull, r.time, added});
     prevFull = r.time;
     added = 0;
   }
+  lastFullAt = prevFull;
+  addedSinceFull = added;
+  float put[COAL_INTERVALS], heat[COAL_INTERVALS], fput[COAL_INTERVALS], feed[COAL_INTERVALS], rest[COAL_INTERVALS];
+  uint16_t found = 0, fed = 0, covered = 0;
+  for (size_t i = spans.size(); i-- > 0;) {
+    const Span& sp = spans[i];
+    if (sp.from < logStart && sp.to <= hoursStart) break;   // older than both logs - and so is every one before it
+    covered += sp.from >= logStart;
+    bool forHeat = found < COAL_INTERVALS && sp.from >= logStart, forFeed = fed < COAL_INTERVALS && sp.to > hoursStart;
+    if (!forHeat && !forFeed) continue;
+    homeSpan.resetWatchdog();
+    CoalUse u = useBetween(sp.from, sp.to);
+    if (forHeat && u.heat >= COAL_MIN_HEAT) {
+      put[found] = sp.put;
+      heat[found++] = u.heat;
+    }
+    if (forFeed && u.feed >= FEED_MIN_SECONDS && u.heard >= FEED_MIN_HEARD * (sp.to - sp.from)) {
+      fput[fed] = sp.put;
+      feed[fed] = u.feed;
+      rest[fed++] = u.heat - u.heatHeard;
+    }
+  }
   if (found) {
     float sumPut = 0, sumHeat = 0;
-    for (uint16_t k = 0; k < min(found, (uint16_t)COAL_INTERVALS); k++) { sumPut += put[k]; sumHeat += heat[k]; }
+    for (uint16_t k = 0; k < found; k++) { sumPut += put[k]; sumHeat += heat[k]; }
     coalK = sumPut / sumHeat;
-    coalSamples = found;
+    coalSamples = max(found, covered);                      // the intervals the minute log covers
     prefs.putFloat("coalK", coalK);
     prefs.putUShort("coalN", coalSamples);
   } else if (fulls < 2) {
@@ -1155,23 +1399,45 @@ void recomputeCoal() {
     prefs.remove("coalK");
     prefs.remove("coalN");
   }
-  lastFullAt = prevFull;
-  addedSinceFull = added;
-  heatSinceFull = prevFull ? heatSince(prevFull, logStart) : NAN;
-  heatSinceAsh = ashAt ? heatSince(ashAt, logStart) : 0;
+  float sumPut = 0, sumFeed = 0;
+  for (uint16_t k = 0; k < fed; k++) {
+    sumPut += fput[k] - (isnan(coalK) ? 0 : coalK * rest[k]);
+    sumFeed += feed[k];
+  }
+  if (fed && sumPut > 0 && sumFeed > 0) {
+    feedK = sumPut / sumFeed;
+    feedSamples = fed;
+    prefs.putFloat("feedK", feedK);
+    prefs.putUShort("feedN", feedSamples);
+  } else if (fulls < 2) {
+    feedSamples = 0;
+    prefs.remove("feedK");
+    prefs.remove("feedN");
+  }
+  scaleFeed(time(nullptr));
 }
 
-// Hopper level, burning pace (last 24 h of readings) and time left - every 10 minutes, after a refill and after
-// a settings change.
+// Until refills to the top bracket enough feeding, the feeder's seconds are weighed with the heat model: what it says
+// the time the controller was heard in the last two weeks took, per feeder second. The timing is the feeder's, the
+// scale the heat model's - until refills to the top teach feedK.
+void scaleFeed(uint32_t now) {
+  if (feedSamples) return;
+  feedK = NAN;
+  if (isnan(coalK) || FURNACE < 0 || RETURN_WATER < 0 || !clockSet(now)) return;
+  CoalUse u = useBetween(now - 14 * 86400, now);
+  if (u.heard >= 12 * 3600 && u.feed >= FEED_MIN_SECONDS && u.heatHeard > 0) feedK = coalK * u.heatHeard / u.feed;
+}
+
+// Hopper level, burning pace (last 24 h) and time left, and the coal since the ash pan was emptied - every 10
+// minutes, after a refill and after a settings change.
 void updateCoal(uint32_t now) {
   coalRate = coalLevel = coalHoursLeft = ashBurned = NAN;
-  if (!settings.coalOn || isnan(coalK) || FURNACE < 0 || RETURN_WATER < 0) return;   // no heat without both
-  if (!isnan(heatSinceAsh)) ashBurned = coalK * heatSinceAsh;
-  uint32_t covered;
-  float heat = heatBetween(now - 86400, now, &covered);
-  if (covered >= 60) coalRate = coalK * heat / (covered / 60.0f);
-  if (settings.hopperKg <= 0 || !lastFullAt || isnan(heatSinceFull)) return;
-  coalLevel = constrain(settings.hopperKg + addedSinceFull - coalK * heatSinceFull, 0.0f, settings.hopperKg);
+  if (!settings.coalOn || !coalCounted()) return;
+  if (ashAt && settings.ashOn) ashBurned = burnedOf(useBetween(ashAt, now));
+  CoalUse day = useBetween(now - 86400, now);
+  if (day.covered >= 3600) coalRate = burnedOf(day) / (day.covered / 3600);
+  if (settings.hopperKg <= 0 || !lastFullAt) return;
+  coalLevel = constrain(settings.hopperKg + addedSinceFull - burnedOf(useBetween(lastFullAt, now)), 0.0f, settings.hopperKg);
   if (!isnan(coalRate)) coalHoursLeft = coalRate > 0.01f ? coalLevel / coalRate : INFINITY;
 }
 
@@ -1267,11 +1533,7 @@ void readAll() {
 
   time_t now = time(nullptr);
   healthTick(now);
-  if (clockSet(now)) {
-    minutes.add(now / 60, rec);
-    if (!isnan(heatSinceFull)) heatSinceFull += heatOf(rec);
-    if (!isnan(heatSinceAsh)) heatSinceAsh += heatOf(rec);
-  }
+  if (clockSet(now)) minutes.add(now / 60, rec);
 
   float furnace = FURNACE >= 0 ? values[FURNACE] : NAN;
   // The first reading after a power cut: was the furnace burning? Then watch whether it comes back (WARN_STALLED).
@@ -1342,9 +1604,8 @@ void summarizeDay(uint32_t dayStart, uint32_t dayEnd) {
 // Runs every loop once NTP has set the clock: pending events, Eve entries, daily summaries.
 // The controller's work log ("/gw"): every change of mode, fan, feeder, piston and pumps, to a tenth of a second,
 // from GecoBus's task to flash in batches - a power cut loses at most the last minute. Changes from before the clock
-// was set have no time; the state of the moment the clock is set is logged instead.
-std::vector<GecoBus::Event> gecoPending;           // changes not on flash yet; /api/geco serves them too
-
+// was set have no time; the state of the moment the clock is set is logged instead. /api/geco and countWork read the
+// changes not on flash yet (gecoPending) too.
 void logGecoChanges() {
   std::vector<GecoBus::Event>& batch = gecoPending;
   static uint32_t flushedMs = 0;
@@ -1374,12 +1635,12 @@ void logHistory() {
   if (!ashAt) {                                   // the ash pan counts from the first time the device has a clock
     ashAt = now;
     prefs.putUInt("ashAt", ashAt);
-    heatSinceAsh = 0;
   }
   if (now - lastAliveMark >= ALIVE_INTERVAL_S) {
     alive.mark(now);
     lastAliveMark = now;
   }
+  logWorkHours(now);
 
   uint32_t slot = now / HISTORY_INTERVAL_S;
   if (slot != lastHistorySlot) {
@@ -1436,8 +1697,8 @@ void morningSummary(time_t now) {
     cutSeconds += (uint32_t)(e.sensor & 0x7F) << 16 | (uint16_t)e.value;
   });
   String j = String("{\"t\":") + (uint32_t)now + ",\"e\":101,\"d\":" + yesterday + ",\"m\":" + (unsigned)d.burnMinutes;
-  if (settings.coalOn && !isnan(coalK) && FURNACE >= 0 && RETURN_WATER >= 0) {
-    float kg = coalK * d.heat;
+  float kg = settings.coalOn ? burnedOf(useBetween(yesterday, today)) : NAN;
+  if (!isnan(kg)) {
     j += ",\"kg\":" + String(lroundf(kg));
     if (settings.coalPrice > 0) j += ",\"z\":" + String(lroundf(kg * settings.coalPrice / 1000));
   }
@@ -1588,6 +1849,8 @@ void setupHistory(bool wipe) {
   refills.begin();
   health.begin();
   gecoLog.begin();
+  workLog.begin();
+  workDone = workLog.newestTime();
   techLog.printf("LittleFS: %u of %u KB used\n", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
   for (auto& row : recent)
     for (auto& v : row) v = NAN;
@@ -1791,6 +2054,8 @@ void handleNow() {
   j += '}';
   j += ",\"coal\":{\"k\":"; j += jsonNumber(coalK, 7);
   j += ",\"samples\":";   j += coalSamples;
+  j += ",\"kf\":";        j += jsonNumber(feedK, 7);   // kg per feeder second, null = the heat model alone
+  j += ",\"kfN\":";       j += feedSamples;            // intervals feedK was learnt from, 0 = scaled from k
   j += ",\"lastFull\":";  j += lastFullAt;
   j += ",\"level\":";     j += jsonNumber(coalLevel, 1);
   j += ",\"rate\":";      j += jsonNumber(coalRate, 2);
@@ -2199,7 +2464,6 @@ void handleAsh() {
 void emptyAsh(uint32_t now) {
   ashAt = now;
   prefs.putUInt("ashAt", ashAt);
-  heatSinceAsh = 0;
   logEvent(EV_ASH, 0, 0);
   updateCoal(now);
   evaluateWarnings();
@@ -2218,6 +2482,24 @@ void handleGeco() {
   gecoLog.forRange(from, to, [&](const GecoBus::Event& e) { w.put(&e, sizeof(e)); });
   for (const GecoBus::Event& e : gecoPending)       // newer than anything on flash
     if (e.time >= from && e.time < to) w.put(&e, sizeof(e));
+  w.end();
+}
+
+// GET from, to (Unix time): the controller's work hour by hour - binary, 22 bytes an hour (WorkHour), oldest first;
+// the hours not stored yet come last, the one running now with its part so far.
+void handleWork() {
+  uint32_t now = time(nullptr), to = argOr("to", now) + 1, from = argOr("from", to - 86400);
+  from -= from % 3600;
+  ChunkWriter w;
+  w.begin("application/octet-stream");
+  workLog.forRange(from, to, [&](const WorkHour& h) { w.put(&h, sizeof(h)); });
+  uint32_t next = workFrom();
+  if (next && clockSet(now) && max(from, next) < min(to, now))
+    countWork(max(from, next), min(to, now), true, [&](const WorkHour& h) {
+      WorkHour c = h;
+      c.heatHeard = heatHeardOf(c, min<uint32_t>(3600, min(to, now) - c.time));
+      w.put(&c, sizeof(c));
+    });
   w.end();
 }
 
@@ -2538,6 +2820,7 @@ void onNetworkUp(int count) {
   server.on("/api/bus", HTTP_GET, handleBus);
   server.on("/api/probes", HTTP_GET, handleProbes);
   server.on("/api/geco", HTTP_GET, handleGeco);
+  server.on("/api/work", HTTP_GET, handleWork);
   server.on("/api/slots", HTTP_POST, handleSlots);
   server.on("/api/refills", HTTP_GET, handleRefills);
   server.on("/api/refill", HTTP_POST, handleRefill);
@@ -2661,18 +2944,22 @@ void setup() {
   // use and ash count (limits and settings stay).
   bool wipe = prefs.getBool("wipe", false);
   if (wipe) {
-    for (const char* key : {"alerts", "coalK", "coalN", "ashAt", "relayKey", "supKey", "supUntil"}) prefs.remove(key);   // old phones out
+    for (const char* key : {"alerts", "coalK", "coalN", "feedK", "feedN", "ashAt", "relayKey", "supKey", "supUntil"}) prefs.remove(key);   // old phones out
     prefs.putBool("cleared", true);
   }
   loadLimits();
   loadSettings();
   restoreAlerts();
   setupHistory(wipe);
+  closeOldCuts();
+  closeGecoLog();
   coalToKilograms();
   if (!updater.crashLoop()) rescanHistory();
   if (wipe) prefs.remove("wipe");
   coalK = prefs.getFloat("coalK", NAN);
   coalSamples = prefs.getUShort("coalN", 0);
+  feedSamples = prefs.getUShort("feedN", 0);
+  feedK = feedSamples ? prefs.getFloat("feedK", NAN) : NAN;
   ashAt = prefs.getUInt("ashAt", 0);
   if (!updater.crashLoop()) recomputeCoal();      // after crash restarts: no heavy work until a fix gets in
   keepOtaPassword();

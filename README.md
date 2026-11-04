@@ -32,8 +32,9 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   home web app -> Ustawienia -> Dostęp zdalny -> "Otwórz na tym telefonie" (or copy the code to another phone).
 - **Coal** (feeder furnace with a hopper, coal carried up loose): "Dosypałem" in the web app records a refill in
   kilograms - typed, or counted in shovels (~3.2 kg) and buckets (~9.6 kg) - to the top or not, also for an
-  earlier hour, or from how full the hopper was before. Coal burned is taken as proportional to the heat output
-  (furnace minus return, summed per minute); the factor is learnt from refills to the top. Gives daily use in kg
+  earlier hour, or from how full the hopper was before. Coal burned is taken as proportional to the feeder's
+  running time while the boiler controller is heard (S3 with the RS485 module, v30), otherwise to the heat output
+  (furnace minus return, summed per minute); both factors are learnt from refills to the top. Gives daily use in kg
   and costs, the hopper level (its size in Ustawienia -> Dane kotła, 100 kg by default), time left, a "Mało
   węgla" warning, a 30-day chart with the frost dependence and the season so far. Can be switched off in the
   settings. Up to v21 coal was counted in buckets; v22 converts the stored data once (coalToKilograms).
@@ -52,7 +53,8 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   settings, WiFi, HomeKit pairing, remote-access key); restored on a new board, the Home app and the phones see it
   as the old one. Home WiFi only.
 - **History**: every minute for 31 days (raw flash partition), daily summaries for 5 years, the journal and 14 days
-  of Eve entries (LittleFS). All rings - nothing ever fills up.
+  of Eve entries (LittleFS); on the S3 also the boiler controller's every change for ~2 months of winter and its
+  work hour by hour for years (docs/geco-gh11tb-bus.md). All rings - nothing ever fills up.
 - **Updates over the internet**: the ESP checks `release/manifest.json` every hour. A newer version is only
   offered: the web app shows what it brings and installs it on "Zainstaluj", with a progress bar (the download
   runs in its own task, resumes after a break-off and goes in turn to GitHub and a jsDelivr mirror). A release published with `-Forced` installs by itself on

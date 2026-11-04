@@ -1,7 +1,8 @@
 // History for the web app:
 //   MinuteLog - one record per minute for all probes, a month of it, in its own flash partition
 //   AliveLog  - a "still alive" mark every few seconds, in its own flash partition, to time power cuts
-//   SegmentLog - fixed-size records appended to two files on LittleFS (daily summaries, journal, coal refills)
+//   SegmentLog - fixed-size records appended to two files on LittleFS (daily summaries, journal, coal refills, the
+//                boiler controller's work)
 // Nothing grows without bound: the newest data replaces the oldest, so the space never runs out.
 
 #pragma once
@@ -368,6 +369,18 @@ public:
   // Time of the record added last, 0 when empty.
   uint32_t newestTime() const { return count[cur] ? last[cur] : last[cur ^ 1]; }
 
+  // The record added last, all zero when empty.
+  T newest() const {
+    uint8_t s = count[cur] ? cur : cur ^ 1;
+    return count[s] ? at(s, count[s] - 1) : T{};
+  }
+
+  // Time of the oldest record kept, 0 when empty.
+  uint32_t oldestTime() const {
+    uint8_t s = count[cur ^ 1] ? cur ^ 1 : cur;
+    return count[s] ? at(s, 0).time : 0;
+  }
+
   // f(record) for every record with time >= since, in the order they were added.
   template <typename F> void forEach(uint32_t since, F f) const {
     for (uint8_t s : {(uint8_t)(cur ^ 1), cur}) {
@@ -403,7 +416,8 @@ private:
     return r;
   }
 
-  // Keeps the first n records of segment s (a small file - the refills - or a rare repair).
+  // Keeps the first n records of segment s (a small file - the refills - or a rare repair; a 1.5 MB segment of the
+  // controller's log goes through PSRAM).
   void rewrite(uint8_t s, uint32_t n) {
     std::vector<T> keep(n);
     File f = LittleFS.open(path(s), "r");
