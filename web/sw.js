@@ -1,13 +1,38 @@
-// Service worker of the remote app (GitHub Pages): the furnace's notifications. The relay brings either its own
-// news (the ESP is offline / back, a test) or the ESP's alert sealed with the pairing key (Relay.h), opened here -
-// the pairing code is kept in IndexedDB by the page when notifications are switched on.
+// Service worker of the remote app (GitHub Pages): the furnace's notifications, and the app itself kept for when
+// GitHub does not answer. The relay brings either its own news (the ESP is offline / back, a test) or the ESP's
+// alert sealed with the pairing key (Relay.h), opened here - the pairing code is kept in IndexedDB by the page when
+// notifications are switched on.
 
 const WARNINGS = ['Piec wygasa', 'Ryzyko zamarznięcia', 'Cofanie żaru', 'Mało węgla', 'Piec stoi po zaniku prądu', 'Opróżnij popielnik',
   'Sterownik nie w automacie'];
 const LOCALE = 'pl-PL';
+const SHELL = 'furnace-shell';
 
-self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('install', e => e.waitUntil(
+  caches.open(SHELL).then(c => c.addAll(['./', 'icon.png', 'manifest.webmanifest'])).catch(() => {}).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+
+// GitHub Pages has outages, and then the app opened as GitHub's own error page. The app's files still come from the
+// network first, so a new version arrives at once; only when the network fails or GitHub answers with a server error
+// is the last good copy served. The furnace's data never passes here - it comes over the relay.
+self.addEventListener('fetch', e => {
+  const r = e.request;
+  if (r.method === 'GET' && r.url.startsWith(self.registration.scope)) e.respondWith(shell(r));
+});
+
+async function shell(req) {
+  const cache = await caches.open(SHELL);
+  let res = null;
+  try {
+    res = await fetch(req);
+    if (res.ok) {
+      await cache.put(req, res.clone());
+      return res;
+    }
+  } catch (err) {}
+  if (res && res.status < 500) return res;                 // a real "not found" stays one
+  return (await cache.match(req, { ignoreSearch: true })) || res || Response.error();
+}
 self.addEventListener('push', e => e.waitUntil(onPush(e)));
 self.addEventListener('notificationclick', e => {
   e.notification.close();
