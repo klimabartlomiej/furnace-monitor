@@ -52,14 +52,16 @@ the fire goes out (it sat like that for 40 minutes on the day of this test).
 | OUT (byte 6) | `0x40` | fan running |
 |  | `0x20` | feeder running |
 |  | `0x02` | CO pump running (the vertical bar left of the display) |
-| MODE (byte 7) | `0x04` | standby - switched on, not in automat |
+|  | `0x08` | hot water (CWU) pump running: the return jumps to 56-59 C, T1 is pulled down, another burn follows |
+| MODE (byte 7) | `0x02` | service menu: everything off, the bus drops out for a moment now and then; leaves through standby |
+|  | `0x04` | standby - switched on, not in automat |
 |  | `0x08` | automat, **burning** |
 |  | `0x10` | **podtrzymanie** (holding: boiler at or above u0) |
 | P3 (byte 3) | `0x40` | feeder piston away from its home position (the kontaktron) |
 |  | `0x08` | always set |
+|  | `0x04` | seen once, 04.11 21:52-22:30 after a bath, 47 min - meaning unknown |
 
-Still unknown: the DHW (boiler) pump bit - it comes on only when the hot water falls below u4; the short `60/70/72`
-frames (settings? alarms?); the `ff xx 23` tails.
+Still unknown: the short `60/70/72` frames (settings? alarms?); the `ff xx 23` tails.
 
 ## What the controller does, as seen on the bus
 
@@ -116,11 +118,19 @@ What it hears:
   bytes a change (time u32, tenths, mode, outputs, P3), the first record being the state the range began in; changes
   not on flash yet are served too. Every start closes the log at the last "still alive" mark before it (a NO_DATA
   record), so the state before a power cut or an update does not run on through it (v30).
-- `/api/work?from&to` (v30): the same work hour by hour ("/wh", 22 bytes an hour, kept 2.5-5 years), worked out from
-  the log - seconds heard, burning, holding, standby, fan, CO pump, the feeder in tenths, the heat model's
-  degree-minutes while heard, piston cycles completed (away -> home) and przedmuchy begun (holding, then the fan or the
-  feeder on); the hour running now last, its part so far. Written as each hour ends; at the first start of v30 for the
-  whole log back, after v29's power cuts got their NO_DATA records from the journal.
+- `/api/work?from&to`: the same work hour by hour ("/wk", 30 bytes an hour, kept 2.5-5 years; v30's shorter "/wh" is
+  counted anew from the log), worked out from the log - seconds heard, burning, holding, standby, fan, CO pump, hot
+  water pump, the feeder in tenths and its part while burning, the heat model's degree-minutes while heard, the flue 4
+  minutes into each burn begun without the hot water pump (between its two minute readings, +-16 C between burns;
+  sum + count), burns begun, piston cycles completed (away -> home) and przedmuchy begun (the run finishing a stroke
+  after a burn is none); the hour running now last, its part so far. Written 6 minutes after each hour ends, so the last
+  burn's flue reading is there.
+- Settings read off the work (v31, `SettingWatch`; user parameters never appear on the bus): u1 = the feeder's pause while
+  burning, u2 = from the feeder stopping in holding to the next przedmuch, the fan's after-run (F18) = how long it
+  outlasts the feeder in holding. `/api/now` -> `geco.set` [u1 s, u2 min, after-run s]; each change and each visit to the
+  service menu goes into the journal (`EV_SETTING`, 16: sensor 0-2 the setting, value old x 256 + new; sensor 3 the menu,
+  value seconds), no notification. u3 (fan power) and the service parameters stay invisible - a visit to the menu is the
+  only trace.
 - The controller's temperatures as three more probes (address `F7 0n ...`, n = 1 boiler, 2 feeder, 3 hot water), added
   by themselves the first time the bus is heard. The app pairs each with our probe on the same water (boiler ->
   furnace probe, feeder -> hopper, hot water -> boiler): its value on that probe's card, a dashed second line on its
@@ -136,15 +146,17 @@ What it hears:
   time (and the feeder ran 10 minutes or more); until two such refills it is scaled from the heat model over the
   last two weeks the bus was heard (`coal.kfN` = 0). Measured 2026-11-04: a full piston cycle is ~31 s of the motor.
 - The app: an animated boiler on the home screen (with the hopper's coal level), work lanes under the charts (from
-  the log up to 9 days, from the hours beyond), the controller's day on "Dzisiaj" (burning, holding, przedmuchy,
-  piston cycles, feeder time) and its month in Miesiace.
+  the log up to 8 days, from the hours beyond), the controller's day on "Dzisiaj" (burning, holding, przedmuchy,
+  piston cycles, feeder time), its month in Miesiace, and "Praca sterownika" in Wykresy: per day for 30 days how many
+  times the fire was started (burns + przedmuchy), the share of the coal fed outside burning and the flue 4 minutes into
+  a burn, the days the settings changed marked - what a test of settings is read from. Whether the flue mark really
+  follows soot on the exchanger is still to be seen.
 
 ## Next
 
 Proposals agreed on 2026-10-29, after the first S3 data:
 
-- Map the DHW pump bit and the short frames from what the S3 logs; then draw the hot water tank's own pump and its
-  pipes in the boiler picture.
+- Map the short frames from what the S3 logs.
 - "Coal hung or ran out": burning, the feeder pushing, and the boiler not warming for 30-45 minutes - coal bridged in
   the hopper or the hopper empty. (It also makes the feeder count too much coal for that time.)
 - The controller's switch points on the furnace chart: u0 (to podtrzymanie) and u0 - hysteresis (back to burning),

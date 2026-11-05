@@ -158,6 +158,7 @@ body.fsmode nav.tabs{display:none}
 .bx .pump circle{fill:#2a2f39;stroke:#3a404c;stroke-width:1.5}
 .bx .pump path{fill:#5d6471}
 .bx .pump.on path{fill:#30d158}
+.bx .pump.dhw.on path{fill:#34d1bf}
 .gchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .gchips span{display:flex;align-items:center;gap:6px;border-radius:999px;padding:5px 10px;font-size:13px;font-weight:600;background:var(--card2);color:var(--faint)}
 .gchips span.on{color:var(--text)}
@@ -247,6 +248,9 @@ body.unpaired .pair{display:block}
 .bars.long button.today{background:rgba(255,69,58,.3);outline-color:rgba(255,69,58,.8)}
 .bars.long button.sel{background:#ff453a}
 .blabel{color:var(--faint);font-size:12px;font-weight:600;margin-top:10px}
+.wmarks{display:flex;gap:3px;height:8px;margin-top:8px}
+.wmarks i{flex:1;display:flex;justify-content:center}
+.wmarks i.on::after{content:'';width:6px;height:6px;border-radius:50%;background:#bf5af2}
 .stats.three{grid-template-columns:repeat(3,1fr);margin-bottom:4px}
 .stats.three b{font-size:17px}
 .outage{fill:rgba(255,159,10,.13)}
@@ -498,6 +502,10 @@ nav.tabs button.on{color:var(--text)}
     <div class="card-h">Praca pieca<small>godziny dziennie, 30 dni</small></div>
     <div id="burn"></div>
   </div>
+  <div class="card" id="workcard" style="display:none">
+    <div class="card-h">Praca sterownika<small>dzień po dniu, 30 dni</small></div>
+    <div id="workdays"></div>
+  </div>
   <div class="card" id="coalchartcard" style="display:none">
     <div class="card-h">Zużycie węgla<small>kg dziennie, 30 dni</small></div>
     <div id="coalchart"></div>
@@ -731,6 +739,7 @@ const CHANGES = {
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
   27: 'Pewniejsza aktualizacja: zapis czujników, przywrócenie kopii albo wyczyszczenie historii tuż po aktualizacji nie cofa już nowej wersji. Nazwy czujników z uszkodzonymi znakami są odrzucane.',
+  31: 'Pompa ciepłej wody i menu serwisowe sterownika: pompa CWU ma swój pasek pod wykresem, napis i rury na obrazku kotła. W Wykresach nowa karta „Praca sterownika” – dzień po dniu ile było rozruchów (palenia + przedmuchy), ile węgla weszło poza paleniem i jakie są spaliny w 4. minucie palenia, do porównywania ustawień. Zmiany przerwy podawania (u1), odstępu przedmuchów (u2) i dobiegu wentylatora oraz wejścia do menu serwisowego same zapisują się w dzienniku i na wykresach, także te sprzed aktualizacji. Przedmuchy liczą się poprawnie (dokończenie skoku tłoka po paleniu to nie przedmuch).',
   30: 'Węgiel liczony z pracy podajnika: gdy piec słyszy sterownik, zużycie, stan zasobnika i „Starczy na…” idą z czasu pracy podajnika, nie z temperatur – skalę uczy się z dosypań do pełna (do tego czasu bierze ją z temperatur). Sterownik dzień po dniu: w „Dzisiaj” godziny palenia i podtrzymania, przedmuchy, cykle tłoka i praca podajnika, w Miesiącach to samo za miesiąc, a paski pracy pod wykresem także dla 30 dni i roku. Piec pamięta każdy ruch sterownika przez ok. 2 miesiące zimą (było ok. tygodnia), a godzinowe podsumowania przez lata. Pociągnij ekran w dół, aby odświeżyć. Wykres po powrocie do aplikacji nie zatrzymuje się już na starych danych.',
   29: 'Moduł RS485 przy sterowniku: dopóki piec nie usłyszy sterownika, sam sprawdza podłączenie – czy z modułu cokolwiek dochodzi, czy przewody A i B nie są zamienione (wtedy odwraca je programowo) i czy sygnał nie trafił na inny pin płytki (wtedy słucha tam).',
   28: 'Sterownik kotła na żywo (z modułem RS485 przy sterowniku Geco): na górze ekranu głównego animowany kocioł – palenie, podtrzymanie i przedmuch, wentylator, podajnik z położeniem tłoka, pompa CO, temperatury sterownika i ile węgla zostało w zasobniku. Pod wykresami paski pracy: kiedy był tryb palenia, kiedy dmuchał wentylator, kiedy pchał podajnik i kiedy chodziła pompa – na tej samej osi co temperatury. Nowe ostrzeżenie „Sterownik nie w automacie” z powiadomieniem – po zaniku prądu sterownik czeka, aż ktoś naciśnie A. Odczyt sterownika na kafelkach pieca, zasobnika i bojlera, a na wykresie jako przerywana linia (przycisk „Sterownik”); gdy nasz czujnik i sterownik rozjadą się o ponad 5°, pojawi się ostrzeżenie. Auto-korekta czujników według sterownika w Ustawienia → Korekta wskazań. Aplikacja po uruchomieniu otwiera się zawsze na Przeglądzie, a w Czujnikach rola zajęta przez inny czujnik jest wyszarzona.',
@@ -759,6 +768,8 @@ const EV_POWER_CUT = 11;      // time = power back, value = minutes without powe
 const BOOT_REASON = ['', 'po włączeniu zasilania', 'po restarcie', 'po spadku napięcia', 'po błędzie programu'];
 const warningProbes = w => ([[FURNACE], [FURNACE, RETURN, BOILER], [COAL], [FURNACE, RETURN], [FURNACE], [FURNACE], [FURNACE]][w] || []).filter(i => i >= 0);
 const EV_SEASON = 12, EV_ASH = 13, EV_HOT_WATER = 14, EV_BATH = 15;   // EV_BATH: e[2] = minutes, e[3] = boiler drop x 100
+const EV_SETTING = 16;        // read off the controller's work: e[2] = which, e[3] = old x 256 + new; e[2] = 3: its service menu, e[3] = seconds
+const SETTING_NAMES = [['Przerwa podawania (u1)', 's'], ['Przedmuch co (u2)', 'min'], ['Dobieg wentylatora', 's']];
 const RANGES = { '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
 const STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200];
 const MIN_SPAN = 1800, MAX_SPAN = 2 * 365 * 86400, LIVE_SPAN = 26 * 3600;
@@ -780,7 +791,7 @@ function saveCache() {
     Object.keys(localStorage).filter(k => k.startsWith('furnace-cache-') && k !== CACHE_KEY).forEach(k => localStorage.removeItem(k));
     const keep = tNow() - 40 * 86400 - (tNow() - 40 * 86400) % 3600, hours = work.filter(w => w.t >= keep).map(w => WORK_KEYS.map(k => w[k]));
     localStorage.setItem(CACHE_KEY, JSON.stringify({ at: lastOk || Date.now(), now, live, liveTodo, journal, days, outdoor, work: hours,
-      workFrom: workFrom && Math.max(workFrom, keep) }));
+      workFrom: workFrom && Math.max(workFrom, keep), workFw }));
   } catch (e) {}
 }
 function dropCache() {
@@ -792,7 +803,7 @@ function loadCache() {
   try {
     const c = JSON.parse(localStorage.getItem(CACHE_KEY));
     if (!c || !c.now || Date.now() - c.at > 3 * 86400e3) return;
-    ({ now, live = [], liveTodo = [], journal = [], days = [], workFrom = 0 } = c);
+    ({ now, live = [], liveTodo = [], journal = [], days = [], workFrom = 0, workFw = 0 } = c);
     work = (c.work || []).map(a => Object.fromEntries(WORK_KEYS.map((k, i) => [k, a[i]])));
     mapRoles(now);
     Object.assign(outdoor, c.outdoor);
@@ -1325,6 +1336,7 @@ function chart(el, o) {
     legend.innerHTML = (band ? '<span><i class="band"></i>brak prądu</span>' : '')
       + (colors.has('#ff453a') ? item('#ff453a', 'alarm') : '') + (colors.has('#ff9f0a') ? item('#ff9f0a', 'ostrzeżenie') : '')
       + (colors.has('#30d158') ? item('#30d158', 'koniec – wróciło do normy') : '') + (colors.has('#0a84ff') ? item('#0a84ff', 'kąpiel') : '')
+      + (colors.has('#bf5af2') ? item('#bf5af2', 'ustawienia sterownika') : '')
       + (band || colors.size ? `<span class="lg-hint">${el.id === 'detail' ? 'przytrzymaj na nim palec' : 'dotknij go'} – zobaczysz, co to</span>` : '');
   }
   el.innerHTML = `<svg width="${W}" height="${H}"><defs>${defs}<clipPath id="${el.id}-c"><rect x="${L}" y="0" width="${pw}" height="${H}"/></clipPath></defs>`
@@ -1713,9 +1725,9 @@ function burnSeconds(from, to) {
 // now.geco (firmware 28+): what the controller announces on its room-panel bus, read only (GecoBus.h) - mode, fan,
 // feeder, piston, pumps and its own temperatures. /api/geco is its work log: every change to a tenth of a second,
 // 8 bytes each (time u32, tenths, mode, outputs, flags); the first record is the state the range began in.
-const G_FAN = 0x40, G_FEEDER = 0x20, G_PUMP = 0x02, G_PISTON = 0x40;
-const G_MODE = { 0: 'brak danych', 4: 'czuwanie', 8: 'palenie', 16: 'podtrzymanie' };
-const G_COLOR = { palenie: '#ff6b3d', podtrzymanie: '#ffb340', przedmuch: '#ffd60a', czuwanie: '#8a919e', 'brak danych': '#3a404c' };
+const G_FAN = 0x40, G_FEEDER = 0x20, G_PUMP = 0x02, G_DHW = 0x08, G_PISTON = 0x40;
+const G_MODE = { 0: 'brak danych', 2: 'menu serwisowe', 4: 'czuwanie', 8: 'palenie', 16: 'podtrzymanie' };
+const G_COLOR = { palenie: '#ff6b3d', podtrzymanie: '#ffb340', przedmuch: '#ffd60a', czuwanie: '#8a919e', 'menu serwisowe': '#bf5af2', 'brak danych': '#3a404c' };
 const gecoHeard = () => !!(now && now.geco && now.geco.age >= 0);
 const gecoLive = () => gecoHeard() && now.geco.age < 10;
 // What the controller is doing: podtrzymanie with the fan or the feeder running is a przedmuch.
@@ -1759,6 +1771,9 @@ function boilerSvg() {
     <path d="M230 194c-5-10 3-16 2-26 8 8 10 16 6 26z" fill="#ffd60a"/></g></g>
   <path class="pipe" d="M90 60H8" stroke="#ff6b3d"/><path class="flow" id="gflow1" d="M90 60H8"/>
   <text id="gsup" x="8" y="52"></text><text class="lbl" x="8" y="76">DO DOMU</text>
+  <path class="pipe" d="M62 60V94" stroke="#ff6b3d"/><path class="flow" id="gflowd1" d="M62 60V94"/>
+  <path class="pipe" d="M48 160V196" stroke="#4aa8ff"/><path class="flow" id="gflowd2" d="M48 160V196"/>
+  <g class="pump dhw" id="gpumpd" transform="translate(48 176) scale(.68)"><circle r="11"/><path d="M-6 -5L0 7L6 -5z"/></g>
   <rect class="metal" x="16" y="94" width="52" height="66" rx="12"/>
   <text class="lbl" x="42" y="112" text-anchor="middle">CWU</text><text id="gcwu" x="42" y="138" text-anchor="middle" class="big" style="font-size:16px"></text>
   <path class="pipe" d="M90 196H8" stroke="#4aa8ff"/><path class="flow" id="gflow2" d="M8 196H90"/>
@@ -1777,13 +1792,14 @@ function renderBoiler() {
   if (!$('#gstate')) card.innerHTML = '<div class="card-h"><span class="gstate" id="gstate"><i></i><b></b></span><small id="gsince"></small></div>'
     + '<div class="ghint" id="ghint"></div>' + boilerSvg() + '<div class="gchips" id="gchips"></div>';
   const g = now.geco, live = gecoLive(), out = live ? g.out : 0, mode = live ? g.mode : 0, what = live ? gecoWhat(mode, out) : 'brak danych';
-  const fan = !!(out & G_FAN), feeder = !!(out & G_FEEDER), pump = !!(out & G_PUMP), away = live && !!(g.flags & G_PISTON);
+  const fan = !!(out & G_FAN), feeder = !!(out & G_FEEDER), pump = !!(out & G_PUMP), dhw = !!(out & G_DHW), away = live && !!(g.flags & G_PISTON);
   const st = $('#gstate');
   st.querySelector('i').style.background = G_COLOR[what] || '#8a919e';
   st.querySelector('b').textContent = live ? what[0].toUpperCase() + what.slice(1) : 'Brak danych';
   $('#gsince').textContent = live && g.since > 1.6e9 ? `od ${when(g.since)}` : g.age >= 0 ? `ostatnio ${durCut(g.age)} temu` : '';
   const hint = !live ? 'Moduł RS485 nie słyszy sterownika – sterownik wyłączony albo luźny przewód A/B.'
-    : mode === 4 && !now.warnings[6] ? 'Sterownik nie jest w automacie – naciśnij A na sterowniku, inaczej piec wygaśnie.' : '';   // the banner says it once it holds
+    : mode === 4 && !now.warnings[6] ? 'Sterownik nie jest w automacie – naciśnij A na sterowniku, inaczej piec wygaśnie.'   // the banner says it once it holds
+    : mode === 2 ? 'Sterownik jest w menu serwisowym – wentylator, podajnik i pompy stoją.' : '';
   $('#ghint').textContent = hint;
   $('#ghint').style.display = hint ? '' : 'none';
   const sens = role => { const i = { furnace: FURNACE, return: RETURN, hopper: COAL, boiler: BOILER, flue: FLUE }[role]; return i >= 0 ? now.sensors[i] : null; };
@@ -1813,14 +1829,17 @@ function renderBoiler() {
   $('#gpump').classList.toggle('on', pump);
   $('#gflow1').classList.toggle('on', pump);
   $('#gflow2').classList.toggle('on', pump);
+  $('#gpumpd').classList.toggle('on', dhw);
+  $('#gflowd1').classList.toggle('on', dhw);
+  $('#gflowd2').classList.toggle('on', dhw);
   const burning = mode === 8 || what === 'przedmuch';
   $('#gfire').classList.toggle('on', burning);
   $('#gember').classList.toggle('on', mode === 16 && !burning);
   $('#gsmoke').classList.toggle('on', burning);
   const chip = (on, color, text) => `<span class="${on ? 'on' : ''}" style="--c:${color}"><i></i>${text}</span>`;
   $('#gchips').innerHTML = chip(fan, '#64d2ff', 'Wentylator') + chip(feeder, '#ff9f0a', 'Podajnik')
-    + chip(away, '#ffd60a', away ? 'Tłok wysunięty' : 'Tłok w pozycji') + chip(pump, '#30d158', 'Pompa CO')
-    + (live && g.out & ~(G_FAN | G_FEEDER | G_PUMP) ? chip(true, '#bf5af2', `inne 0x${(g.out & ~(G_FAN | G_FEEDER | G_PUMP)).toString(16)}`) : '');
+    + chip(away, '#ffd60a', away ? 'Tłok wysunięty' : 'Tłok w pozycji') + chip(pump, '#30d158', 'Pompa CO') + chip(dhw, '#34d1bf', 'Pompa CWU')
+    + (live && g.out & ~(G_FAN | G_FEEDER | G_PUMP | G_DHW) ? chip(true, '#bf5af2', `inne 0x${(g.out & ~(G_FAN | G_FEEDER | G_PUMP | G_DHW)).toString(16)}`) : '');
 }
 
 // The work log of a chart's range, loaded with the chart's data (ranges up to a week). Once loaded, only what is new
@@ -1879,7 +1898,7 @@ function gecoPieces(t0, t1) {
   return out;
 }
 
-// Lanes under the detail chart, on its time axis: mode, fan, feeder, piston, CO pump. Drawn per pixel column: a
+// Lanes under the detail chart, on its time axis: mode, fan, feeder, piston, CO pump, hot water pump. Drawn per pixel column: a
 // column shows how much of its time an output ran (faint = short pulses, like the feeder's portions while burning;
 // full = it ran throughout) and the mode that held most of it - standby and a przedmuch win any column they touch, so
 // a short one is never hidden. A week of portions stays a few hundred rectangles. Views up to 8 days come from the
@@ -1891,6 +1910,7 @@ const LANES = [
   ['Podaj.', e => e.out & G_FEEDER, '#ff9f0a'],
   ['Tłok', e => e.flags & G_PISTON, '#ffd60a'],
   ['Pompa', e => e.out & G_PUMP, '#30d158'],
+  ['CWU', e => e.out & G_DHW, '#34d1bf'],
 ];
 function paintLanes() {
   const box = $('#lanes'), geo = $('#detail').geom;
@@ -1917,7 +1937,7 @@ function paintLanes() {
       if (what) addMode(what, c, s);
     });
   } else for (const w of hours) {
-    const len = Math.max(1, Math.min(3600, tNow() - w.t)), ran = [0, w.fan, w.feed, 0, w.pump];
+    const len = Math.max(1, Math.min(3600, tNow() - w.t)), ran = [0, w.fan, w.feed, 0, w.pump, w.dhw];
     spread(w.t, w.t + len, (c, s) => {
       const f = s / len;
       ran.forEach((v, k) => { if (v) on[k][c] += v * f; });
@@ -1934,7 +1954,7 @@ function paintLanes() {
     // [fill, opacity] of column c
     const look = c => {
       if (!test) {
-        let best = fromLog ? ['czuwanie', 'przedmuch'].find(m => modes[m] && modes[m][c] > 0) : null, most = 0;
+        let best = fromLog ? ['menu serwisowe', 'czuwanie', 'przedmuch'].find(m => modes[m] && modes[m][c] > 0) : null, most = 0;
         if (!best) for (const m in modes) if (modes[m][c] > most) { most = modes[m][c]; best = m; }
         if (best) drawn.add(best);
         return best ? [G_COLOR[best] || '#5d6471', 1] : null;
@@ -1969,22 +1989,25 @@ function gecoTip(t) {
   if (e.out & G_FAN) parts.push('wentylator');
   if (e.out & G_FEEDER) parts.push('podajnik');
   if (e.out & G_PUMP) parts.push('pompa CO');
+  if (e.out & G_DHW) parts.push('pompa CWU');
   return `<div class="tev"><i style="background:${G_COLOR[what] || '#8a919e'}"></i><span>Sterownik: ${what}${parts.length ? ' · ' + parts.join(', ') : ''}</span></div>`;
 }
 
 // The controller's work hour by hour (firmware 30+, /api/work): seconds heard, in each mode and of each output, the
-// feeder's seconds, the heat model's degree-minutes while heard, piston cycles and przedmuchy - the hour running now
-// last, with its part so far. Kept from the earliest hour a view asked for: later loads fetch the newest hours, and
+// feeder's seconds and its part while burning, the heat model's degree-minutes while heard, the flue 4 minutes into its
+// burns (sum, count), burns, piston cycles and przedmuchy - the hour running now last, with its part so far. Firmware
+// 30 sends less, and counts the end of a stroke after a burn as a przedmuch: another firmware starts the hours anew. Kept from the earliest hour a view asked for: later loads fetch the newest hours, and
 // older ones in 30-day pieces, newest first. Loads queue one after another.
-const WORK_KEYS = ['t', 'heard', 'burning', 'holding', 'standby', 'fan', 'pump', 'feed', 'heatHeard', 'strokes', 'blows'];
-let work = [], workFrom = 0, workAt = 0, workLoading = Promise.resolve();
+const WORK_KEYS = ['t', 'heard', 'burning', 'holding', 'standby', 'fan', 'pump', 'dhw', 'feed', 'feedBurn', 'heatHeard', 'flueSum', 'flueN', 'burns', 'strokes', 'blows'];
+let work = [], workFrom = 0, workAt = 0, workFw = 0, workLoading = Promise.resolve();
 function parseWork(buf) {
-  if (buf.byteLength % 22) throw new Error('records of another size');
-  const v = new DataView(buf), out = [];
-  for (let o = 0; o < buf.byteLength; o += 22)
-    out.push({ t: v.getUint32(o, true), heard: v.getUint16(o + 4, true), burning: v.getUint16(o + 6, true), holding: v.getUint16(o + 8, true),
-      standby: v.getUint16(o + 10, true), fan: v.getUint16(o + 12, true), pump: v.getUint16(o + 14, true), feed: v.getUint16(o + 16, true) / 10,
-      heatHeard: v.getUint16(o + 18, true), strokes: v.getUint8(o + 20), blows: v.getUint8(o + 21) });
+  const wide = now.fw >= 31, size = wide ? 30 : 22;
+  if (buf.byteLength % size) throw new Error('records of another size');
+  const v = new DataView(buf), out = [], u16 = o => v.getUint16(o, true);
+  for (let o = 0; o < buf.byteLength; o += size)
+    out.push(Object.assign({ t: v.getUint32(o, true), heard: u16(o + 4), burning: u16(o + 6), holding: u16(o + 8), standby: u16(o + 10), fan: u16(o + 12), pump: u16(o + 14) },
+      wide ? { dhw: u16(o + 16), feed: u16(o + 18) / 10, feedBurn: u16(o + 20) / 10, heatHeard: u16(o + 22), flueSum: u16(o + 24), flueN: v.getUint8(o + 26), burns: v.getUint8(o + 27), strokes: v.getUint8(o + 28), blows: v.getUint8(o + 29) }
+        : { feed: u16(o + 16) / 10, heatHeard: u16(o + 18), strokes: v.getUint8(o + 20), blows: v.getUint8(o + 21) }));
   return out;
 }
 function loadWork(from) {
@@ -1993,6 +2016,11 @@ function loadWork(from) {
 }
 async function loadWorkNow(from) {
   const t = tNow(), get = async (a, b) => parseWork(await (await api(`/api/work?from=${a}&to=${b}`, {}, 20000)).arrayBuffer());
+  if (workFw !== now.fw) {
+    work = [];
+    workFrom = 0;
+    workFw = now.fw;
+  }
   try {
     if (!workFrom) {                                             // nothing yet: the hour running now first
       work = await get(t - t % 3600, t);
@@ -2013,7 +2041,7 @@ async function loadWorkNow(from) {
 
 // The controller's work in [t0, t1) summed from the hours; null when it was not heard then.
 function workSum(t0, t1) {
-  const s = { heard: 0, burning: 0, holding: 0, standby: 0, fan: 0, pump: 0, feed: 0, heatHeard: 0, strokes: 0, blows: 0 };
+  const s = { heard: 0, burning: 0, holding: 0, standby: 0, fan: 0, pump: 0, dhw: 0, feed: 0, feedBurn: 0, heatHeard: 0, flueSum: 0, flueN: 0, burns: 0, strokes: 0, blows: 0 };
   for (const w of work) if (w.t >= t0 && w.t < t1) for (const k in s) s[k] += w[k] || 0;
   return s.heard > 0 ? s : null;
 }
@@ -2369,8 +2397,8 @@ function paintDetail() {
     if (d) lines.push({ color: colorOf(i), name: `${nameOf(i)} · sterownik`, agg: d.agg, step: d.step, dash: true, pts: windowed(d.pts, view.t0, view.t1) });
   }
   const limits = single && s0 ? [s0.high !== null && { v: s0.high, label: `maks. ${n1(s0.high)}°` }, s0.low !== null && { v: s0.low, label: `min. ${n1(s0.low)}°` }].filter(Boolean) : [];
-  const MARK = { 3: '#ff453a', 4: '#ff453a', 6: '#ff453a', 8: '#ff9f0a', 5: '#30d158', 7: '#30d158', 9: '#30d158', [EV_BATH]: '#0a84ff' };
-  const concerns = e => (e[1] === EV_BATH ? shown.includes(BOILER) || shown.includes(FURNACE)
+  const MARK = { 3: '#ff453a', 4: '#ff453a', 6: '#ff453a', 8: '#ff9f0a', 5: '#30d158', 7: '#30d158', 9: '#30d158', [EV_BATH]: '#0a84ff', [EV_SETTING]: '#bf5af2' };
+  const concerns = e => (e[1] === EV_SETTING ? true : e[1] === EV_BATH ? shown.includes(BOILER) || shown.includes(FURNACE)
     : e[1] >= 8 ? warningProbes(e[2]).some(p => shown.includes(p)) : shown.includes(e[2]));
   const marks = journal.filter(e => MARK[e[1]] && concerns(e)).map(e => { const v = eventView(e); return { t: e[0], color: MARK[e[1]], title: v[2], sub: v[3] }; });
   chart($('#detail'), { series: lines, t0: view.t0, t1: view.t1, step, limits, marks, bands: outages(), fill: single, band: single,
@@ -2410,6 +2438,53 @@ function renderBurn() {
   };
 }
 
+// The controller day by day for 30 days - what a test of settings is read from: how many times the fire is started
+// (burns and przedmuchy, each one a cold start of a dose of coal), how much coal goes in outside burning, and the flue 4
+// minutes into a burn. Days the settings changed are marked; the bars take the flue on a scale of 150-300 degrees, or
+// a difference of ten would not show.
+function renderWork() {
+  const card = $('#workcard');
+  if (!now || !(now.fw >= 31)) { card.style.display = 'none'; return; }
+  const today = midnight(tNow()), list = [], changes = journal.filter(e => e[1] === EV_SETTING);
+  for (let k = 29; k >= 0; k--) {
+    const d = new Date(today * 1000);
+    d.setDate(d.getDate() - k);
+    const ds = d / 1000, de = dayEnd(ds), w = workSum(ds, de);
+    list.push({ t: ds, w, today: k === 0, starts: w ? w.burns + w.blows : 0, out: w && w.feed ? (1 - w.feedBurn / w.feed) * 100 : null,
+      flue: w && w.flueN ? w.flueSum / w.flueN : null, changes: changes.filter(e => e[0] >= ds && e[0] < de) });
+  }
+  if (!list.some(x => x.w)) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const ref = [...list].reverse().find(x => !x.today && x.w && x.w.heard >= 20 * 3600) || list[29];
+  const maxS = Math.max(20, ...list.map(x => x.starts));
+  const row = (cls, f) => `<div class="bars short ${cls}">${list.map((x, k) => { const h = x.w ? f(x) : null; return `<button data-k="${k}" class="${x.today ? 'today' : ''}" style="height:${h ? clamp(h, 4, 100) : 0}%"></button>`; }).join('')}</div>`;
+  const stat = (k, v) => `<div><span>${k}</span><b class="num">${v}</b></div>`;
+  const set = now.geco && now.geco.set;
+  const line = set ? [set[0] && `przerwa podawania (u1) ${set[0]} s`, set[1] && `przedmuch co ${set[1]} min (u2)`, set[2] && `dobieg wentylatora ${set[2]} s`].filter(Boolean).join(' · ') : '';
+  const recent = changes.slice(-4).reverse().map(e => { const v = eventView(e); return row2(v[2], `${day(e[0])}, ${hhmm(e[0])}`); }).join('');
+  $('#workdays').innerHTML = `<div class="blabel" style="margin-top:0">${ref.today ? 'Dziś do teraz' : day(ref.t)}</div>`
+    + `<div class="stats three">${stat('ROZRUCHY', ref.starts)}${stat('POZA PALENIEM', ref.out !== null ? `${Math.round(ref.out)}%` : '–')}${stat('SPALINY', ref.flue !== null ? `${Math.round(ref.flue)}°` : '–')}</div>`
+    + `<div class="wmarks">${list.map(x => `<i class="${x.changes.length ? 'on' : ''}"></i>`).join('')}</div>`
+    + `<div class="blabel" style="margin-top:2px">Rozruchy: palenia + przedmuchy</div>${row('', x => x.starts / maxS * 100)}`
+    + `<div class="blabel">Węgiel podany poza paleniem</div>${row('amber', x => x.out)}`
+    + `<div class="blabel">Spaliny w 4. minucie palenia (150–300°)</div>${row('coalb', x => (x.flue === null ? null : (x.flue - 150) / 150 * 100))}`
+    + `<div class="bars-x"><span>${day(list[0].t)}</span><span>dziś</span></div><div class="caption" id="workcap">Stuknij słupek, aby zobaczyć dzień. Fioletowa kropka: zmiana ustawień.</div>`
+    + (line ? `<div class="note">Ustawienia odczytane z pracy sterownika: ${line}.</div>` : '')
+    + (recent ? `<div class="blabel">Ostatnie zmiany</div><div class="rows">${recent}</div>` : '');
+  $('#workdays').onclick = e => {
+    const b = e.target.closest('.bars button');
+    if (!b) return;
+    const k = +b.dataset.k, x = list[k];
+    $$('#workdays .bars button').forEach(q => q.classList.toggle('sel', +q.dataset.k === k));
+    const w = x.w, parts = !w ? ['brak danych'] : [`${w.burns} ${plural(w.burns, 'palenie', 'palenia', 'paleń')} + ${w.blows} ${plural(w.blows, 'przedmuch', 'przedmuchy', 'przedmuchów')}`];
+    if (x.out !== null) parts.push(`${Math.round(x.out)}% węgla poza paleniem`);
+    if (x.flue !== null) parts.push(`spaliny ${Math.round(x.flue)}°`);
+    parts.push(...x.changes.map(e => eventView(e)[2]));
+    $('#workcap').textContent = `${day(x.t)}${x.today ? ' (do teraz)' : ''}: ${parts.join(' · ')}`;
+  };
+}
+const row2 = (k, s) => `<div class="row"><div><div class="k">${esc(k)}</div><div class="s">${esc(s)}</div></div></div>`;
+
 // Periodic refresh of the charts tab: the line follows the present when it is not zoomed, the readings are new,
 // and nothing is redrawn while a finger reads the chart. The bar charts keep the day that was tapped.
 let scrubbing = false;
@@ -2434,8 +2509,8 @@ function renderCharts() {
   $('#chips').innerHTML = (keys.some(i => ctlOf(i) >= 0) ? `<button class="chip ctl ${ui.ctl ? 'on' : ''}" data-ctl="1" style="--c:#c7ccd6;--cb:rgba(199,204,214,.12)"><i></i>Sterownik</button>` : '')
     + keys.map(i => `<button class="chip ${ui.shown.includes(i) ? 'on' : ''}" data-i="${i}" style="--c:${colorOf(i)};--cb:${rgba(colorOf(i), .14)}"><i></i>${esc(nameOf(i))}</button>`).join('');
   if (!view) resetView(); else fetchForView();
-  Promise.all([loadDays(), loadWork(seasonStart() - 366 * 86400)]).then(() => { renderBurn(); renderCoalChart(); });
-  loadJournal().then(() => { paintDetail(); renderPower(); });
+  Promise.all([loadDays(), loadWork(seasonStart() - 366 * 86400)]).then(() => { renderBurn(); renderCoalChart(); renderWork(); });
+  loadJournal().then(() => { paintDetail(); renderPower(); renderWork(); });
 }
 
 // Power cuts per day for 30 days, a cut counted on the day it started: one row of bars for how many, one for
@@ -2733,6 +2808,11 @@ function eventView(e) {
     case EV_ASH: return ['c-gray', I_ASH, 'Opróżniono popielnik', ''];
     case EV_HOT_WATER: return ['c-blue', I_DROP, 'Ciepła woda gotowa', `${name}${temp}`];
     case EV_BATH: return ['c-blue', I_SHOWER, 'Kąpiel', `ciepła woda z bojlera: −${n1(raw / 100)}° w ${i} min`];
+    case EV_SETTING: {
+      if (i === 3) return ['c-gray', I_TOOLS, 'Menu serwisowe sterownika', durCut(raw)];
+      const [label, unit] = SETTING_NAMES[i] || ['Ustawienie sterownika', ''];
+      return ['c-blue', I_TOOLS, `${label}: ${(raw >> 8) & 255} → ${raw & 255} ${unit}`, 'odczytane z pracy sterownika'];
+    }
     case 10: return ['c-gray', I_INFO, 'Historia usunięta', ''];
     default: return ['c-gray', I_INFO, 'Zdarzenie', ''];
   }

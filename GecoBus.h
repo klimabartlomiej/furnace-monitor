@@ -2,8 +2,9 @@
 // The controller announces its state for a GA01HA panel every ~57 ms, also when no panel is attached:
 //   9600 8N1, every byte bit-inverted, every piece ends with 0x23 (inverted). Used frames (inverted):
 //     40 T1 T2 T3 .. .. .. .. .. CK      temperatures x 2 (T1 boiler, T2 feeder, T3 hot water), 0xfa = no sensor
-//     50 .. .. P3 .. .. OUT MODE .. CK   P3 0x40 piston away from home; OUT 0x40 fan, 0x20 feeder, 0x02 CO pump;
-//                                        MODE 0x04 standby, 0x08 burning, 0x10 podtrzymanie
+//     50 .. .. P3 .. .. OUT MODE .. CK   P3 0x40 piston away from home; OUT 0x40 fan, 0x20 feeder, 0x02 CO pump,
+//                                        0x08 hot water pump; MODE 0x02 service menu (everything off, the bus drops out
+//                                        for a moment now and then), 0x04 standby, 0x08 burning, 0x10 podtrzymanie
 //   CK = sum(bytes 0..8) - 0x10.
 // The UART has no TX pin and the RS485 module's driver is held off: nothing can reach the controller.
 // A task of its own reads the line, so a busy loop() loses no frame; every change of the state is queued as an
@@ -22,8 +23,8 @@
 
 class GecoBus {
 public:
-  enum Mode : uint8_t { NO_DATA = 0, STANDBY = 0x04, BURNING = 0x08, HOLDING = 0x10 };
-  enum Output : uint8_t { FAN = 0x40, FEEDER = 0x20, CO_PUMP = 0x02 };
+  enum Mode : uint8_t { NO_DATA = 0, MENU = 0x02, STANDBY = 0x04, BURNING = 0x08, HOLDING = 0x10 };
+  enum Output : uint8_t { FAN = 0x40, FEEDER = 0x20, CO_PUMP = 0x02, DHW_PUMP = 0x08 };
   static constexpr uint8_t PISTON_AWAY = 0x40;               // in flags
   static constexpr uint32_t QUIET_MS  = 5000;                 // no valid frame this long = the controller is gone
 

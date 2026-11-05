@@ -76,7 +76,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 30;                  // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 31;                  // bump for every release (release/publish.ps1)
 // Each board has its own release channel - a firmware for the other chip must never be offered.
 #if CONFIG_IDF_TARGET_ESP32S3
 const char* UPDATE_MANIFEST_URL =
@@ -110,6 +110,10 @@ constexpr uint8_t  COAL_INTERVALS     = 10;              // latest refill-to-ref
 constexpr float    COAL_MIN_HEAT      = 600;             // degree-minutes an interval needs to count (10 degrees, 1 h)
 constexpr float    FEED_MIN_SECONDS   = 600;             // feeder seconds an interval needs to teach the feed factor
 constexpr float    FEED_MIN_HEARD     = 0.7;             // ... and the share of it the controller has to be heard in
+constexpr uint32_t FLUE_MARK_S        = 240;             // the flue is compared this long into a burn: every burn gets
+                                                         // this far, and it hardly rises any more (+-16 between burns)
+constexpr uint32_t WORK_DELAY_S       = 360;             // an hour is stored this long after its end - the flue mark of
+                                                         // a burn begun in its last minute is on the minute log by then
 constexpr float    HOT_WATER_HYSTERESIS = 3;             // degrees below "ready" before the hot-water contact closes
 constexpr float    BATH_DROP          = 2;               // boiler degrees lost within BATH_WINDOW = hot water drawn
 constexpr uint8_t  BATH_WINDOW        = 10;              // minutes (standing, the boiler loses well under 1 degree/h)
@@ -268,6 +272,8 @@ enum EventType : uint8_t {
   EV_HOT_WATER,         // the boiler reached its "ready" temperature (value = degrees x 100)
   EV_BATH,              // hot water drawn - a bath, a shower: time = when it began, value = how far the boiler fell
                         // (degrees x 100), sensor = minutes it took (see BathWatch)
+  EV_SETTING,           // a setting of the boiler controller moved, read off its work (SettingWatch): sensor = the setting,
+                        // value = old x 256 + new; sensor MENU = a visit to its service menu, value = seconds
 };
 
 // Why the ESP started - the `sensor` byte of EV_BOOT and EV_POWER_CUT.
@@ -308,11 +314,17 @@ struct __attribute__((packed)) WorkHour {
   uint16_t standby;
   uint16_t fan;                       // seconds each output ran
   uint16_t pump;
+  uint16_t dhw;                       // ... the hot water pump too
   uint16_t feed10;                    // the feeder, in tenths of a second
+  uint16_t feedBurn10;                // ... of it while burning
   uint16_t heatHeard;                 // the heat model's degree-minutes while the controller was heard (by the hour's
                                       // heard share) - what the feeder counts instead (heatHeardOf)
+  uint16_t flueSum;                   // the flue FLUE_MARK_S into the burns begun this hour without the hot water pump, degrees
+  uint8_t  flueN;                     // ... how many burns that adds up
+  uint8_t  burns;                     // burns begun
   uint8_t  strokes;                   // piston cycles completed (away from home, then back)
-  uint8_t  blows;                     // przedmuchy begun (podtrzymanie, then the fan or the feeder on)
+  uint8_t  blows;                     // przedmuchy begun (in podtrzymanie the fan or the feeder comes on; the run that
+                                      // finishes the stroke after a burn is no przedmuch)
 };
 
 // What a stretch of time took, both ways (useBetween): the heat model's degree-minutes - all of them, and those while
@@ -408,7 +420,7 @@ RTC_NOINIT_ATTR uint32_t     healthMagic;
 SegmentLog<HealthRecord> health("/hl", HEALTH_CAPACITY / 2);
 SegmentLog<GecoBus::Event> gecoLog("/gw", GECO_CAPACITY / 2);   // the controller's work: every change (GecoBus.h)
 std::vector<GecoBus::Event> gecoPending;                        // changes not on flash yet (logGecoChanges)
-SegmentLog<WorkHour> workLog("/wh", WORK_CAPACITY / 2);         // ... and hour by hour (countWork)
+SegmentLog<WorkHour> workLog("/wk", WORK_CAPACITY / 2);         // ... and hour by hour (countWork)
 uint32_t workDone = 0;                          // the newest hour in workLog (its start), 0 = none yet
 uint16_t relayUpsSeen = 0, updateFailsSeen = 0;
 
@@ -1102,15 +1114,25 @@ void evaluateWarnings(bool tick = false) {
 
 // ------------------------------------------------------------------ the controller's work, hour by hour
 
+// The flue at moment t, between its two minute readings; NAN without both.
+float flueAt(uint32_t t) {
+  if (FLUE < 0 || !minutes.newest()) return NAN;
+  uint32_t m = t / 60;
+  int16_t a = NO_VALUE, b = NO_VALUE;
+  minutes.forEach(m, m + 1, [&](uint32_t k, const MinuteRecord& r) { (k == m ? a : b) = r.v[FLUE]; });
+  return a == NO_VALUE || b == NO_VALUE ? NAN : (a + (b - a) * (t % 60) / 60.0f) / 100.0f;
+}
+
 // The controller's work from the hour `from` (its start) up to `until`, worked out from its log on flash and the
 // changes not there yet: hour(w) for every hour that ends by `until`, then - when `partial` - the hour `until` falls
 // in with its part so far. One pass over the log however many hours (all of it at the first start). A state lasts
 // until the next change; every start closes the log (closeGecoLog), so no state runs on through a power cut.
 void countWork(uint32_t from, uint32_t until, bool partial, const std::function<void(const WorkHour&)>& hour) {
   if (until <= from) return;
-  enum { HEARD, BURNING, HOLDING, STANDBY, FAN, PUMP, FEED, SUMS };
+  enum { HEARD, BURNING, HOLDING, STANDBY, FAN, PUMP, DHW, FEED, FEED_BURN, SUMS };
   uint32_t sum[SUMS] = {}, at = 0, start = from;            // at: tenths of a second into the hour `start`
-  uint8_t strokes = 0, blows = 0;
+  uint8_t strokes = 0, blows = 0, burns = 0, marks = 0;
+  uint32_t marked[12];                                      // when the burns to read the flue of began
   GecoBus::Event st = gecoLog.forRange(from, from, [](const GecoBus::Event&) {});
   auto blowing = [](const GecoBus::Event& e) {
     return e.mode == GecoBus::HOLDING && (e.outputs & (GecoBus::FAN | GecoBus::FEEDER));
@@ -1126,15 +1148,28 @@ void countWork(uint32_t from, uint32_t until, bool partial, const std::function<
     else if (st.mode == GecoBus::STANDBY) sum[STANDBY] += d;
     if (st.outputs & GecoBus::FAN) sum[FAN] += d;
     if (st.outputs & GecoBus::CO_PUMP) sum[PUMP] += d;
-    if (st.outputs & GecoBus::FEEDER) sum[FEED] += d;
+    if (st.outputs & GecoBus::DHW_PUMP) sum[DHW] += d;
+    if (st.outputs & GecoBus::FEEDER) {
+      sum[FEED] += d;
+      if (st.mode == GecoBus::BURNING) sum[FEED_BURN] += d;
+    }
   };
   auto close = [&]() {
     auto sec = [&](uint8_t k) { return (uint16_t)min<uint32_t>((sum[k] + 5) / 10, 3600); };
-    WorkHour w = {start, sec(HEARD), sec(BURNING), sec(HOLDING), sec(STANDBY), sec(FAN), sec(PUMP),
-                  (uint16_t)min<uint32_t>(sum[FEED], 36000), 0, strokes, blows};
+    uint32_t flue = 0;
+    uint8_t flueN = 0;
+    for (uint8_t k = 0; k < marks; k++) {
+      float f = flueAt(marked[k] + FLUE_MARK_S);
+      if (isnan(f)) continue;
+      flue += lroundf(f);
+      flueN++;
+    }
+    WorkHour w = {start, sec(HEARD), sec(BURNING), sec(HOLDING), sec(STANDBY), sec(FAN), sec(PUMP), sec(DHW),
+                  (uint16_t)min<uint32_t>(sum[FEED], 36000), (uint16_t)min<uint32_t>(sum[FEED_BURN], 36000), 0,
+                  (uint16_t)min<uint32_t>(flue, 65535), flueN, burns, strokes, blows};
     hour(w);
     memset(sum, 0, sizeof(sum));
-    strokes = blows = 0;
+    strokes = blows = burns = marks = 0;
     at = 0;
     start += 3600;
   };
@@ -1150,7 +1185,11 @@ void countWork(uint32_t from, uint32_t until, bool partial, const std::function<
     run((e.time - start) * 10 + e.tenths);
     if (st.mode != GecoBus::NO_DATA && e.mode != GecoBus::NO_DATA) {
       if ((st.flags & GecoBus::PISTON_AWAY) && !(e.flags & GecoBus::PISTON_AWAY) && strokes < 255) strokes++;
-      if (blowing(e) && !blowing(st) && blows < 255) blows++;
+      if (blowing(e) && !blowing(st) && st.mode != GecoBus::BURNING && blows < 255) blows++;
+      if (e.mode == GecoBus::BURNING && st.mode != GecoBus::BURNING) {
+        if (burns < 255) burns++;
+        if (!(e.outputs & GecoBus::DHW_PUMP) && marks < 12) marked[marks++] = e.time;
+      }
     }
     st = e;
   };
@@ -1174,6 +1213,118 @@ uint32_t workFrom() {
   uint32_t first = gecoLog.oldestTime();
   if (!first && !gecoPending.empty()) first = gecoPending.front().time;
   return first ? first - first % 3600 : 0;
+}
+
+// The controller's settings as its work shows them - user parameters never appear on the bus: u1 = the feeder's pause
+// while burning, u2 = from the feeder stopping in podtrzymanie (or podtrzymanie beginning without it) to the next
+// przedmuch, the after-run = how long the fan outlasts the feeder in podtrzymanie. Fed the changes in time order; told
+// gets a setting that moved (value = old x 256 + new) and each visit to the service menu (value = seconds, at = when it
+// began). The first value seen of a setting is only noted. A misreading costs a line in the journal, nothing more.
+class SettingWatch {
+public:
+  enum Kind : uint8_t { U1, U2, AFTER_RUN, MENU, KINDS = MENU };
+  uint16_t known[KINDS] = {};                                // 0 = not seen yet
+  std::function<void(uint8_t kind, uint16_t value, uint32_t at)> told;
+
+  void feed(const GecoBus::Event& e) {
+    int64_t t = e.time * 10LL + e.tenths;
+    if (started) step(last, e, t);
+    last = e;
+    started = true;
+  }
+
+private:
+  GecoBus::Event last = {};
+  bool    started = false;
+  int64_t feederOff = 0, anchor = 0, fanAlone = 0, menuAt = 0, menuSeen = 0;   // tenths of a second, 0 = none
+  uint16_t pauses[64];
+  uint8_t pauseN = 0;
+
+  void settle(uint8_t k, uint32_t value, uint32_t at, int tolerance) {
+    value = min<uint32_t>(value, 255);
+    if (!known[k]) {
+      known[k] = value;
+    } else if (abs((int)value - (int)known[k]) >= tolerance) {
+      uint16_t old = known[k];
+      known[k] = value;
+      if (told) told(k, old * 256 + value, at);
+    }
+  }
+
+  void step(const GecoBus::Event& p, const GecoBus::Event& e, int64_t t) {
+    bool feedNow = e.outputs & GecoBus::FEEDER, feedWas = p.outputs & GecoBus::FEEDER;
+    bool fanNow = e.outputs & GecoBus::FAN, fanWas = p.outputs & GecoBus::FAN;
+    bool held = p.mode == GecoBus::HOLDING, holding = e.mode == GecoBus::HOLDING, burned = p.mode == GecoBus::BURNING;
+    if (burned && e.mode == GecoBus::BURNING) {
+      if (feedWas && !feedNow) feederOff = t;
+      else if (!feedWas && feedNow && feederOff && pauseN < 64) pauses[pauseN++] = t - feederOff;
+    } else if (burned) {
+      if (pauseN >= 5) {
+        std::sort(pauses, pauses + pauseN);
+        settle(U1, (pauses[pauseN / 2] + 5) / 10, e.time, 1);
+      }
+      pauseN = 0;
+      feederOff = 0;
+    }
+    if (!holding) {
+      anchor = 0;
+    } else if (!held) {
+      anchor = burned && !feedNow ? t : 0;                   // after the menu or a quiet bus its timer is not known
+    } else if (feedWas && !feedNow) {
+      anchor = t;
+    } else if (!feedWas && feedNow) {
+      uint32_t m = anchor ? (t - anchor + 300) / 600 : 0;
+      if (m >= 5 && m <= 250) settle(U2, m, e.time, 1);
+      anchor = 0;
+    }
+    if (!holding) {
+      fanAlone = 0;
+    } else if (fanNow && !feedNow && (burned || (held && feedWas))) {
+      fanAlone = t;
+    } else if (held && fanWas && !fanNow && fanAlone) {
+      settle(AFTER_RUN, (t - fanAlone + 5) / 10, e.time, 2);
+      fanAlone = 0;
+    }
+    if (e.mode == GecoBus::MENU) {
+      if (!menuAt) menuAt = t;
+      menuSeen = t;
+    } else if (menuAt && e.mode != GecoBus::NO_DATA) {
+      int64_t end = t - menuSeen < 1200 ? t : menuSeen;      // back after 2 minutes of silence: a power cut, not the menu
+      if (told) told(MENU, min<int64_t>((end - menuAt) / 10, 32767), menuAt / 10);
+      menuAt = 0;
+    }
+  }
+};
+SettingWatch settingWatch;
+
+void saveSettingsSeen() {
+  prefs.putUShort("gU1", settingWatch.known[SettingWatch::U1]);
+  prefs.putUShort("gU2", settingWatch.known[SettingWatch::U2]);
+  prefs.putUShort("gAft", settingWatch.known[SettingWatch::AFTER_RUN]);
+}
+
+// Once (v31) the settings and the menu visits in the log kept so far go into the journal, each in its place; from then
+// on the changes as they come, and what was seen last comes back from flash at every start.
+void beginSettingWatch() {
+  settingWatch.known[SettingWatch::U1] = prefs.getUShort("gU1", 0);
+  settingWatch.known[SettingWatch::U2] = prefs.getUShort("gU2", 0);
+  settingWatch.known[SettingWatch::AFTER_RUN] = prefs.getUShort("gAft", 0);
+  if (GECO_RX_PIN >= 0 && !prefs.getUChar("gScan", 0) && !updater.crashLoop()) {
+    std::vector<EventRecord> found;
+    settingWatch.told = [&](uint8_t kind, uint16_t value, uint32_t at) { found.push_back({at, (uint8_t)EV_SETTING, kind, (int16_t)value}); };
+    gecoLog.forEach(0, [&](const GecoBus::Event& e) { settingWatch.feed(e); });
+    if (!found.empty()) events.edit([&](std::vector<EventRecord>& all) {
+      all.insert(all.end(), found.begin(), found.end());
+      std::stable_sort(all.begin(), all.end(), [](const EventRecord& a, const EventRecord& b) { return a.time < b.time; });
+    });
+    saveSettingsSeen();
+    prefs.putUChar("gScan", 1);
+    techLog.printf("Controller settings: %u changes found back in the log\n", (unsigned)found.size());
+  }
+  settingWatch.told = [](uint8_t kind, uint16_t value, uint32_t at) {
+    logEvent(EV_SETTING, kind, (int16_t)value, at);
+    if (kind != SettingWatch::MENU) saveSettingsSeen();
+  };
 }
 
 // The heat model's degree-minutes of an hour while the controller was heard, by the hour's heard share - stored with
@@ -1218,13 +1369,13 @@ void closeGecoLog() {
 }
 
 // Stores the hours the controller's log has finished: at the first pass all of them since the newest stored (or
-// since the log began), then each hour as it ends. The first pass with the clock recounts the coal - the count made
+// since the log began), then each hour a moment after it ends (WORK_DELAY_S). The first pass with the clock recounts the coal - the count made
 // at boot had no clock and missed these hours - and every new hour scales the feed factor anew while it is not
 // learnt yet.
 void logWorkHours(time_t now) {
   static bool counted = false;
   if (GECO_RX_PIN < 0 || !clockSet(now) || updater.crashLoop()) return;
-  uint32_t hour = now - now % 3600, from = workFrom();
+  uint32_t hour = (now - WORK_DELAY_S) - (now - WORK_DELAY_S) % 3600, from = workFrom();
   bool added = from && from < hour;
   if (added) {
     logGecoChanges();                                       // the changes still queued belong to the hours being closed
@@ -1612,13 +1763,17 @@ void logGecoChanges() {
   static bool clockLogged = false;
   GecoBus::Event e;
   while (geco.nextEvent(e))
-    if (clockSet(e.time)) batch.push_back(e);
+    if (clockSet(e.time)) {
+      batch.push_back(e);
+      settingWatch.feed(e);
+    }
   time_t now = time(nullptr);
   if (!clockLogged && clockSet(now) && geco.lastFrame()) {
     e = geco.state();
     e.time = now;
     e.tenths = 0;
     batch.push_back(e);
+    settingWatch.feed(e);
     clockLogged = true;
   }
   if (batch.empty() || (batch.size() < 64 && millis() - flushedMs < 60000)) return;
@@ -1849,6 +2004,8 @@ void setupHistory(bool wipe) {
   refills.begin();
   health.begin();
   gecoLog.begin();
+  for (const char* old : {"/wh0.bin", "/wh1.bin"})           // v30's hours, shorter: counted anew from the log
+    if (LittleFS.exists(old)) LittleFS.remove(old);
   workLog.begin();
   workDone = workLog.newestTime();
   techLog.printf("LittleFS: %u of %u KB used\n", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
@@ -2029,7 +2186,9 @@ void handleNow() {
     j += ",\"out\":";   j += (int)g.outputs;
     j += ",\"flags\":"; j += (int)g.flags;
     j += ",\"since\":"; j += g.time;
-    j += ",\"t\":[";
+    j += ",\"set\":[";                                       // u1 s, u2 min, the fan's after-run s - as its work shows them
+    for (uint8_t k = 0; k < SettingWatch::KINDS; k++) { if (k) j += ','; j += settingWatch.known[k]; }
+    j += "],\"t\":[";
     for (uint8_t ch = 1; ch <= 3; ch++) j += (ch > 1 ? "," : "") + jsonNumber(geco.temp(ch), 1);
     j += "],\"good\":"; j += geco.goodFrames();
     j += ",\"bad\":";   j += geco.badFrames();
@@ -2485,7 +2644,7 @@ void handleGeco() {
   w.end();
 }
 
-// GET from, to (Unix time): the controller's work hour by hour - binary, 22 bytes an hour (WorkHour), oldest first;
+// GET from, to (Unix time): the controller's work hour by hour - binary, 30 bytes an hour (WorkHour), oldest first;
 // the hours not stored yet come last, the one running now with its part so far.
 void handleWork() {
   uint32_t now = time(nullptr), to = argOr("to", now) + 1, from = argOr("from", to - 86400);
@@ -2944,7 +3103,7 @@ void setup() {
   // use and ash count (limits and settings stay).
   bool wipe = prefs.getBool("wipe", false);
   if (wipe) {
-    for (const char* key : {"alerts", "coalK", "coalN", "feedK", "feedN", "ashAt", "relayKey", "supKey", "supUntil"}) prefs.remove(key);   // old phones out
+    for (const char* key : {"alerts", "coalK", "coalN", "feedK", "feedN", "gU1", "gU2", "gAft", "gScan", "gwCuts", "ashAt", "relayKey", "supKey", "supUntil"}) prefs.remove(key);   // old phones out
     prefs.putBool("cleared", true);
   }
   loadLimits();
@@ -2953,6 +3112,7 @@ void setup() {
   setupHistory(wipe);
   closeOldCuts();
   closeGecoLog();
+  beginSettingWatch();
   coalToKilograms();
   if (!updater.crashLoop()) rescanHistory();
   if (wipe) prefs.remove("wipe");
