@@ -57,7 +57,7 @@ the fire goes out (it sat like that for 40 minutes on the day of this test).
 |  | `0x04` | standby - switched on, not in automat |
 |  | `0x08` | automat, **burning** |
 |  | `0x10` | **podtrzymanie** (holding: boiler at or above u0) |
-| P3 (byte 3) | `0x40` | feeder piston away from its home position (the kontaktron) |
+| P3 (byte 3) | `0x40` | feeder piston away from its home position (the kontaktron). Home is pushed in, closing the hopper's outlet (seen at the boiler, 2026-11-06); the bus itself does not show the direction |
 |  | `0x08` | always set |
 |  | `0x04` | seen once, 04.11 21:52-22:30 after a bath, 47 min - meaning unknown |
 
@@ -150,7 +150,7 @@ What it hears:
 - The app: an animated boiler on the home screen (with the hopper's coal level). `/api/now` alone cannot drive it, a
   refresh every 15 s catches one feeder portion in five, so since v32 it plays `/api/geco`: the last 6 hours, topped up at
   each refresh (a few dozen bytes, ~260 ms), shown 18 s behind the device. The piston follows the motor's seconds since it
-  last came home (a crank, ~30.5 s to a cycle); "od" is when the state really began, from the log; a burn's end has its
+  last came home (a crank, ~30.3 s to a cycle: back for the first half, forward for the second); "od" is when the state really began, from the log; a burn's end has its
   own name, "dobieg". Without the log it falls back on the snapshot. Work lanes under the charts (from
   the log up to 8 days, from the hours beyond; the mode that held most of a column, with a thin line at the lane's foot
   for what was too short to lead it), the controller's day on "Dzisiaj" (burning, holding, przedmuchy,
