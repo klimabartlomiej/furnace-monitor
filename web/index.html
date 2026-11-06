@@ -142,9 +142,10 @@ body.fsmode nav.tabs{display:none}
 .bx .fan circle{fill:#2a2f39;stroke:#3a404c;stroke-width:1.5}
 .bx .fan path{fill:#8a919e}
 .bx .fan.on path{fill:#64d2ff}
-.bx .piston{transition:transform 1.2s ease;fill:#8a919e}
+.bx .piston{transition:transform .25s linear;fill:#8a919e}
 .bx .piston.away{transform:translateX(-44px)}
-.bx .piston.push{animation:gpush 1.6s ease-in-out infinite;fill:#ff9f0a}
+.bx .piston.push{fill:#ff9f0a}
+.bx .piston.run{animation:gpush 1.6s ease-in-out infinite}
 .bx .coal{fill:#4a505c}
 .bx .fire{opacity:0;transition:opacity .6s}
 .bx .fire.on{opacity:1}
@@ -170,7 +171,7 @@ body.fsmode nav.tabs{display:none}
 @keyframes gflick{from{transform:scale(.9,.82)}to{transform:scale(1.04,1.08)}}
 @keyframes gglow{0%,100%{opacity:.55}50%{opacity:.95}}
 @keyframes gsmoke{0%{opacity:.45;transform:translate(0,0) scale(.6)}100%{opacity:0;transform:translate(-6px,-26px) scale(1.6)}}
-@media (prefers-reduced-motion:reduce){.bx *{animation:none!important}}
+@media (prefers-reduced-motion:reduce){.bx *{animation:none!important}.bx .ember.on{opacity:.75}.bx .smoke.on circle{opacity:.3}}
 .lanes{margin-top:2px}
 .lanes svg{display:block}
 .lanes .ll{font:600 10px -apple-system,system-ui;fill:var(--faint)}
@@ -739,6 +740,7 @@ const CHANGES = {
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
   27: 'Pewniejsza aktualizacja: zapis czujników, przywrócenie kopii albo wyczyszczenie historii tuż po aktualizacji nie cofa już nowej wersji. Nazwy czujników z uszkodzonymi znakami są odrzucane.',
+  32: 'Obrazek kotła pokazuje prawdziwą pracę podajnika: każdą porcję węgla i położenie tłoka, z opóźnieniem ok. 20 s (aplikacja odtwarza dziennik sterownika, bo odświeżanie co 15 s prawie nigdy nie trafiało w sekundową porcję). „Palenie od…” i „Podtrzymanie od…” to teraz prawdziwy początek stanu. Koniec palenia nazywa się „dobieg”, a nie „przedmuch”. Pasek trybu pod wykresem nie chowa już paleń. Bez połączenia kocioł na obrazku nie udaje, że pracuje. Węgiel z dokończenia skoku po paleniu liczy się do palenia, a powrót z menu serwisowego nie jest nowym rozruchem.',
   31: 'Pompa ciepłej wody i menu serwisowe sterownika: pompa CWU ma swój pasek pod wykresem, napis i rury na obrazku kotła. W Wykresach nowa karta „Praca sterownika” – dzień po dniu ile było rozruchów (palenia + przedmuchy), ile węgla weszło poza paleniem i jakie są spaliny w 4. minucie palenia, do porównywania ustawień. Zmiany przerwy podawania (u1), odstępu przedmuchów (u2) i dobiegu wentylatora oraz wejścia do menu serwisowego same zapisują się w dzienniku i na wykresach, także te sprzed aktualizacji. Przedmuchy liczą się poprawnie (dokończenie skoku tłoka po paleniu to nie przedmuch).',
   30: 'Węgiel liczony z pracy podajnika: gdy piec słyszy sterownik, zużycie, stan zasobnika i „Starczy na…” idą z czasu pracy podajnika, nie z temperatur – skalę uczy się z dosypań do pełna (do tego czasu bierze ją z temperatur). Sterownik dzień po dniu: w „Dzisiaj” godziny palenia i podtrzymania, przedmuchy, cykle tłoka i praca podajnika, w Miesiącach to samo za miesiąc, a paski pracy pod wykresem także dla 30 dni i roku. Piec pamięta każdy ruch sterownika przez ok. 2 miesiące zimą (było ok. tygodnia), a godzinowe podsumowania przez lata. Pociągnij ekran w dół, aby odświeżyć. Wykres po powrocie do aplikacji nie zatrzymuje się już na starych danych.',
   29: 'Moduł RS485 przy sterowniku: dopóki piec nie usłyszy sterownika, sam sprawdza podłączenie – czy z modułu cokolwiek dochodzi, czy przewody A i B nie są zamienione (wtedy odwraca je programowo) i czy sygnał nie trafił na inny pin płytki (wtedy słucha tam).',
@@ -768,6 +770,7 @@ const EV_POWER_CUT = 11;      // time = power back, value = minutes without powe
 const BOOT_REASON = ['', 'po włączeniu zasilania', 'po restarcie', 'po spadku napięcia', 'po błędzie programu'];
 const warningProbes = w => ([[FURNACE], [FURNACE, RETURN, BOILER], [COAL], [FURNACE, RETURN], [FURNACE], [FURNACE], [FURNACE]][w] || []).filter(i => i >= 0);
 const EV_SEASON = 12, EV_ASH = 13, EV_HOT_WATER = 14, EV_BATH = 15;   // EV_BATH: e[2] = minutes, e[3] = boiler drop x 100
+const worthTelling = e => !(e[1] === 16 && e[2] === 3 && e[3] < 3);   // v31 wrote down the menu's blink on the way out as a visit
 const EV_SETTING = 16;        // read off the controller's work: e[2] = which, e[3] = old x 256 + new; e[2] = 3: its service menu, e[3] = seconds
 const SETTING_NAMES = [['Przerwa podawania (u1)', 's'], ['Przedmuch co (u2)', 'min'], ['Dobieg wentylatora', 's']];
 const RANGES = { '6h': 6 * 3600, '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400 };
@@ -919,6 +922,7 @@ function refreshNow() {
       // Another board (the S3's 8 slots after the classic's 4) or a wiped history: the cached data is of no use.
       if ((live.length && fresh.oldest && live[0].t < fresh.oldest - 120) || (now && now.sensors.length !== fresh.sensors.length)) dropCache();
       now = fromDevice(fresh);
+      deviceClock = fresh.time - Date.now() / 1000;
       nowFresh = true;
       supportGone = false;
       online = true;
@@ -930,6 +934,7 @@ function refreshNow() {
     nowLoading = null;
     render(true);
     updateUi();
+    loadTail();
   })();
   return nowLoading;
 }
@@ -1074,12 +1079,12 @@ async function loadJournal() {
   journalAt = Date.now();
   try {
     if (!journal.length || Date.now() - journalFullAt > 30 * 60e3) {
-      journal = await (await api(`/api/events?since=${tNow() - 90 * 86400}`)).json();
+      journal = (await (await api(`/api/events?since=${tNow() - 90 * 86400}`)).json()).filter(worthTelling);
       journalFullAt = Date.now();
     } else {
       const since = journal[journal.length - 1][0] - 3600, held = new Set(journal.filter(e => e[0] >= since).map(e => e.join()));
       const add = (await (await api(`/api/events?since=${since}`)).json()).filter(e => !held.has(e.join()));
-      if (add.length) journal = journal.concat(add);
+      if (add.length) journal = journal.concat(add.filter(worthTelling));
     }
   } catch (e) { journalAt = 0; }
 }
@@ -1636,7 +1641,7 @@ function renderHome() {
   $('#cards').innerHTML = now.sensors.map((s, i) => {
     if (s.on === false || !ownLine(i)) return '';
     const c = COLORS[i % COLORS.length], pts = points(live, i, false).filter(p => p[0] >= t - 6 * 3600);
-    const k = s.trend, state = s.fault ? 'fault' : s.alarm ? 'alarm' : '', ci = ctlOf(i), ct = ci >= 0 ? now.sensors[ci].temp : null;
+    const k = s.trend, state = s.fault ? 'fault' : s.alarm ? 'alarm' : '', ci = ctlOf(i), ct = ci >= 0 && gecoLive() ? now.sensors[ci].temp : null;
     const stand = s.temp === null && ct !== null;             // our probe silent: the controller's reading stands in
     const pill = s.fault ? 'BRAK SYGNAŁU' : s.alarm > 0 ? 'ZA GORĄCO' : s.alarm < 0 ? 'ZA ZIMNO' : '';
     const tr = k === null ? '' : Math.abs(k) < .5 ? '→ stabilnie' : `${k > 0 ? '↑' : '↓'} ${n1(Math.abs(k))}°/h`;
@@ -1690,7 +1695,7 @@ function renderToday() {
   if (s[FURNACE] && s[RETURN] && s[FURNACE].temp !== null && s[RETURN].temp !== null)
     rows.push(['Piec → powrót', 'ciepło oddawane do domu', `${n1(s[FURNACE].temp - s[RETURN].temp)}°`, '']);
   if (FURNACE >= 0) rows.push(['Piec pracuje', `dziś powyżej ${n1(burnThreshold())}°`, dur(burnSeconds(m, tNow())), '']);
-  const w = gecoHeard() ? workSum(m, tNow() + 1) : null;      // the controller's own day
+  const w = gecoKnown() ? workSum(m, tNow() + 1) : null;      // the controller's own day
   if (w) {
     rows.push(['Palenie', 'sterownik, dziś', dur(w.burning), '']);
     rows.push(['Podtrzymanie', `przedmuchy: ${w.blows}`, dur(w.holding), '']);
@@ -1727,14 +1732,91 @@ function burnSeconds(from, to) {
 // 8 bytes each (time u32, tenths, mode, outputs, flags); the first record is the state the range began in.
 const G_FAN = 0x40, G_FEEDER = 0x20, G_PUMP = 0x02, G_DHW = 0x08, G_PISTON = 0x40;
 const G_MODE = { 0: 'brak danych', 2: 'menu serwisowe', 4: 'czuwanie', 8: 'palenie', 16: 'podtrzymanie' };
-const G_COLOR = { palenie: '#ff6b3d', podtrzymanie: '#ffb340', przedmuch: '#ffd60a', czuwanie: '#8a919e', 'menu serwisowe': '#bf5af2', 'brak danych': '#3a404c' };
+const G_COLOR = { palenie: '#ff6b3d', dobieg: '#ff9166', podtrzymanie: '#ffb340', przedmuch: '#ffd60a', czuwanie: '#8a919e', 'menu serwisowe': '#bf5af2', 'brak danych': '#3a404c' };
 const gecoHeard = () => !!(now && now.geco && now.geco.age >= 0);
 const gecoLive = () => gecoHeard() && now.geco.age < 10;
-// What the controller is doing: podtrzymanie with the fan or the feeder running is a przedmuch.
-function gecoWhat(mode, out) {
+// A controller known from its hours, though silent since the last restart: its card says so instead of vanishing.
+const gecoKnown = () => !!(now && now.geco) && (now.geco.age >= 0 || work.length > 0);
+// What the controller is doing: podtrzymanie with the fan or the feeder running is a przedmuch, or, right after a burn,
+// the burn's end (tail): the stroke finishing and the fan's after-run.
+function gecoWhat(mode, out, tail) {
   const m = G_MODE[mode] || `tryb ${mode}`;
-  return mode === 16 && out & (G_FAN | G_FEEDER) ? 'przedmuch' : m;
+  return mode === 16 && out & (G_FAN | G_FEEDER) ? (tail ? 'dobieg' : 'przedmuch') : m;
 }
+// Marks the tails of a log, as countWork does. The service menu and a bus gap do not end a burn.
+function markTails(ev) {
+  let burn = false, tail = false;
+  for (const e of ev) {
+    e.tail = false;
+    if (!e.mode) continue;
+    e.tail = tail = e.mode === 16 && !!(e.out & (G_FAN | G_FEEDER)) && (tail || burn);
+    if (e.mode === 8 || e.mode === 16) burn = e.mode === 8;
+  }
+  return ev;
+}
+// The last change at or before t, -1 when there is none.
+function lastAt(ev, t) {
+  let a = 0, b = ev.length;
+  while (a < b) { const m = (a + b) >> 1; if (ev[m].t <= t) a = m + 1; else b = m; }
+  return a - 1;
+}
+
+// /api/now is a snapshot every 15 s, and the feeder's portions last a second every 19 s (a snapshot catches one in
+// five), so the live picture plays the controller's log instead: every change, LIVE_DELAY behind the device - one
+// refresh and its round trip, so what comes next is already in hand. A refresh adds a few dozen bytes. Without a log
+// (a failed request) the picture falls back on the snapshot.
+const TAIL_BACK = 6 * 3600, LIVE_DELAY = 18;
+const STROKE_S = 30.5;                     // motor seconds of a piston's cycle, measured: 86 strokes at 30.4 s
+let gecoTail = null, tailAsked = 0, deviceClock = 0, boilerLook = '';
+async function loadTail() {
+  if (!nowFresh || online !== true || !gecoHeard() || !(now.time > 1.6e9) || document.hidden || Date.now() - tailAsked < 10e3) return;
+  tailAsked = Date.now();
+  const g = gecoTail, t = now.time, last = g && g.ev.length ? g.ev[g.ev.length - 1].t : 0, whole = last < t - TAIL_BACK, s = whole ? t - TAIL_BACK : Math.floor(last);
+  try {
+    const got = parseGeco(await (await api(`/api/geco?from=${s}&to=${t + 60}`, {}, 10000)).arrayBuffer());
+    if (gecoTail !== g) return;
+    // From the second of the last change known: everything from then on comes again and replaces what was there.
+    const ev = (whole ? got : g.ev.filter(e => e.t < s).concat(got.slice(1))).filter(e => e.t > 1.6e9);
+    if (ev.length > 6000) ev.splice(0, ev.length - 4000);
+    gecoTail = { ev: markTails(ev), at: Date.now() };
+  } catch (e) {}
+}
+// When the state of record k began: a bus gap of a moment is no change, and neither is a pump going on.
+function stateStart(ev, k) {
+  const what = gecoWhat(ev[k].mode, ev[k].out, ev[k].tail);
+  let j = k;
+  for (let p = k - 1; p >= 0; p--) {
+    if (!ev[p].mode && ev[p + 1].t - ev[p].t < 10) continue;
+    if (gecoWhat(ev[p].mode, ev[p].out, ev[p].tail) !== what) break;
+    j = p;
+  }
+  return ev[j].t;
+}
+// The motor's seconds since the piston last came home at time t, null when that is not in the log.
+function pistonMotor(ev, k, t) {
+  let m = 0, end = t, later = null;
+  for (let j = k; j >= 0 && k - j < 300; j--) {
+    const e = ev[j];
+    if (e.mode) {
+      if (later && e.flags & G_PISTON && !(later.flags & G_PISTON)) return m;
+      if (e.out & G_FEEDER) m += end - e.t;
+      later = e;
+    }
+    end = e.t;
+  }
+  return null;
+}
+// The moment the picture shows, null with no fresh log.
+function gecoReplay() {
+  const g = gecoTail;
+  if (!g || !g.ev.length || Date.now() - g.at > 45e3) return null;
+  const ev = g.ev, t = Date.now() / 1000 + deviceClock - LIVE_DELAY;
+  let k = lastAt(ev, t);
+  while (k > 0 && !ev[k].mode && k + 1 < ev.length && ev[k + 1].t - ev[k].t < 10) k--;
+  return k < 0 ? null : { e: ev[k], t, since: stateStart(ev, k), motor: pistonMotor(ev, k, t) };
+}
+// Whether the card's data is of this moment: false = no answer, null = asking (a start, or back from the background).
+const boilerConn = () => (online === false ? false : online === true && Date.now() - lastOk < 40e3 ? true : null);
 
 function boilerSvg() {
   // As it stands in the boiler room: the hopper's neck on the feeder tube, which feeds the fire bed from the right,
@@ -1783,25 +1865,18 @@ function boilerSvg() {
 </svg>`;
 }
 
-// The boiler as the controller sees it, live. Drawn once; later renders only change what moved, so the animations
-// run on instead of restarting every 15 s.
+// The boiler as the controller sees it: the temperatures and the coal at each refresh, the rest in paintBoiler. Drawn
+// once; later renders only change what moved, so the animations run on instead of restarting.
 function renderBoiler() {
   const card = $('#boilercard');
-  if (!gecoHeard()) { card.style.display = 'none'; return; }
+  if (!gecoKnown()) { card.style.display = 'none'; return; }
   card.style.display = '';
-  if (!$('#gstate')) card.innerHTML = '<div class="card-h"><span class="gstate" id="gstate"><i></i><b></b></span><small id="gsince"></small></div>'
-    + '<div class="ghint" id="ghint"></div>' + boilerSvg() + '<div class="gchips" id="gchips"></div>';
-  const g = now.geco, live = gecoLive(), out = live ? g.out : 0, mode = live ? g.mode : 0, what = live ? gecoWhat(mode, out) : 'brak danych';
-  const fan = !!(out & G_FAN), feeder = !!(out & G_FEEDER), pump = !!(out & G_PUMP), dhw = !!(out & G_DHW), away = live && !!(g.flags & G_PISTON);
-  const st = $('#gstate');
-  st.querySelector('i').style.background = G_COLOR[what] || '#8a919e';
-  st.querySelector('b').textContent = live ? what[0].toUpperCase() + what.slice(1) : 'Brak danych';
-  $('#gsince').textContent = live && g.since > 1.6e9 ? `od ${when(g.since)}` : g.age >= 0 ? `ostatnio ${durCut(g.age)} temu` : '';
-  const hint = !live ? 'Moduł RS485 nie słyszy sterownika – sterownik wyłączony albo luźny przewód A/B.'
-    : mode === 4 && !now.warnings[6] ? 'Sterownik nie jest w automacie – naciśnij A na sterowniku, inaczej piec wygaśnie.'   // the banner says it once it holds
-    : mode === 2 ? 'Sterownik jest w menu serwisowym – wentylator, podajnik i pompy stoją.' : '';
-  $('#ghint').textContent = hint;
-  $('#ghint').style.display = hint ? '' : 'none';
+  if (!$('#gstate')) {
+    card.innerHTML = '<div class="card-h"><span class="gstate" id="gstate"><i></i><b></b></span><small id="gsince"></small></div>'
+      + '<div class="ghint" id="ghint"></div>' + boilerSvg() + '<div class="gchips" id="gchips"></div>';
+    boilerLook = '';
+  }
+  const g = now.geco, live = boilerConn() === true && gecoLive();
   const sens = role => { const i = { furnace: FURNACE, return: RETURN, hopper: COAL, boiler: BOILER, flue: FLUE }[role]; return i >= 0 ? now.sensors[i] : null; };
   const deg = v => (v === null || v === undefined ? '' : `${n1(v)}°`);
   const tc = live ? g.t : [null, null, null];
@@ -1822,24 +1897,51 @@ function renderBoiler() {
   $('#gcoal').style.opacity = known ? (low || mid ? .55 : 1) : .4;
   $('#gcoalp').textContent = known ? `${Math.round(full * 100)}%` : '';
   $('#gcoalp').style.fill = low ? 'var(--red)' : mid ? 'var(--orange)' : '';
-  $('#gfan').classList.toggle('on', fan);
-  const piston = $('#gpiston');
+  paintBoiler();
+}
+
+// What the controller is doing, on the picture: from the log's moment (gecoReplay), four times a second, on the home tab.
+function paintBoiler() {
+  if (!now || !now.geco || !$('#gstate')) return;
+  const g = now.geco, conn = boilerConn(), live = conn === true && gecoLive(), r = live ? gecoReplay() : null;
+  const e = r ? r.e : live ? g : { mode: 0, out: 0, flags: 0 }, mode = e.mode, out = e.out, what = live ? gecoWhat(mode, out, e.tail) : 'brak danych';
+  const fan = !!(out & G_FAN), feeder = !!(out & G_FEEDER), pump = !!(out & G_PUMP), dhw = !!(out & G_DHW), away = !!(e.flags & G_PISTON);
+  // The piston follows its motor: a crank, one cycle in STROKE_S seconds of running, set again each time it comes home.
+  const piston = $('#gpiston'), part = !r ? 0 : r.motor === null ? (away ? .5 : 0) : (1 - Math.cos(2 * Math.PI * Math.min(r.motor, STROKE_S) / STROKE_S)) / 2;
+  const shift = r ? `translateX(${(-44 * part).toFixed(1)}px)` : '';
+  if (piston.style.transform !== shift) piston.style.transform = shift;
   piston.classList.toggle('push', feeder);
-  piston.classList.toggle('away', !feeder && away);
+  piston.classList.toggle('run', feeder && !r);
+  piston.classList.toggle('away', !feeder && away && !r);
+  const since = !live ? (conn === true && g.age >= 0 ? `ostatnio ${durCut(g.age)} temu` : '') : !r ? '' : r.since < r.t - TAIL_BACK ? 'od ponad 6 h' : `od ${when(r.since)}`;
+  const hint = conn !== true ? '' : !live ? 'Moduł RS485 nie słyszy sterownika – sterownik wyłączony albo luźny przewód A/B.'
+    : mode === 4 && !now.warnings[6] ? 'Sterownik nie jest w automacie – naciśnij A na sterowniku, inaczej piec wygaśnie.'   // the banner says it once it holds
+    : mode === 2 ? 'Sterownik jest w menu serwisowym – wentylator, podajnik i pompy stoją.' : '';
+  const look = [conn, what, out, e.flags, since, hint].join();
+  if (look === boilerLook) return;
+  boilerLook = look;
+  $('#boilercard').classList.toggle('stale', conn !== true);
+  const st = $('#gstate');
+  st.querySelector('i').style.background = G_COLOR[what] || '#8a919e';
+  st.querySelector('b').textContent = conn === false ? 'Brak połączenia' : conn === null ? 'Łączenie…' : live ? what[0].toUpperCase() + what.slice(1) : 'Brak danych';
+  $('#gsince').textContent = since;
+  $('#ghint').textContent = hint;
+  $('#ghint').style.display = hint ? '' : 'none';
+  $('#gfan').classList.toggle('on', fan);
   $('#gpump').classList.toggle('on', pump);
   $('#gflow1').classList.toggle('on', pump);
   $('#gflow2').classList.toggle('on', pump);
   $('#gpumpd').classList.toggle('on', dhw);
   $('#gflowd1').classList.toggle('on', dhw);
   $('#gflowd2').classList.toggle('on', dhw);
-  const burning = mode === 8 || what === 'przedmuch';
+  const burning = mode === 8 || what === 'przedmuch' || what === 'dobieg';
   $('#gfire').classList.toggle('on', burning);
   $('#gember').classList.toggle('on', mode === 16 && !burning);
   $('#gsmoke').classList.toggle('on', burning);
   const chip = (on, color, text) => `<span class="${on ? 'on' : ''}" style="--c:${color}"><i></i>${text}</span>`;
   $('#gchips').innerHTML = chip(fan, '#64d2ff', 'Wentylator') + chip(feeder, '#ff9f0a', 'Podajnik')
     + chip(away, '#ffd60a', away ? 'Tłok wysunięty' : 'Tłok w pozycji') + chip(pump, '#30d158', 'Pompa CO') + chip(dhw, '#34d1bf', 'Pompa CWU')
-    + (live && g.out & ~(G_FAN | G_FEEDER | G_PUMP | G_DHW) ? chip(true, '#bf5af2', `inne 0x${(g.out & ~(G_FAN | G_FEEDER | G_PUMP | G_DHW)).toString(16)}`) : '');
+    + (live && out & ~(G_FAN | G_FEEDER | G_PUMP | G_DHW) ? chip(true, '#bf5af2', `inne 0x${(out & ~(G_FAN | G_FEEDER | G_PUMP | G_DHW)).toString(16)}`) : '');
 }
 
 // The work log of a chart's range, loaded with the chart's data (ranges up to a week). Once loaded, only what is new
@@ -1873,18 +1975,27 @@ async function loadGecoNow(from, to) {
       if (g.to >= to - 30 || Date.now() - g.at < 60e3) return;     // covered, or asked within the minute
       // From the second of the last change known: everything from then on comes again and replaces what was there.
       const s = Math.floor(g.ev[g.ev.length - 1].t), ev = parseGeco(await (await api(url(s, to), {}, 30000)).arrayBuffer());
-      if (gecoLog === g) gecoLog = { from: g.from, to, ev: g.ev.filter(e => e.t < s).concat(ev.slice(1)), at: Date.now() };
+      if (gecoLog === g) gecoLog = { from: g.from, to, ev: markTails(g.ev.filter(e => e.t < s).concat(ev.slice(1))), at: Date.now() };
       return;
     }
-    gecoLog = { from, to, ev: parseGeco(await (await api(url(from, to), {}, 30000)).arrayBuffer()), at: Date.now() };
+    gecoLog = { from, to, ev: markTails(parseGeco(await (await api(url(from, to), {}, 30000)).arrayBuffer())), at: Date.now() };
   } catch (e) {}
 }
 
-// The log and, after it, the state /api/now has just told (the device writes its log in batches, about a minute).
+// The chart's log, what the live picture's has since (the chart's is asked for once a minute) and, after them, the
+// state /api/now has just told.
 function gecoEvents() {
-  const ev = gecoLog ? gecoLog.ev : [], g = now && now.geco;
-  if (!g || !gecoHeard() || g.since < 1.6e9 || (ev.length && ev[ev.length - 1].t >= g.since)) return ev;
-  return ev.concat([{ t: g.since, mode: g.mode, out: g.out, flags: g.flags }]);
+  let ev = gecoLog ? gecoLog.ev : [];
+  const g = now && now.geco, tail = gecoTail ? gecoTail.ev : [];
+  if (ev.length) {
+    const last = ev[ev.length - 1].t;
+    let k = tail.length;
+    while (k > 0 && tail[k - 1].t > last) k--;
+    if (k < tail.length) ev = ev.concat(tail.slice(k));
+  }
+  const p = ev.length ? ev[ev.length - 1] : null;
+  if (!g || !gecoHeard() || g.since < 1.6e9 || (p && p.t >= g.since)) return ev;
+  return ev.concat([{ t: g.since, mode: g.mode, out: g.out, flags: g.flags, tail: !!p && g.mode === 16 && !!(g.out & (G_FAN | G_FEEDER)) && (p.mode === 8 || p.tail) }]);
 }
 
 // [start, end, record] pieces of [t0, t1]: each state from its change to the next; before the first, the state the
@@ -1900,10 +2011,11 @@ function gecoPieces(t0, t1) {
 
 // Lanes under the detail chart, on its time axis: mode, fan, feeder, piston, CO pump, hot water pump. Drawn per pixel column: a
 // column shows how much of its time an output ran (faint = short pulses, like the feeder's portions while burning;
-// full = it ran throughout) and the mode that held most of it - standby and a przedmuch win any column they touch, so
-// a short one is never hidden. A week of portions stays a few hundred rectangles. Views up to 8 days come from the
-// log, longer ones from the hours (each hour's seconds spread evenly over it - no przedmuch or piston there, and a
-// column shows the mode that held most of it).
+// full = it ran throughout) and the mode that held most of it, with a thin line at the lane's foot for what it also
+// holds but was too short to lead it (LANE_TICKS, first one found), so neither a short przedmuch nor the burns of a
+// long view are hidden. A week of portions stays a few hundred rectangles. Views up to 8 days come from the log, longer
+// ones from the hours (each hour's seconds spread evenly over it - no przedmuch or piston there).
+const LANE_TICKS = ['menu serwisowe', 'czuwanie', 'palenie', 'przedmuch'];
 const LANES = [
   ['Tryb', null],
   ['Went.', e => e.out & G_FAN, '#64d2ff'],
@@ -1931,7 +2043,7 @@ function paintLanes() {
     }
   };
   if (fromLog) for (const [a, b, e] of gecoPieces(o.t0, o.t1)) {
-    const what = e.mode ? gecoWhat(e.mode, e.out) : null, lit = LANES.map(([, test]) => test && test(e));
+    const what = e.mode ? gecoWhat(e.mode, e.out, e.tail) : null, lit = LANES.map(([, test]) => test && test(e));
     spread(a, b, (c, s) => {
       lit.forEach((x, k) => { if (x) on[k][c] += s; });
       if (what) addMode(what, c, s);
@@ -1951,26 +2063,39 @@ function paintLanes() {
   LANES.forEach(([label, test, color], k) => {
     const y = k * (H + gap);
     svg += `<rect class="lb" x="${L}" y="${y}" width="${pw}" height="${H}" rx="3"/><text class="ll" x="${W - 2}" y="${y + 9}" text-anchor="end">${label}</text>`;
+    const major = c => {
+      let best = null, most = 0;
+      for (const m in modes) if (modes[m][c] > most) { most = modes[m][c]; best = m; }
+      return best;
+    };
     // [fill, opacity] of column c
     const look = c => {
       if (!test) {
-        let best = fromLog ? ['menu serwisowe', 'czuwanie', 'przedmuch'].find(m => modes[m] && modes[m][c] > 0) : null, most = 0;
-        if (!best) for (const m in modes) if (modes[m][c] > most) { most = modes[m][c]; best = m; }
+        const best = major(c);
         if (best) drawn.add(best);
         return best ? [G_COLOR[best] || '#5d6471', 1] : null;
       }
       const d = on[k][c] / per;
       return d <= 0 ? null : [color, d >= 0.5 ? 1 : d >= 0.15 ? 0.6 : 0.3];
     };
-    let run = null;
-    const flush = () => { if (run) svg += `<rect x="${(L + run[0]).toFixed(1)}" y="${y}" width="${Math.min(run[1], pw - run[0]).toFixed(1)}" height="${H}" fill="${run[2]}" fill-opacity="${run[3]}"/>`; run = null; };
-    for (let c = 0; c < cols; c++) {
-      const v = look(c);
-      if (run && v && v[0] === run[2] && v[1] === run[3]) { run[1]++; continue; }
+    const foot = c => {
+      const best = major(c), also = best && LANE_TICKS.find(m => m !== best && modes[m] && modes[m][c] > 0);
+      if (also) drawn.add(also);
+      return also ? [G_COLOR[also], 1] : null;
+    };
+    const strip = (of, top, high) => {
+      let run = null;
+      const flush = () => { if (run) svg += `<rect x="${(L + run[0]).toFixed(1)}" y="${top}" width="${Math.min(run[1], pw - run[0]).toFixed(1)}" height="${high}" fill="${run[2]}" fill-opacity="${run[3]}"/>`; run = null; };
+      for (let c = 0; c < cols; c++) {
+        const v = of(c);
+        if (run && v && v[0] === run[2] && v[1] === run[3]) { run[1]++; continue; }
+        flush();
+        if (v) run = [c, 1, v[0], v[1]];
+      }
       flush();
-      if (v) run = [c, 1, v[0], v[1]];
-    }
-    flush();
+    };
+    strip(look, y, H);
+    if (!test) strip(foot, y + H - 4, 4);
   });
   const seen = Object.keys(G_COLOR).filter(m => drawn.has(m));
   box.innerHTML = `<svg width="${W}" height="${LANES.length * (H + gap)}">${svg}</svg>`
@@ -1980,12 +2105,9 @@ function paintLanes() {
 // The controller's state at time t, for the chart's finger.
 function gecoTip(t) {
   if (!gecoLog || !$('#lanes').innerHTML) return '';
-  const ev = gecoEvents();
-  let a = 0, b = ev.length;                      // the last change at or before t
-  while (a < b) { const m = (a + b) >> 1; if (ev[m].t <= t) a = m + 1; else b = m; }
-  const e = ev[a - 1];
+  const ev = gecoEvents(), e = ev[lastAt(ev, t)];
   if (!e || e.mode === 0) return '';
-  const what = gecoWhat(e.mode, e.out), parts = [];
+  const what = gecoWhat(e.mode, e.out, e.tail), parts = [];
   if (e.out & G_FAN) parts.push('wentylator');
   if (e.out & G_FEEDER) parts.push('podajnik');
   if (e.out & G_PUMP) parts.push('pompa CO');
@@ -4251,6 +4373,7 @@ function setup() {
   // and when the app goes to the background. The timers start first, so a first load that hangs stops nothing.
   let minutesRun = 0;
   setInterval(() => { if (!document.hidden) refreshNow(); }, 15000);
+  setInterval(() => { if (!document.hidden && ui.tab === 'home') paintBoiler(); }, 250);
   setInterval(() => {
     if (document.hidden) return;
     loadLive().then(loadJournal).then(() => { if (++minutesRun % 10 === 0) saveCache(); render(true); });

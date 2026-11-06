@@ -76,7 +76,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 31;                  // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 32;                  // bump for every release (release/publish.ps1)
 // Each board has its own release channel - a firmware for the other chip must never be offered.
 #if CONFIG_IDF_TARGET_ESP32S3
 const char* UPDATE_MANIFEST_URL =
@@ -316,7 +316,7 @@ struct __attribute__((packed)) WorkHour {
   uint16_t pump;
   uint16_t dhw;                       // ... the hot water pump too
   uint16_t feed10;                    // the feeder, in tenths of a second
-  uint16_t feedBurn10;                // ... of it while burning
+  uint16_t feedBurn10;                // ... of it while burning, a burn's end included (the stroke finishing)
   uint16_t heatHeard;                 // the heat model's degree-minutes while the controller was heard (by the hour's
                                       // heard share) - what the feeder counts instead (heatHeardOf)
   uint16_t flueSum;                   // the flue FLUE_MARK_S into the burns begun this hour without the hot water pump, degrees
@@ -420,7 +420,7 @@ RTC_NOINIT_ATTR uint32_t     healthMagic;
 SegmentLog<HealthRecord> health("/hl", HEALTH_CAPACITY / 2);
 SegmentLog<GecoBus::Event> gecoLog("/gw", GECO_CAPACITY / 2);   // the controller's work: every change (GecoBus.h)
 std::vector<GecoBus::Event> gecoPending;                        // changes not on flash yet (logGecoChanges)
-SegmentLog<WorkHour> workLog("/wk", WORK_CAPACITY / 2);         // ... and hour by hour (countWork)
+SegmentLog<WorkHour> workLog("/wk2", WORK_CAPACITY / 2);        // ... and hour by hour (countWork)
 uint32_t workDone = 0;                          // the newest hour in workLog (its start), 0 = none yet
 uint16_t relayUpsSeen = 0, updateFailsSeen = 0;
 
@@ -1120,7 +1120,7 @@ float flueAt(uint32_t t) {
   uint32_t m = t / 60;
   int16_t a = NO_VALUE, b = NO_VALUE;
   minutes.forEach(m, m + 1, [&](uint32_t k, const MinuteRecord& r) { (k == m ? a : b) = r.v[FLUE]; });
-  return a == NO_VALUE || b == NO_VALUE ? NAN : (a + (b - a) * (t % 60) / 60.0f) / 100.0f;
+  return a == NO_VALUE || b == NO_VALUE ? NAN : (a + (b - a) * (int32_t)(t % 60) / 60.0f) / 100.0f;
 }
 
 // The controller's work from the hour `from` (its start) up to `until`, worked out from its log on flash and the
@@ -1134,6 +1134,8 @@ void countWork(uint32_t from, uint32_t until, bool partial, const std::function<
   uint8_t strokes = 0, blows = 0, burns = 0, marks = 0;
   uint32_t marked[12];                                      // when the burns to read the flue of began
   GecoBus::Event st = gecoLog.forRange(from, from, [](const GecoBus::Event&) {});
+  bool inBurn = st.mode == GecoBus::BURNING;                // the last working mode: the service menu and a bus gap end no burn
+  bool tail = false;                                        // a burn's end: the stroke finishing and the fan's after-run
   auto blowing = [](const GecoBus::Event& e) {
     return e.mode == GecoBus::HOLDING && (e.outputs & (GecoBus::FAN | GecoBus::FEEDER));
   };
@@ -1151,7 +1153,7 @@ void countWork(uint32_t from, uint32_t until, bool partial, const std::function<
     if (st.outputs & GecoBus::DHW_PUMP) sum[DHW] += d;
     if (st.outputs & GecoBus::FEEDER) {
       sum[FEED] += d;
-      if (st.mode == GecoBus::BURNING) sum[FEED_BURN] += d;
+      if (st.mode == GecoBus::BURNING || tail) sum[FEED_BURN] += d;
     }
   };
   auto close = [&]() {
@@ -1183,14 +1185,16 @@ void countWork(uint32_t from, uint32_t until, bool partial, const std::function<
       close();
     }
     run((e.time - start) * 10 + e.tenths);
+    if (e.mode != GecoBus::NO_DATA) tail = blowing(e) && (tail || inBurn);
     if (st.mode != GecoBus::NO_DATA && e.mode != GecoBus::NO_DATA) {
       if ((st.flags & GecoBus::PISTON_AWAY) && !(e.flags & GecoBus::PISTON_AWAY) && strokes < 255) strokes++;
-      if (blowing(e) && !blowing(st) && st.mode != GecoBus::BURNING && blows < 255) blows++;
-      if (e.mode == GecoBus::BURNING && st.mode != GecoBus::BURNING) {
-        if (burns < 255) burns++;
-        if (!(e.outputs & GecoBus::DHW_PUMP) && marks < 12) marked[marks++] = e.time;
-      }
+      if (blowing(e) && !blowing(st) && !tail && blows < 255) blows++;
     }
+    if (e.mode == GecoBus::BURNING && !inBurn) {
+      if (burns < 255) burns++;
+      if (!(e.outputs & GecoBus::DHW_PUMP) && marks < 12) marked[marks++] = e.time;
+    }
+    if (e.mode == GecoBus::BURNING || e.mode == GecoBus::HOLDING) inBurn = e.mode == GecoBus::BURNING;
     st = e;
   };
   gecoLog.forRange(from, until, take);
@@ -1290,7 +1294,7 @@ private:
       menuSeen = t;
     } else if (menuAt && e.mode != GecoBus::NO_DATA) {
       int64_t end = t - menuSeen < 1200 ? t : menuSeen;      // back after 2 minutes of silence: a power cut, not the menu
-      if (told) told(MENU, min<int64_t>((end - menuAt) / 10, 32767), menuAt / 10);
+      if (told && end - menuAt >= 30) told(MENU, min<int64_t>((end - menuAt) / 10, 32767), menuAt / 10);   // not the blink on the way out
       menuAt = 0;
     }
   }
@@ -2004,7 +2008,7 @@ void setupHistory(bool wipe) {
   refills.begin();
   health.begin();
   gecoLog.begin();
-  for (const char* old : {"/wh0.bin", "/wh1.bin"})           // v30's hours, shorter: counted anew from the log
+  for (const char* old : {"/wh0.bin", "/wh1.bin", "/wk0.bin", "/wk1.bin"})   // the hours of v30 and v31: counted anew from the log
     if (LittleFS.exists(old)) LittleFS.remove(old);
   workLog.begin();
   workDone = workLog.newestTime();

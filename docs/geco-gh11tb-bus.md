@@ -112,19 +112,21 @@ its 5V pin went to 3V3.
 What it hears:
 
 - `/api/now` -> `geco`: seconds since the last good frame (`age`, -1 = never heard), `mode`, `out`, `flags` (P3), `since`
-  (when that state began), `t` (the controller's three temperatures), good/bad frame counts.
+  (the last change of any of them - not when the mode began; a burn changes it every portion), `t` (the controller's
+  three temperatures), good/bad frame counts.
 - `/api/geco?from&to`: the work log ("/gw" on flash, 390 000 changes = 3 MB: about 2 months of winter burning, 5 of
   autumn - burning makes ~6 changes a minute, the feeder's 1-1.5 s portions every ~19.5 s; holding almost none) - 8
   bytes a change (time u32, tenths, mode, outputs, P3), the first record being the state the range began in; changes
   not on flash yet are served too. Every start closes the log at the last "still alive" mark before it (a NO_DATA
   record), so the state before a power cut or an update does not run on through it (v30).
-- `/api/work?from&to`: the same work hour by hour ("/wk", 30 bytes an hour, kept 2.5-5 years; v30's shorter "/wh" is
-  counted anew from the log), worked out from the log - seconds heard, burning, holding, standby, fan, CO pump, hot
-  water pump, the feeder in tenths and its part while burning, the heat model's degree-minutes while heard, the flue 4
-  minutes into each burn begun without the hot water pump (between its two minute readings, +-16 C between burns;
-  sum + count), burns begun, piston cycles completed (away -> home) and przedmuchy begun (the run finishing a stroke
-  after a burn is none); the hour running now last, its part so far. Written 6 minutes after each hour ends, so the last
-  burn's flue reading is there.
+- `/api/work?from&to`: the same work hour by hour ("/wk2", 30 bytes an hour, kept 2.5-5 years; the hours of v30 and v31
+  are counted anew from the log), worked out from the log - seconds heard, burning, holding, standby, fan, CO pump, hot
+  water pump, the feeder in tenths and its part while burning (v32: with the burn's end - the stroke finishing and the
+  fan's after-run, in holding right after a burn), the heat model's degree-minutes while heard, the flue 4 minutes into
+  each burn begun without the hot water pump (between its two minute readings, +-16 C between burns; sum + count), burns
+  begun (v32: coming back from the service menu into a burn is none), piston cycles completed (away -> home) and
+  przedmuchy begun (a burn's end is none); the hour running now last, its part so far. Written 6 minutes after each hour
+  ends, so the last burn's flue reading is there.
 - Settings read off the work (v31, `SettingWatch`; user parameters never appear on the bus): u1 = the feeder's pause while
   burning, u2 = from the feeder stopping in holding to the next przedmuch, the fan's after-run (F18) = how long it
   outlasts the feeder in holding. `/api/now` -> `geco.set` [u1 s, u2 min, after-run s]; each change and each visit to the
@@ -145,8 +147,13 @@ What it hears:
   the heat factor, from intervals between refills to the top in which the controller was heard at least 70 % of the
   time (and the feeder ran 10 minutes or more); until two such refills it is scaled from the heat model over the
   last two weeks the bus was heard (`coal.kfN` = 0). Measured 2026-11-04: a full piston cycle is ~31 s of the motor.
-- The app: an animated boiler on the home screen (with the hopper's coal level), work lanes under the charts (from
-  the log up to 8 days, from the hours beyond), the controller's day on "Dzisiaj" (burning, holding, przedmuchy,
+- The app: an animated boiler on the home screen (with the hopper's coal level). `/api/now` alone cannot drive it, a
+  refresh every 15 s catches one feeder portion in five, so since v32 it plays `/api/geco`: the last 6 hours, topped up at
+  each refresh (a few dozen bytes, ~260 ms), shown 18 s behind the device. The piston follows the motor's seconds since it
+  last came home (a crank, ~30.5 s to a cycle); "od" is when the state really began, from the log; a burn's end has its
+  own name, "dobieg". Without the log it falls back on the snapshot. Work lanes under the charts (from
+  the log up to 8 days, from the hours beyond; the mode that held most of a column, with a thin line at the lane's foot
+  for what was too short to lead it), the controller's day on "Dzisiaj" (burning, holding, przedmuchy,
   piston cycles, feeder time), its month in Miesiace, and "Praca sterownika" in Wykresy: per day for 30 days how many
   times the fire was started (burns + przedmuchy), the share of the coal fed outside burning and the flue 4 minutes into
   a burn, the days the settings changed marked - what a test of settings is read from. Whether the flue mark really
