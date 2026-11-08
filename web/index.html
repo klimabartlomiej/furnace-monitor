@@ -689,6 +689,9 @@ const OLD_ROLES = ['furnace', 'return', 'hopper', 'boiler'];
 const OTHER_COLORS = ['#ff7eb6', '#9be15d', '#ffd84d', '#7d8cff', '#5ce1e6', '#d9a066', '#b0b7c3', '#ff9a8b'];
 let COLORS = ['#ff6b3d', '#4aa8ff', '#ffb340', '#34d1bf'], ICONS = [I_FLAME, I_RETURN, I_HOPPER, I_WATER];
 const roleOf = (s, i) => (s && s.role) || OLD_ROLES[i] || 'other';
+// The flue jumps 50 degrees a minute and holds its top for a few minutes of a burn: its line is neither smoothed nor
+// averaged, or the chart shows far less than the card did.
+const peaky = i => { const s = now && now.sensors[i]; return !!s && (s.kind === 'Termopara K' || roleOf(s, i) === 'flue'); };
 const roleColor = (r, i) => (ROLES[r] || ROLES.other).color || OTHER_COLORS[i % OTHER_COLORS.length];
 function mapRoles(n) {
   const s = n && n.sensors;
@@ -1186,6 +1189,9 @@ function segments(pts, gap) {
 
 // Centered moving average over ±w neighbours of value idx in one gap-free segment - takes the probes' 0.06°
 // steps out of the line.
+// The value a line goes through: a reading, or of a bucket its average - its highest for a probe with peaks.
+const lineOf = (s, p) => (s.agg ? (s.peak ? p[3] : p[2]) : p[1]);
+
 function smoothSeg(seg, w, idx) {
   if (!w || seg.length < 3) return seg;
   return seg.map((p, k) => {
@@ -1259,7 +1265,7 @@ function chart(el, o) {
   let lo = Infinity, hi = -Infinity;
   for (const s of o.series) for (const p of s.pts) {
     if (p[0] < o.t0 || p[0] > o.t1) continue;
-    const a = s.agg && o.band ? p[1] : s.agg ? p[2] : p[1], b = s.agg && o.band ? p[3] : s.agg ? p[2] : p[1];
+    const a = s.agg && o.band ? p[1] : lineOf(s, p), b = s.agg && o.band ? p[3] : lineOf(s, p);
     if (a < lo) lo = a;
     if (b > hi) hi = b;
   }
@@ -1299,7 +1305,7 @@ function chart(el, o) {
     const every = Math.max(1, Math.ceil(6 / gap)), r = gap >= 10 ? 2.8 : 2;
     let out = '';
     for (let k = 0; k < seg.length; k += every)
-      out += `<circle class="pt" cx="${f1(X(seg[k][0]))}" cy="${f1(Y(s.agg ? seg[k][2] : seg[k][1]))}" r="${r}" fill="${s.color}"/>`;
+      out += `<circle class="pt" cx="${f1(X(seg[k][0]))}" cy="${f1(Y(lineOf(s, seg[k])))}" r="${r}" fill="${s.color}"/>`;
     return out;
   };
   for (const l of o.limits || []) if (l.v >= y0 && l.v <= y1) {
@@ -1318,12 +1324,13 @@ function chart(el, o) {
   o.series.forEach((s, si) => {
     const id = `${el.id}-g${si}`, fill = o.fill && !s.dash;
     if (fill) defs += `<linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".34"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`;
-    // Minute readings are smoothed (o.smooth = neighbours each side); the finger reads the drawn line (s.view).
+    // Minute readings are smoothed (o.smooth = neighbours each side), a probe with peaks (s.peak) never; the finger
+    // reads the drawn line (s.view).
     s.view = [];
     for (const raw of segments(s.pts, s.step || o.step)) {
-      const seg = s.agg ? raw : smoothSeg(raw, o.smooth || 0, 1);
+      const seg = s.agg || s.peak ? raw : smoothSeg(raw, o.smooth || 0, 1);
       s.view.push(...seg);
-      const line = curvePath(seg.map(p => [X(p[0]), Y(s.agg ? p[2] : p[1])]));
+      const line = curvePath(seg.map(p => [X(p[0]), Y(lineOf(s, p))]));
       if (s.agg && o.band && !s.dash) {
         const top = seg.map(p => f1(X(p[0])) + ',' + f1(Y(p[3]))), bottom = seg.map(p => f1(X(p[0])) + ',' + f1(Y(p[1]))).reverse();
         plot += `<polygon points="${top.concat(bottom).join(' ')}" fill="${s.color}" fill-opacity=".17"/>`;
@@ -1331,7 +1338,7 @@ function chart(el, o) {
         plot += `<path d="${line}L${f1(X(seg[seg.length - 1][0]))} ${T + ph}L${f1(X(seg[0][0]))} ${T + ph}Z" fill="url(#${id})"/>`;
       }
       plot += seg.length > 1 ? `<path class="ln${s.dash ? ' dash' : ''}" d="${line}" stroke="${s.color}"/>` + (s.dash ? '' : dots(seg, s))
-        : `<circle cx="${f1(X(seg[0][0]))}" cy="${f1(Y(s.agg ? seg[0][2] : seg[0][1]))}" r="2.5" fill="${s.color}"/>`;
+        : `<circle cx="${f1(X(seg[0][0]))}" cy="${f1(Y(lineOf(s, seg[0])))}" r="2.5" fill="${s.color}"/>`;
     }
   });
   // What the bands and marks in view mean - only the ones that are there.
@@ -1359,7 +1366,7 @@ function scrub(el, clientX) {
   for (const s of g.o.series) {
     const p = nearest(s.view || s.pts, t), st = s.step || g.o.step;
     if (!p || Math.abs(p[0] - t) > st * 2 || p[0] < g.o.t0 || p[0] > g.o.t1) continue;
-    const v = s.agg ? p[2] : p[1], px = g.X(p[0]);
+    const v = lineOf(s, p), px = g.X(p[0]);
     if (x === null) { x = px; when = p[0]; whenStep = st; }
     dots += `<circle cx="${px.toFixed(1)}" cy="${g.Y(v).toFixed(1)}" r="4.5" fill="${s.color}" stroke="#15181e" stroke-width="2"/>`;
     html += `<div><i style="background:${s.color}"></i>${g.o.series.length > 1 ? esc(s.name) + ' ' : ''}<b class="num">${n1(v)}°</b>`
@@ -1464,14 +1471,14 @@ function gestures(el, zoomable) {
 
 // ---------------------------------------------------------------- home
 
-function sparkline(pts, color) {
+function sparkline(pts, color, peak) {
   if (pts.length < 2) return '<svg class="spark"></svg>';
   const W = 200, H = 48, t0 = pts[0][0], t1 = pts[pts.length - 1][0];
   let lo = Infinity, hi = -Infinity;
   for (const p of pts) { lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]); }
   if (hi - lo < 1) { const m = (hi + lo) / 2; lo = m - .5; hi = m + .5; }
   const X = t => (t - t0) / (t1 - t0 || 1) * W, Y = v => 6 + (hi - v) / (hi - lo) * (H - 10);
-  const d = curvePath(smoothSeg(pts, 4, 1).map(p => [X(p[0]), Y(p[1])]));
+  const d = curvePath(smoothSeg(pts, peak ? 0 : 4, 1).map(p => [X(p[0]), Y(p[1])]));
   const id = 'sp' + color.slice(1);
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1">`
     + `<stop offset="0" stop-color="${color}" stop-opacity=".38"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>`
@@ -1650,7 +1657,7 @@ function renderHome() {
       + `<div class="hd"><span class="ico">${SVG(ICONS[i] || ICONS[0])}</span><span class="n">${esc(s.name)}</span></div>`
       + `<div class="val num">${stand ? n1(ct) : s.temp === null ? '–' : n1(s.temp)}<small>°C</small></div>`
       + `<div class="trend num ${k > .5 ? 'up' : k < -.5 ? 'down' : ''}">${pill ? `<span class="pill">${pill}</span>` : ''}${tr}`
-      + `${ct !== null ? `<span class="ctlv" title="Odczyt sterownika kotła"><i></i>${stand ? 'sterownik' : `${n1(ct)}°`}</span>` : ''}</div>${sparkline(pts, c)}</div>`;
+      + `${ct !== null ? `<span class="ctlv" title="Odczyt sterownika kotła"><i></i>${stand ? 'sterownik' : `${n1(ct)}°`}</span>` : ''}</div>${sparkline(pts, c, peaky(i))}</div>`;
   }).join('');
 
   $$('#ovRange button').forEach(b => b.classList.toggle('on', +b.dataset.h === ui.overview));
@@ -2519,7 +2526,7 @@ function paintDetail() {
   if (!shown.length) shown = defaultShown();
   const probes = shown.filter(i => i !== OUT);
   const single = probes.length === 1 && shown.length === 1, s0 = now.sensors[probes[0]];
-  const lines = shown.map(i => { const d = detailData(i); return { color: colorOf(i), name: nameOf(i), agg: d.agg, step: d.step, dash: i === OUT, pts: windowed(d.pts, view.t0, view.t1) }; });
+  const lines = shown.map(i => { const d = detailData(i); return { color: colorOf(i), name: nameOf(i), agg: d.agg, step: d.step, dash: i === OUT, peak: i !== OUT && peaky(i), pts: windowed(d.pts, view.t0, view.t1) }; });
   const step = lines.length ? lines[0].step : 60;
   for (const i of probes.filter(ctlShown)) {        // the controller's reading of the same water, dashed in its colour
     const c = ctlOf(i), d = c >= 0 ? detailData(c) : null;
