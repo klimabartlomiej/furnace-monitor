@@ -1671,12 +1671,14 @@ function renderHome() {
   const drawn = `${lastLive}:${live.length}:${ui.overview}:${lines.join()}:${ctls.join()}:${COLORS.join()}:${ov.clientWidth}:${journal.length}`;
   if (ov.dataset.drawn !== drawn) {
     ov.dataset.drawn = drawn;
+    // Minutes are smoothed (the probes' 0.06 degree steps); 5-minute buckets are averages already - smoothing them
+    // again took a degree or two off the top of the furnace's swings.
     const span = ui.overview * 3600, t0 = t - span, step = ui.overview > 6 ? 300 : 60;
     const buckets = step === 60 ? live : rebucket(live, step);
     chart(ov, {
       series: lines.map(i => ({ color: COLORS[i], name: now.sensors[i].name, pts: windowed(points(buckets, i, false), t0, t) }))
         .concat(ctls.map(i => ({ color: COLORS[i], name: `${now.sensors[i].name} · sterownik`, dash: true, pts: windowed(points(buckets, ctlOf(i), false), t0, t) }))),
-      t0, t1: t, step, bands: outages(), smooth: step === 60 ? 3 : 1, empty: 'Historia zapełni się w ciągu kilku minut',
+      t0, t1: t, step, bands: outages(), smooth: step === 60 ? 3 : 0, empty: 'Historia zapełni się w ciągu kilku minut',
     });
   }
   renderBoiler();
@@ -2599,7 +2601,7 @@ function renderWork() {
   const line = set ? [set[0] && `przerwa podawania (u1) ${set[0]} s`, set[1] && `przedmuch co ${set[1]} min (u2)`, set[2] && `dobieg wentylatora ${set[2]} s`].filter(Boolean).join(' · ') : '';
   const recent = changes.slice(-4).reverse().map(e => { const v = eventView(e); return row2(v[2], `${day(e[0])}, ${hhmm(e[0])}`); }).join('');
   $('#workdays').innerHTML = `<div class="blabel" style="margin-top:0">${ref.today ? 'Dziś do teraz' : day(ref.t)}</div>`
-    + `<div class="stats three">${stat('ROZRUCHY', ref.starts)}${stat('POZA PALENIEM', ref.out !== null ? `${Math.round(ref.out)}%` : '–')}${stat('SPALINY', ref.flue !== null ? `${Math.round(ref.flue)}°` : '–')}</div>`
+    + `<div class="stats three">${stat('ROZRUCHY', ref.starts)}${stat('POZA PALENIEM', ref.out !== null ? `${Math.round(ref.out)}%` : '–')}${stat('SPALINY 4. MIN', ref.flue !== null ? `${Math.round(ref.flue)}°` : '–')}</div>`
     + `<div class="wmarks">${list.map(x => `<i class="${x.changes.length ? 'on' : ''}"></i>`).join('')}</div>`
     + `<div class="blabel" style="margin-top:2px">Rozruchy: palenia + przedmuchy</div>${row('', x => x.starts / maxS * 100)}`
     + `<div class="blabel">Węgiel podany poza paleniem</div>${row('amber', x => x.out)}`
@@ -2614,7 +2616,7 @@ function renderWork() {
     $$('#workdays .bars button').forEach(q => q.classList.toggle('sel', +q.dataset.k === k));
     const w = x.w, parts = !w ? ['brak danych'] : [`${w.burns} ${plural(w.burns, 'palenie', 'palenia', 'paleń')} + ${w.blows} ${plural(w.blows, 'przedmuch', 'przedmuchy', 'przedmuchów')}`];
     if (x.out !== null) parts.push(`${Math.round(x.out)}% węgla poza paleniem`);
-    if (x.flue !== null) parts.push(`spaliny ${Math.round(x.flue)}°`);
+    if (x.flue !== null) parts.push(`spaliny w 4. min palenia ${Math.round(x.flue)}°`);
     parts.push(...x.changes.map(e => eventView(e)[2]));
     $('#workcap').textContent = `${day(x.t)}${x.today ? ' (do teraz)' : ''}: ${parts.join(' · ')}`;
   };
