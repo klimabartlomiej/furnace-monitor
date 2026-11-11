@@ -35,7 +35,7 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   earlier hour, with how full the hopper was before. Coal burned is counted in the feeder piston's strokes (S3 with
   the RS485 module to the boiler controller, v33), each worth the kg learnt from refills to the top; the water's heat
   is not used (v30-v32 leaned on it and under-counted). Gives daily use in kg and costs, the hopper level (its size in
-  Ustawienia -> Dane kotła; a refill to the top into an empty hopper sets it), how long it lasts with a strip of days,
+  Ustawienia -> Dane kotła: "full"), how long it lasts with a strip of days,
   a "Mało węgla" warning - also when the burns stop heating the flue - a 30-day chart with the frost dependence and
   the season so far. Can be switched off in the settings. Up to v21 coal was counted in buckets; v22 converts the
   stored data once (coalToKilograms).

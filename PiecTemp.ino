@@ -75,7 +75,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 33;                  // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 34;                  // bump for every release (release/publish.ps1)
 // Each board has its own release channel - a firmware for the other chip must never be offered.
 #if CONFIG_IDF_TARGET_ESP32S3
 const char* UPDATE_MANIFEST_URL =
@@ -388,8 +388,8 @@ int      networkUps        = 0;                 // WiFi connections since the st
 float    strokeKg          = NAN;               // kg of coal one piston stroke pushes, learnt from refills (flash
 uint16_t strokeSamples     = 0;                 // "strkKg"), and the refill-to-refill intervals it came from ("strkN")
 uint32_t lastFullAt        = 0;                 // last refill to the top, 0 = none
-float    coalCap           = NAN;               // kg the hopper holds: what refills to the top into an empty one took
-                                                // (the median of the last five), else the setting (recomputeCoal)
+float    coalCap           = NAN;               // kg the hopper holds: the setting (Dane kotla) - the owner's word for
+                                                // "full" (v33 took refills into an empty hopper; v34 no more)
 uint32_t anchorAt          = 0;                 // the hopper's content was last known then (0 = never): a refill to the
 float    anchorKg          = NAN;               // top or one saying how full it was - what it held right after
 float    addedSince        = 0;                 // ... and the kg put in later by refills of unknown fill
@@ -1111,11 +1111,8 @@ void evaluateWarnings(bool tick = false) {
   setWarning(WARN_STANDBY, geco.state().mode == GecoBus::STANDBY, geco.fresh(), 2, 1, heating && settings.standbyOn,
              f.lastGood, tick);
 
-  // Ash pan: due after ashLimit kg of coal (once the coal use is learnt) or ashDays since it was emptied.
-  // Unknown without a clock (right after a power cut), so it does not close and reopen.
-  time_t now = time(nullptr);
-  bool ashDue = ashAt && clockSet(now) && ((now - ashAt) / 86400.0f >= settings.ashDays || ashBurned >= settings.ashLimit);
-  setWarning(WARN_ASH, ashDue, clockSet(now), 1, 1, heating && settings.coalOn && settings.ashOn, upTo320(ashBurned), tick);
+  // The ash pan's reminder is gone (v34, not needed): off for good, an old one closes.
+  setWarning(WARN_ASH, false, true, 1, 1, false, NAN, tick);
 
   // Hot water ready: not a problem, a notification "you can shower" when the boiler is warm enough - at most one
   // an hour, as a boiler around its "ready" temperature crosses it back and forth.
@@ -1631,8 +1628,8 @@ void watchStarving(uint32_t now) {
 
 // Learns the kg one piston stroke pushes from the latest COAL_INTERVALS intervals between refills to the top that the
 // controller's hours cover (burned = everything put in after the first, the closing refill included; the strokes
-// pushed = all but those after the hopper ran empty, when the closing refill says it was). The hopper's size: what
-// refills to the top into an empty hopper took. Then where its content was last known: the last refill to the top, or
+// pushed = all but those after the hopper ran empty, when the closing refill says it was). The hopper's size is the
+// setting. Then where its content was last known: the last refill to the top, or
 // a later one saying how full it was - the lower of what it says and what the count makes of it. At boot, per refill
 // and settings change. A learnt factor outlives its intervals (summer, a long gap) in flash; without two refills to
 // the top it goes.
@@ -1642,7 +1639,6 @@ void recomputeCoal() {
   struct Span { uint32_t from, to; float put; bool empty; };
   std::vector<RefillRecord> all = sortedRefills();
   std::vector<Span> spans;                                  // between refills to the top, oldest first
-  std::vector<float> empties;                               // kg of the refills to the top into an empty hopper
   uint16_t fulls = 0;
   uint32_t prevFull = 0;
   float added = 0;
@@ -1654,20 +1650,12 @@ void recomputeCoal() {
     }
     fulls++;
     if (prevFull) spans.push_back({prevFull, r.time, added + kg, r.before() == 1});
-    if (r.before() == 1) empties.push_back(kg);
     prevFull = r.time;
     added = 0;
   }
   lastFullAt = prevFull;
   lastRefill = all.empty() ? RefillRecord{} : all.back();
-  // The size: the median of the last five, within half and twice the setting (1216 typed for 121.6 stays out).
   coalCap = settings.hopperKg > 0 ? settings.hopperKg : NAN;
-  if (!empties.empty()) {
-    std::vector<float> e(empties.end() - min<size_t>(5, empties.size()), empties.end());
-    std::nth_element(e.begin(), e.begin() + e.size() / 2, e.end());
-    float m = e[e.size() / 2];
-    if (isnan(coalCap) || (m >= 0.5f * coalCap && m <= 2 * coalCap)) coalCap = m;
-  }
   float put = 0, pushed = 0;
   uint16_t used = 0;
   for (size_t i = spans.size(); i-- > 0 && used < COAL_INTERVALS;) {
@@ -1725,7 +1713,6 @@ void updateCoal(uint32_t now) {
   if (!clockSet(now)) return;
   watchStarving(now);
   if (!settings.coalOn || isnan(strokeKg)) return;
-  if (ashAt && settings.ashOn) ashBurned = burnedOf(useBetween(ashAt, now));
   CoalUse day = useBetween(now - 86400, now), days = useBetween(now - 3 * 86400, now);
   if (day.heard >= 6 * 3600) coalPace = day.strokes * 3600 / day.heard;
   if (days.heard >= 24 * 3600) {
@@ -2360,7 +2347,7 @@ void handleNow() {
   j += '}';
   j += ",\"coal\":{\"k\":null,\"strokeKg\":"; j += jsonNumber(strokeKg, 4);   // kg per piston stroke, null = not
                                                     // learnt; k: v32's apps took the water's factor from it
-  j += ",\"cap\":";       j += jsonNumber(coalCap, 1);  // kg the hopper holds (from refills into an empty one)
+  j += ",\"cap\":";       j += jsonNumber(coalCap, 1);  // kg the hopper holds (the setting)
   j += ",\"strokeN\":";   j += strokeSamples;           // refill-to-refill intervals it was learnt from
   j += ",\"lastFull\":";  j += lastFullAt;
   j += ",\"anchor\":";    j += anchorAt;                // the hopper's content was last known then
@@ -2698,7 +2685,7 @@ void handleSettings() {
   for (size_t i = 0; i < SENSOR_COUNT; i++)
     if (settings.offset[i] != oldOffset[i]) shiftProbe(i, settings.offset[i] - oldOffset[i]);
   saveSettings();
-  recomputeCoal();                                       // the hopper's size may have changed
+  recomputeCoal();                                       // the hopper's size may have changed (it is the level's top)
   if (clockSet(time(nullptr))) updateCoal(time(nullptr));
   evaluateWarnings();
   handleNow();

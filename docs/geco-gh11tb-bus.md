@@ -147,8 +147,8 @@ What it hears:
   the feeder and every piston cycle pushes the same coal, so coal = `coal.strokeKg` x strokes (WorkHour.strokes). It is
   learnt from intervals between refills to the top in which the controller was heard at least 70 % of the time (20
   strokes or more): kg put in / strokes. A refill says how full the hopper was before; into an empty one its strokes
-  after the hopper ran empty do not count (the last run of two or more starved half hours before it, below), and
-  filling it to the top sets the hopper's size. Time the controller is not heard counts nothing (it was off). The
+  after the hopper ran empty do not count (the last run of two or more starved half hours before it, below). The
+  hopper's size is the setting (v34; v33 took it from refills into an empty hopper). Time the controller is not heard counts nothing (it was off). The
   pace is strokes per hour heard, the busier of the last 24 h and 72 h. Measured 2026-11-11: ~0.25 kg a stroke, a full
   hopper (~122 kg) ~485 strokes, 71-94 strokes a day; a stroke is ~30.2 s of the motor.
 - Starved burns (v33): coal fed heats the flue to its usual peak within minutes. Two half hours in a row with feeding

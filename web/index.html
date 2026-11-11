@@ -298,10 +298,6 @@ body.unpaired .pair{display:block}
 .coal .left.low{color:var(--red)}
 .coal .rows{margin-top:6px}
 .stale{opacity:.55;transition:opacity .3s}
-.ashrow{display:flex;align-items:center;gap:12px;padding:12px 0 2px;border-top:1px solid var(--line);margin-top:8px}
-.ashrow>div{flex:1;min-width:0}
-.ashrow .k{font-weight:600;font-size:15px}
-.ashrow .s{color:var(--faint);font-size:12px;margin-top:1px}
 .gauge.thin{height:6px;margin:7px 0 0}
 .mini{border:0;border-radius:999px;padding:8px 12px;background:var(--card2);color:var(--text);font-weight:600;font-size:13px;flex:none}
 .banner .bbtn{display:inline-block;margin-top:8px;border:0;border-radius:999px;padding:6px 12px;background:rgba(255,255,255,.14);color:inherit;font-weight:600;font-size:13px}
@@ -629,7 +625,7 @@ nav.tabs button.on{color:var(--text)}
     <div class="count"><span>Wiadra<small>po ok. 9,6 kg</small></span><div><button data-c="bucket" data-n="-1" aria-label="Wiadro mniej">−</button><b id="rbucket">0</b><button data-c="bucket" data-n="1" aria-label="Wiadro więcej">+</button></div></div>
   </div>
   <label class="rf"><span>Do pełna</span><input class="sw" type="checkbox" id="rfull" checked></label>
-  <div id="rlevelbox"><div class="hint">Ile było w zasobniku przed dosypaniem? Pomaga liczyć dokładnie.</div>
+  <div id="rlevelbox"><div class="hint" id="rlevelq">Ile było w zasobniku przed dosypaniem? Pomaga liczyć dokładnie.</div>
   <div class="when" id="rlevel"><button data-b="1" data-f="0">pusto</button><button data-b="2" data-f="0.25">¼</button><button data-b="3" data-f="0.5">½</button><button data-b="4" data-f="0.75">¾</button></div></div>
   <div class="when" id="rwhen"><button data-m="0">Teraz</button><button data-m="30">30 min temu</button><button data-m="60">1 godz. temu</button><button data-m="120">2 godz. temu</button></div>
   <label class="rf"><span id="rwhenl">Godzina</span><input type="time" id="rtime"></label>
@@ -755,6 +751,7 @@ const WARNINGS = [
 // Release notes: offered with a new version (release/publish.ps1 copies them into the manifest) and shown once
 // after the device updated itself. Every FW_VERSION needs its entry - the app's version is the highest key.
 const CHANGES = {
+  34: 'Pełny zasobnik to pojemność z Danych kotła – dosypania jej już nie zmieniają. W okienku „Dosypałem” przy dosypaniu do pełna jest tylko pytanie, czy zasobnik był pusty; ćwiartki tylko przy dosypywaniu nie do pełna. Popielnik usunięty – bez przypomnień i bez „Wyczyściłem”.',
   33: 'Węgiel liczony z posuwów tłoka podajnika – bez temperatur wody, które zaniżały zużycie (zasobnik bywał pusty, a aplikacja pokazywała zapas). Ile pcha jeden posuw, piec uczy się z dosypań do pełna. Przy dosypaniu zaznacz, ile było w zasobniku – „pusto” ustawia też pojemność zasobnika. Gdy palenia przestają rozgrzewać spaliny, przychodzi „Mało węgla”: zasobnik pusty albo węgiel zawisł. Karta Węgiel: na ile starczy, do kiedy i pasek dni.',
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
@@ -2322,18 +2319,7 @@ function renderCoal() {
   else if (c.level === null && !c.starved) hints.push(cap > 0 ? 'Stan zasobnika pojawi się po najbliższym dosypaniu do pełna.'
     : 'Wpisz w Ustawieniach → Dane kotła, ile kg mieści zasobnik, a pokażę, ile zostało i na ile starczy.');
   el.innerHTML = html + hints.map(t => `<div class="hint">${t}</div>`).join('')
-    + `<button class="btn primary" id="refill">${SVG(I_PLUS)}Dosypałem węgiel</button>` + ashRow();
-}
-
-// Ash pan: how far it is towards its reminder - days or kg burned, whichever is further.
-function ashRow() {
-  const st = now.settings, a = now.ash;
-  if (!st.ashOn || !a.at) return '';
-  const days = (tNow() - a.at) / 86400, frac = Math.max(days / st.ashDays, a.kg !== null ? a.kg / st.ashLimit : 0);
-  const col = now.warnings[5] || frac >= 1 ? 'red' : frac >= .75 ? 'orange' : 'green';
-  return `<div class="ashrow"><div><div class="k">Popielnik</div><div class="s">opróżniony ${when(a.at)}${a.kg !== null ? ` · spalono ~${massText(a.kg)}` : ''}</div>`
-    + `<div class="gauge thin"><i style="width:${Math.min(100, frac * 100).toFixed(1)}%;background:var(--${col})"></i></div></div>`
-    + `<button class="mini" id="ashdone">Wyczyściłem</button></div>`;
+    + `<button class="btn primary" id="refill">${SVG(I_PLUS)}Dosypałem węgiel</button>`;
 }
 
 // The last 7 full days against the 7 before them.
@@ -2451,8 +2437,20 @@ function setRefillKg(kg, keepCounts) {
   $('#rbucket').textContent = refillCount.bucket;
 }
 
-// How full the hopper was before: 0 not said, 1 empty, 2-4 quarters (the firmware's RefillRecord::before).
+// How full the hopper was before: 0 not said, 1 empty, 2-4 quarters (the firmware's RefillRecord::before). Filling to
+// the top, only whether it was empty is asked (the top is the top, the rest is a guess); the quarters are for refills
+// that stop short of it.
 const refillBefore = () => { const b = $('#rlevel button.on'); return b ? +b.dataset.b : 0; };
+function refillLevelChoices() {
+  const full = $('#rfull').checked;
+  $('#rlevelq').textContent = full ? 'Zasobnik był pusty? Zaznacz – wtedy liczę dokładniej.' : 'Ile było w zasobniku przed dosypaniem? Pomaga liczyć dokładnie.';
+  $$('#rlevel button').forEach(b => {
+    const quarter = b.dataset.b !== '1';
+    b.style.display = full && quarter ? 'none' : '';
+    if (full && quarter) b.classList.remove('on');
+  });
+  $('#rlevel button[data-b="1"]').textContent = full ? 'był pusty' : 'pusto';
+}
 
 // Starts empty: the kg are what went in, counted or weighed - an amount offered from the estimate would teach the
 // estimate back to itself. When the burns went cold (the hopper ran empty), "pusto" and a full hopper's worth.
@@ -2468,6 +2466,7 @@ function openRefill() {
     $('#rlevel button[data-b="1"]').classList.add('on');
     if (cap > 0) { setRefillKg(Math.round(cap)); refillSuggested = refillAmount(); }
   }
+  refillLevelChoices();
   setRefillAgo(0);
   $('#rmodal').classList.add('on');
 }
@@ -3317,7 +3316,7 @@ async function sendSubscription(sub) {
 
 const PUSH_KINDS = [
   ['alarm', 'Alarmy i czujniki', 'za gorąco, za zimno, czujnik nie odpowiada – i powrót do normy'],
-  ['warn', 'Ostrzeżenia', 'piec wygasa, sterownik nie w automacie, mało węgla, cofanie żaru, popielnik…'],
+  ['warn', 'Ostrzeżenia', 'piec wygasa, sterownik nie w automacie, mało węgla, cofanie żaru…'],
   ['power', 'Brak prądu', 'piec offline, zaniki prądu dłuższe niż minuta'],
   ['summary', 'Podsumowanie dnia', 'o 7:00: wczorajszy węgiel i koszt, godziny palenia, zaniki prądu'],
   ['water', 'Ciepła woda gotowa', 'bojler nagrzany – można się kąpać'],
@@ -3670,7 +3669,7 @@ const SET_PAGES = [
   { id: 'probes', title: 'Czujniki', icon: I_THERMO, cls: 'c-blue', status: () => (now.sensors[0] && now.sensors[0].addr !== undefined ? plural3(inUse().length) : '') },
   { id: 'limits', title: 'Progi alarmów', icon: I_THERMO, cls: 'c-red', status: () => { const n = now.sensors.filter(s => s.on !== false && (s.low !== null || s.high !== null)).length; return n ? plural3(n) : 'wyłączone'; } },
   { id: 'warn', title: 'Ostrzeżenia', icon: I_FLAME, cls: 'c-orange', status: () => {
-    const st = now.settings, on = [st.goOutOn, st.freezeOn, st.burnbackOn, st.coalOn && st.lowCoalOn, st.stalledOn, st.coalOn && st.ashOn].concat(now.geco ? [st.standbyOn] : []);
+    const st = now.settings, on = [st.goOutOn, st.freezeOn, st.burnbackOn, st.coalOn && st.lowCoalOn, st.stalledOn].concat(now.geco ? [st.standbyOn] : []);
     return `${on.filter(Boolean).length} z ${on.length} włączonych`;
   } },
   { id: 'boiler', title: 'Dane kotła', icon: I_BOILER, cls: 'c-orange', status: () => (now.settings.hopperKg > 0 ? `zasobnik ${kgText(now.settings.hopperKg)}` : 'uzupełnij') },
@@ -3763,8 +3762,7 @@ function renderSettings() {
       + warnBlock(2, st.burnbackOn, 'Gdy temperatura zasobnika rośnie szybko – żar może cofać się do węgla.', [['Wzrost szybszy niż', 'burnbackRate', st.burnbackRate, '°/h']])
       + warnBlock(4, st.stalledOn, 'Gdy po powrocie prądu piec dalej stygnie – sterownik mógł się sam nie uruchomić.', [])
       + (now.geco ? warnBlock(6, st.standbyOn, 'Gdy sterownik kotła od 2 minut stoi w czuwaniu zamiast w automacie – tak wraca po każdym zaniku prądu i trzeba nacisnąć A. Prosto z modułu RS485 przy sterowniku.', []) : '')
-      + (st.coalOn ? warnBlock(3, st.lowCoalOn, 'Gdy według szacunku węgla w zasobniku starczy już tylko na kilka godzin.', [['Starczy na mniej niż', 'lowCoalHours', st.lowCoalHours, 'godz.']])
-        + warnBlock(5, st.ashOn, 'Przypomina o opróżnieniu popielnika – co nastąpi wcześniej. Przycisk „Wyczyściłem” jest w karcie węgla.', [['Po spaleniu', 'ashLimit', st.ashLimit, 'kg'], ['Albo po', 'ashDays', st.ashDays, 'dniach']]) : '')
+      + (st.coalOn ? warnBlock(3, st.lowCoalOn, 'Gdy według szacunku węgla w zasobniku starczy już tylko na kilka godzin – albo gdy palenia przestają rozgrzewać spaliny (zasobnik pusty, węgiel zawisł).', [['Starczy na mniej niż', 'lowCoalHours', st.lowCoalHours, 'godz.']]) : '')
       + `<div class="warn-block"><div class="warn-head"><span class="badge c-green">${SVG(I_WATER)}</span>Ciepła woda gotowa</div>`
       + `<div class="warn-desc">Czujnik „Ciepła woda gotowa” w aplikacji Dom otwiera się, gdy bojler osiągnie tę temperaturę – z powiadomieniem wiadomo, że można się kąpać.</div>`
       + fieldRows([['Od temperatury bojlera', 'hotWater', st.hotWater, '°C']]) + '</div>';
@@ -3780,7 +3778,7 @@ function renderSettings() {
       + `<input class="sw" type="checkbox" data-k="coalOn" data-msg="Liczenie węgla" ${st.coalOn ? 'checked' : ''}></div>`
       + `<div class="warn-desc">Przycisk „Dosypałem” na ekranie głównym, zużycie i koszty, stan zasobnika i ostrzeżenie „Mało węgla”. Wyłączone – wszystko to znika.</div>`
       + fieldRows([['Cena węgla', 'coalPrice', st.coalPrice || null, 'zł/t', true]])
-      + `<div class="warn-desc">Dosypania wpisuje się w kilogramach – albo licząc łopaty (ok. ${n1(SHOVEL_KG)} kg) i wiadra (ok. ${n1(BUCKET_KG)} kg). Pojemność zasobnika jest w Danych kotła${now.coal.cap != null && Math.abs(now.coal.cap - st.hopperKg) >= 1 ? ` – z dosypań do pustego zasobnika wychodzi ~${kgText(now.coal.cap)} i tak liczę` : '; dosypanie do pełna pustego zasobnika ją poprawia'}.</div>`
+      + `<div class="warn-desc">Dosypania wpisuje się w kilogramach – albo licząc łopaty (ok. ${n1(SHOVEL_KG)} kg) i wiadra (ok. ${n1(BUCKET_KG)} kg). Pojemność zasobnika jest w Danych kotła – tyle to „do pełna”.</div>`
       + `<div class="warn-desc">${strokeKg() !== null ? `Węgiel liczę z posuwów tłoka podajnika: jeden posuw to ok. ${strokeKg().toLocaleString(LOCALE, { maximumFractionDigits: 2 })} kg – z dosypań do pełna, z każdym kolejnym dokładniej.`
         : 'Węgiel liczę z posuwów tłoka podajnika. Ile pcha jeden posuw, wyliczę z dwóch dosypań do pełna – potem z każdym kolejnym dokładniej.'}</div></div>`;
   }
@@ -4297,13 +4295,6 @@ function setup() {
   $('#boilerset').addEventListener('change', onWarnChange);
   $('#coalcard').onclick = async e => {
     if (e.target.closest('#refill')) openRefill();
-    if (e.target.id !== 'ashdone') return;
-    try {
-      now = fromDevice(await (await api('/api/ash', { method: 'POST' })).json());
-      journalAt = 0;
-      toast('Zapisano: popielnik opróżniony');
-    } catch (err) { toast('Nie udało się zapisać – brak połączenia z piecem?'); }
-    render();
   };
   $('#seasonset').addEventListener('change', onWarnChange);
   $('#remoteset').addEventListener('click', onRemoteClick);
@@ -4315,6 +4306,7 @@ function setup() {
     refillCount.shovel = refillCount.bucket = 0;
     $('#rshovel').textContent = $('#rbucket').textContent = 0;
   });
+  $('#rfull').addEventListener('change', refillLevelChoices);
   $('#rmodal .stepper').onclick = e => {
     const b = e.target.closest('button');
     if (!b) return;
