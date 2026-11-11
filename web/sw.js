@@ -92,7 +92,7 @@ function describe(a) {
     case 5: return { title: `${name}: wróciło do normy`, body: temp, tag: `alarm-${a.s}` };
     case 6: return { title: `${name}: czujnik nie odpowiada`, body: 'Sprawdź przewód czujnika.', tag: `fault-${a.s}` };
     case 7: return { title: `${name}: czujnik znów działa`, body: temp, tag: `fault-${a.s}` };
-    case 8: return { title: warn, body: a.s === 3 ? (v !== null ? `Zostało ~${kg(v)} węgla.` : '') : a.s === 5 ? (v !== null ? `Spalono ~${kg(v)} od opróżnienia.` : '')
+    case 8: return { title: warn, body: a.s === 3 ? (v !== null && v < 0 ? 'Palenia nie rozgrzewają spalin – zasobnik pusty albo węgiel zawisł.' : v !== null ? `Zostało ~${kg(v)} węgla.` : '') : a.s === 5 ? (v !== null ? `Spalono ~${kg(v)} od opróżnienia.` : '')
       : a.s === 6 ? `Naciśnij A na sterowniku – inaczej piec wygaśnie.${temp ? ` Piec ${temp}.` : ''}` : temp, tag: `warn-${a.s}` };
     case 9: return { title: `${warn} – koniec`, body: a.s === 3 ? '' : temp, tag: `warn-${a.s}` };
     case 14: return { title: 'Ciepła woda gotowa', body: `${name} ${temp} – można się kąpać.`, tag: 'water' };

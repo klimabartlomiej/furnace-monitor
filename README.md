@@ -32,12 +32,13 @@ ESP32 + four DS18B20 probes on a coal-fired furnace, straight into Apple Home - 
   home web app -> Ustawienia -> Dostęp zdalny -> "Otwórz na tym telefonie" (or copy the code to another phone).
 - **Coal** (feeder furnace with a hopper, coal carried up loose): "Dosypałem" in the web app records a refill in
   kilograms - typed, or counted in shovels (~3.2 kg) and buckets (~9.6 kg) - to the top or not, also for an
-  earlier hour, or from how full the hopper was before. Coal burned is taken as proportional to the feeder's
-  running time while the boiler controller is heard (S3 with the RS485 module, v30), otherwise to the heat output
-  (furnace minus return, summed per minute); both factors are learnt from refills to the top. Gives daily use in kg
-  and costs, the hopper level (its size in Ustawienia -> Dane kotła, 100 kg by default), time left, a "Mało
-  węgla" warning, a 30-day chart with the frost dependence and the season so far. Can be switched off in the
-  settings. Up to v21 coal was counted in buckets; v22 converts the stored data once (coalToKilograms).
+  earlier hour, with how full the hopper was before. Coal burned is counted in the feeder piston's strokes (S3 with
+  the RS485 module to the boiler controller, v33), each worth the kg learnt from refills to the top; the water's heat
+  is not used (v30-v32 leaned on it and under-counted). Gives daily use in kg and costs, the hopper level (its size in
+  Ustawienia -> Dane kotła; a refill to the top into an empty hopper sets it), how long it lasts with a strip of days,
+  a "Mało węgla" warning - also when the burns stop heating the flue - a 30-day chart with the frost dependence and
+  the season so far. Can be switched off in the settings. Up to v21 coal was counted in buckets; v22 converts the
+  stored data once (coalToKilograms).
 - **Hot water**: "Ciepła woda gotowa" - a notification (at most one an hour) when the boiler reaches its "ready"
   temperature.
 - **Summer mode**: switches off "too cold" on the furnace and the return plus the burning warnings; the web app

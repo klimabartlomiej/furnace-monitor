@@ -273,9 +273,24 @@ body.unpaired .pair{display:block}
 .bars.coalb button{background:rgba(163,168,179,.5)}
 .bars.coalb button.today{background:rgba(163,168,179,.25);outline-color:rgba(163,168,179,.8)}
 .bars.coalb button.sel{background:#c7cbd3}
-.coal .big{display:flex;align-items:baseline;gap:8px}
-.coal .big b{font-size:30px;font-weight:700;white-space:nowrap}
-.coal .big span{color:var(--muted);font-size:14px}
+.coal .cleft b{display:block;font-size:21px;font-weight:700;line-height:1.25;color:var(--green)}
+.coal .cleft.mid b{color:var(--orange)}
+.coal .cleft.low b{color:var(--red)}
+.coal .cleft span{display:block;color:var(--muted);font-size:14px;margin-top:2px}
+.coal .days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:12px 0 2px}
+.coal .days i{display:block;height:16px;border-radius:5px;background:var(--card2);overflow:hidden}
+.coal .days i b{display:block;height:100%;background:var(--green)}
+.coal .days .mid i b{background:var(--orange)}
+.coal .days .low i b{background:var(--red)}
+.coal .days span{display:block;text-align:center;font-size:11px;color:var(--faint);margin-top:4px;white-space:nowrap}
+.coal .days .mid span{color:var(--orange)}
+.coal .days .low span{color:var(--red)}
+.coal .cfill{display:flex;align-items:center;gap:10px;margin-top:10px;color:var(--muted);font-size:13px}
+.coal .cfill .gauge{flex:1;margin:0}
+.coal .cempty{display:flex;gap:12px;align-items:flex-start;color:var(--red)}
+.coal .cempty svg{width:26px;height:26px;flex:none;margin-top:2px}
+.coal .cempty b{display:block;font-size:20px}
+.coal .cempty span{display:block;color:var(--muted);font-size:14px;margin-top:2px}
 .gauge{height:12px;border-radius:6px;background:var(--card2);overflow:hidden;margin:10px 0 8px}
 .gauge i{display:block;height:100%;border-radius:6px;transition:width .4s}
 .coal .left{font-size:15px;font-weight:600;color:var(--green)}
@@ -614,8 +629,8 @@ nav.tabs button.on{color:var(--text)}
     <div class="count"><span>Wiadra<small>po ok. 9,6 kg</small></span><div><button data-c="bucket" data-n="-1" aria-label="Wiadro mniej">−</button><b id="rbucket">0</b><button data-c="bucket" data-n="1" aria-label="Wiadro więcej">+</button></div></div>
   </div>
   <label class="rf"><span>Do pełna</span><input class="sw" type="checkbox" id="rfull" checked></label>
-  <div id="rlevelbox"><div class="hint">Nie liczyłeś? Przed dosypaniem w zasobniku było:</div>
-  <div class="when" id="rlevel"><button data-f="0">prawie pusto</button><button data-f="0.25">¼</button><button data-f="0.5">½</button><button data-f="0.75">¾</button></div></div>
+  <div id="rlevelbox"><div class="hint">Ile było w zasobniku przed dosypaniem? Pomaga liczyć dokładnie.</div>
+  <div class="when" id="rlevel"><button data-b="1" data-f="0">pusto</button><button data-b="2" data-f="0.25">¼</button><button data-b="3" data-f="0.5">½</button><button data-b="4" data-f="0.75">¾</button></div></div>
   <div class="when" id="rwhen"><button data-m="0">Teraz</button><button data-m="30">30 min temu</button><button data-m="60">1 godz. temu</button><button data-m="120">2 godz. temu</button></div>
   <label class="rf"><span id="rwhenl">Godzina</span><input type="time" id="rtime"></label>
 </div><div class="acts"><button id="rno">Anuluj</button><button class="ok" id="ryes">Zapisz</button></div></div></div>
@@ -740,6 +755,7 @@ const WARNINGS = [
 // Release notes: offered with a new version (release/publish.ps1 copies them into the manifest) and shown once
 // after the device updated itself. Every FW_VERSION needs its entry - the app's version is the highest key.
 const CHANGES = {
+  33: 'Węgiel liczony z posuwów tłoka podajnika – bez temperatur wody, które zaniżały zużycie (zasobnik bywał pusty, a aplikacja pokazywała zapas). Ile pcha jeden posuw, piec uczy się z dosypań do pełna. Przy dosypaniu zaznacz, ile było w zasobniku – „pusto” ustawia też pojemność zasobnika. Gdy palenia przestają rozgrzewać spaliny, przychodzi „Mało węgla”: zasobnik pusty albo węgiel zawisł. Karta Węgiel: na ile starczy, do kiedy i pasek dni.',
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
   6: 'Karta „Co się działo” ze zdarzeniami od ostatniej wizyty (np. z nocy) – stuknięcie otwiera wykres z tego czasu. Zdarzenia zaznaczone na wykresach.',
   7: 'Dziennik zapisuje też koniec alarmu wyłączonego zmianą progu.',
@@ -1510,6 +1526,7 @@ function warningText(w) {
   }
   if (w === 3) {
     const c = now.coal;
+    if (c.starved) return `od ${hhmm(c.starved)} palenia nie rozgrzewają spalin – zasobnik pusty albo węgiel zawisł`;
     if (c.level === null) return 'w zasobniku zostało mało węgla';
     return `w zasobniku ~${kgText(c.level)}${c.hoursLeft !== null && c.hoursLeft < 1e8 ? `, starczy ${leftText(c.hoursLeft)}` : ''}`;
   }
@@ -1903,8 +1920,8 @@ function renderBoiler() {
   $('#gret').textContent = sens('return') ? deg(sens('return').temp) : '';
   $('#gflue').textContent = sens('flue') ? deg(sens('flue').temp) : '–';
   // The coal as the Węgiel card counts it, coloured the same way; unknown -> half a hopper, faint, no number.
-  const c = now.coal, set = now.settings, known = !!(c && c.level !== null && set.hopperKg > 0);
-  const full = known ? clamp(c.level / set.hopperKg, 0, 1) : 0.5, h = known ? c.hoursLeft : null;
+  const c = now.coal, set = now.settings, cap = coalCapKg(), known = !!(c && c.level !== null && cap > 0);
+  const full = known ? clamp(c.level / cap, 0, 1) : 0.5, h = known ? c.hoursLeft : null;
   const low = known && (full < .15 || (h !== null && h < set.lowCoalHours)), mid = known && !low && (full < .4 || (h !== null && h < 2 * set.lowCoalHours));
   for (const r of [$('#gcoal'), $('#gcoald')]) { r.setAttribute('y', 150 - 120 * full); r.setAttribute('height', 120 * full); }
   $('#gcoal').style.fill = low ? 'var(--red)' : mid ? 'var(--orange)' : '';
@@ -2185,25 +2202,24 @@ function workSum(t0, t1) {
 }
 
 // ---------------------------------------------------------------- coal and day summaries
-// Coal is counted in kilograms. The firmware learns coal.k - kg per degree-minute of furnace minus return water -
-// and, where the boiler controller is heard, coal.kf - kg per second of the feeder - from refills to the top (kf is
-// scaled from k until then, kfN = 0); coal used = kf x feeder seconds for the share of a day the controller was heard,
-// k x heat for the rest - for every day with the same factors, so the history stays consistent as they improve. A
-// refill is typed in kg or counted in shovels and buckets of about SHOVEL_KG / BUCKET_KG.
+// Coal is counted in kilograms, what burned in the feeder piston's strokes (the controller's bus): the firmware learns
+// coal.strokeKg - the kg one stroke pushes - from refills to the top (v32 had coal.kf per feeder second: a stroke is
+// STROKE_FEED_S of it). A day's coal = its strokes x strokeKg, every day with the same factor, so the history stays
+// consistent as it improves; no strokes, no coal - the water's heat is not used. A refill is typed in kg or counted in
+// shovels and buckets of about SHOVEL_KG / BUCKET_KG, with how full the hopper was before.
 
-const SHOVEL_KG = 3.2, BUCKET_KG = 9.6;
+const SHOVEL_KG = 3.2, BUCKET_KG = 9.6, STROKE_FEED_S = 30.2;
 const coalOn = () => now.settings.coalOn;
-const coalKg = heat => (now.coal.k !== null && heat !== null ? heat * now.coal.k : null);
-const coalKnown = () => now.coal.k !== null || now.coal.kf != null;
-// Coal of [t0, t1) with its heat (degree-minutes), counted as the firmware counts it: the feeder's seconds, and the
-// heat the controller was not heard through; null when nothing is known.
-function coalOf(t0, t1, heat) {
-  const c = now.coal, w = c.kf != null ? workSum(t0, t1) : null;
-  if (!w) return coalKg(heat);
-  return c.kf * w.feed + (c.k !== null && heat !== null ? c.k * Math.max(0, heat - w.heatHeard) : 0);
+const strokeKg = () => (now.coal.strokeKg != null ? now.coal.strokeKg : now.coal.kf != null && now.coal.kfN ? now.coal.kf * STROKE_FEED_S : null);
+const coalKnown = () => strokeKg() !== null;
+const coalCapKg = () => (now.coal.cap != null ? now.coal.cap : now.settings.hopperKg);
+// Coal of [t0, t1): the piston strokes of the controller's hours at the learnt kg per stroke; null without either.
+function coalOf(t0, t1) {
+  const k = strokeKg(), w = k !== null ? workSum(t0, t1) : null;
+  return w ? w.strokes * k : null;
 }
 const dayEnd = t => midnight(t + 36 * 3600);
-const kgOf = d => coalOf(d.t, d.today ? tNow() : dayEnd(d.t), d.heat);     // a day of lastDays / dayList / days
+const kgOf = d => coalOf(d.t, d.today ? tNow() : dayEnd(d.t));     // a day of lastDays / dayList / days
 const seasonStart = () => { const d = new Date(); return new Date(d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1, 8, 1) / 1000; };
 const coalCost = kg => (kg !== null && now.settings.coalPrice > 0 ? kg * now.settings.coalPrice / 1000 : null);
 // 2,5 kg below 10, whole kilograms above, tonnes from one.
@@ -2243,25 +2259,6 @@ function outdoorMean(ds, src = outdoor.hourly) {
   return p.length >= 12 ? p.reduce((a, q) => a + q[1], 0) / p.length : null;
 }
 
-// Buckets a day as a straight line of the day's mean outdoor temperature, fitted to the last 30 full days.
-// Colder has to mean more coal: with the wrong slope or too little spread in temperature, the average day.
-function coalModel() {
-  const pts = lastDays(31).filter(x => !x.today).map(x => [outdoorMean(x.t), kgOf(x)]).filter(p => p[0] !== null && p[1] !== null);
-  if (pts.length < 7) return null;
-  const n = pts.length, xs = pts.map(p => p[0]), mx = xs.reduce((a, v) => a + v, 0) / n, my = pts.reduce((a, p) => a + p[1], 0) / n;
-  const sxx = pts.reduce((a, p) => a + (p[0] - mx) ** 2, 0), sxy = pts.reduce((a, p) => a + (p[0] - mx) * (p[1] - my), 0);
-  const b = Math.max(...xs) - Math.min(...xs) >= 3 && sxy < 0 ? sxy / sxx : 0;
-  return t => Math.max(0, my + b * (t - mx));
-}
-
-// Tomorrow's coal from the weather forecast: {temp, kg}, or null without a forecast or a model.
-function coalTomorrow() {
-  const d = new Date(midnight(tNow()) * 1000);
-  d.setDate(d.getDate() + 1);
-  const temp = outdoorMean(d / 1000, outdoor.ahead), model = temp !== null && coalKnown() ? coalModel() : null;
-  return model ? { temp, kg: model(temp) } : null;
-}
-
 function whenAhead(t) {
   const d = Math.round((midnight(t) - midnight(tNow())) / 86400);
   return (d === 0 ? 'dziś ' : d === 1 ? 'jutro ' : day(t) + ', ') + hhmm(t);
@@ -2269,43 +2266,61 @@ function whenAhead(t) {
 
 // "na ok. 1 dzień 6 godz. · do jutro 14:20" from hours left at the current pace.
 function leftText(h) {
-  if (h > 14 * 24) return 'na ponad 2 tygodnie';
+  return h > 14 * 24 ? 'na ponad 2 tygodnie' : `na ${leftSpan(h)} · do ${whenAhead(tNow() + h * 3600)}`;
+}
+function leftSpan(h) {
+  if (h > 14 * 24) return 'ponad 2 tygodnie';
   const hr = Math.round(h), d = Math.floor(hr / 24), r = hr % 24;
-  const span = h < 1 ? 'mniej niż godzinę' : d ? `${d} ${plural(d, 'dzień', 'dni', 'dni')}${r ? ` ${r} godz.` : ''}` : `${hr} godz.`;
-  return `na ok. ${span} · do ${whenAhead(tNow() + h * 3600)}`;
+  return h < 1 ? 'mniej niż godzinę' : `ok. ${d ? `${d} ${plural(d, 'dzień', 'dni', 'dni')}${r ? ` ${r} godz.` : ''}` : `${hr} godz.`}`;
 }
 
+// A week of days from today, each filled as far as the coal reaches into it at the current pace: until which day it
+// lasts, at a glance. The day it runs out is orange, red when the card says the coal is low.
+function dayStrip(h, low) {
+  const t = tNow(), out = t + h * 3600, cells = [];
+  let d = midnight(t);
+  for (let k = 0; k < 7; k++) {
+    const next = midnight(d + 36 * 3600), a = Math.max(t, d), part = clamp((out - a) / (next - a), 0, 1);
+    const label = k === 0 ? 'dziś' : new Date(d * 1000).toLocaleDateString(LOCALE, { weekday: 'short' });
+    cells.push(`<div class="${part < 1 ? (low ? 'low' : 'mid') : ''}"><i><b style="width:${(part * 100).toFixed(0)}%"></b></i><span>${label}</span></div>`);
+    if (part < 1 && k < 6) { while (cells.length < 7) cells.push('<div></div>'); break; }
+    d = next;
+  }
+  return `<div class="days">${cells.join('')}</div>`;
+}
+
+// Strokes as words: "47 posuwów".
+const strokesText = n => `${Math.round(n)} ${plural(Math.round(n), 'posuw', 'posuwy', 'posuwów')}`;
+
+// The hopper: how long the coal lasts, the strip of days, what is in it; today's coal and the pace. When the burns
+// stopped heating the flue (the firmware's starved watch), that first - whatever the count says.
 function renderCoal() {
   const el = $('#coalcard');
   if (!coalOn() || !now.settings.heating) { el.style.display = 'none'; return; }
   el.style.display = '';
-  const c = now.coal, st = now.settings;
+  const c = now.coal, st = now.settings, k = strokeKg(), cap = coalCapKg();
   let html = `<div class="card-h">Węgiel${c.lastRefill ? `<small>dosypano ${when(c.lastRefill[0])} · ${kgIn(c.lastRefill[1] / 10)}</small>` : ''}</div>`;
-  if (c.level !== null) {
-    const p = clamp(c.level / st.hopperKg, 0, 1), h = c.hoursLeft;
+  if (c.starved) {
+    html += `<div class="cempty">${SVG(I_WARN)}<div><b>Zasobnik pusty?</b><span>Od ${hhmm(c.starved)} palenia nie rozgrzewają spalin – węgiel się skończył albo zawisł.</span></div></div>`;
+  } else if (c.level !== null && cap > 0) {
+    const h = c.hoursLeft !== null && c.hoursLeft < 1e8 ? c.hoursLeft : null, p = clamp(c.level / cap, 0, 1);
     const low = p < .15 || (h !== null && h < st.lowCoalHours), mid = !low && (p < .4 || (h !== null && h < 2 * st.lowCoalHours));
-    html += `<div class="big"><b class="num">~${kgText(c.level)}</b><span>${Math.round(p * 100)}% zasobnika (${kgText(st.hopperKg)})</span></div>`
-      + `<div class="gauge"><i style="width:${(p * 100).toFixed(1)}%;background:var(--${low ? 'red' : mid ? 'orange' : 'green'})"></i></div>`
-      + (h !== null ? `<div class="left ${low ? 'low' : mid ? 'mid' : ''}">Starczy ${leftText(h)}</div>` : '');
+    if (h !== null) html += `<div class="cleft ${low ? 'low' : mid ? 'mid' : ''}"><b>Starczy na ${leftSpan(h)}</b>`
+      + `${h <= 14 * 24 ? `<span>do ${whenAhead(tNow() + h * 3600)}</span>` : ''}</div>` + dayStrip(h, low);
+    html += `<div class="cfill"><div class="gauge thin"><i style="width:${(p * 100).toFixed(1)}%;background:var(--${low ? 'red' : mid ? 'orange' : 'green'})"></i></div>`
+      + `<span>~${kgText(c.level)} z ${kgText(cap)}</span></div>`;
   }
-  if (coalKnown()) {
-    const m = midnight(tNow()), kg = coalOf(m, tNow(), heatSince(m, tNow()));
-    const next = coalTomorrow();
-    html += `<div class="rows">${row('Dziś', coalText(kg))}`
-      + `${c.rate !== null ? row('Tempo', `~${kgText(c.rate * 24)} na dobę`, 'z ostatnich 24 godzin') : ''}`
-      + `${next ? row('Jutro', coalText(next.kg), `prognoza: średnio ${n1(next.temp)}° na zewnątrz`) : ''}</div>`;
+  if (k !== null) {
+    const m = midnight(tNow()), w = workSum(m, tNow() + 1), pace = c.pace != null ? c.pace : c.rate != null ? c.rate / k : null;
+    html += `<div class="rows">${w ? row('Dziś', coalText(w.strokes * k), strokesText(w.strokes)) : ''}`
+      + `${pace !== null ? row('Tempo', `~${kgText(pace * 24 * k)} na dobę`, `${strokesText(pace * 24)} na dobę`) : ''}</div>`;
   }
   const hints = [];
-  if (c.kf != null) {
-    const w = workSum(tNow() - 7 * 86400, tNow() + 1), stroke = w && w.strokes >= 10 ? c.kf * w.feed / w.strokes : null;
-    hints.push(`Liczę z pracy podajnika${stroke !== null ? ` – jeden cykl tłoka to ~${kgText(stroke)} węgla` : ''}. `
-      + (c.kfN ? 'Skala nauczona z dosypań do pełna.' : 'Skala na razie z temperatur – dokładna po dwóch dosypaniach do pełna.'));
-  }
-  if (!coalKnown()) hints.push(c.lastFull ? 'Po następnym dosypaniu do pełna będę wiedzieć, ile węgla schodzi – pokażę zużycie i stan zasobnika.'
-    : 'Przy każdym dosypaniu stuknij „Dosypałem”. Po dwóch dosypaniach do pełna pokażę zużycie i stan zasobnika.');
-  else if (c.level === null) hints.push(st.hopperKg > 0 ? 'Stan zasobnika pojawi się po najbliższym dosypaniu do pełna.'
+  if (!now.geco) hints.push('Węgiel liczę z posuwów tłoka podajnika – potrzebne jest połączenie ze sterownikiem kotła (płytka S3 z modułem RS485).');
+  else if (k === null) hints.push(c.lastFull ? 'Liczę węgiel z posuwów tłoka. Po następnym dosypaniu do pełna będę wiedzieć, ile pcha jeden posuw – pokażę zużycie i na ile starczy.'
+    : 'Liczę węgiel z posuwów tłoka. Przy każdym dosypaniu stuknij „Dosypałem”. Po dwóch dosypaniach do pełna pokażę zużycie i na ile starczy.');
+  else if (c.level === null && !c.starved) hints.push(cap > 0 ? 'Stan zasobnika pojawi się po najbliższym dosypaniu do pełna.'
     : 'Wpisz w Ustawieniach → Dane kotła, ile kg mieści zasobnik, a pokażę, ile zostało i na ile starczy.');
-  if (coalKnown() && !(st.coalPrice > 0)) hints.push('Wpisz cenę węgla w Ustawieniach, a pokażę koszty.');
   el.innerHTML = html + hints.map(t => `<div class="hint">${t}</div>`).join('')
     + `<button class="btn primary" id="refill">${SVG(I_PLUS)}Dosypałem węgiel</button>` + ashRow();
 }
@@ -2335,8 +2350,12 @@ function renderWeek() {
   const bh = sum(cur, x => x.burn) / 60, pbh = sum(prev, x => x.burn) / 60;
   rows.push(row('Piec pracował', `${Math.round(bh)} godz.${delta(avg(cur, x => x.burn), avg(prev, x => x.burn), false)}`));
   if (coalOn() && coalKnown()) {
-    const kg = sum(cur, kgOf);
-    rows.push(row('Węgiel', `${coalText(kg)}${delta(avg(cur, kgOf), avg(prev, kgOf), true)}`, `średnio ${kgText(kg / have(cur))} dziennie`));
+    const known = a => a.filter(x => kgOf(x) !== null), kgAvg = a => sum(known(a), kgOf) / known(a).length;
+    if (known(cur).length) {
+      const kg = sum(known(cur), kgOf);
+      rows.push(row('Węgiel', `${coalText(kg)}${known(prev).length >= 5 ? delta(kgAvg(cur), kgAvg(prev), true) : ''}`,
+        `średnio ${kgText(kgAvg(cur))} dziennie${known(cur).length < cur.length ? ` · z ${known(cur).length} dni` : ''}`));
+    }
   }
   const outs = cur.map(x => outdoorMean(x.t)).filter(v => v !== null), pouts = prev.map(x => outdoorMean(x.t)).filter(v => v !== null);
   if (outs.length) {
@@ -2354,13 +2373,16 @@ function renderCoalChart() {
   const card = $('#coalchartcard');
   if (!coalOn()) { card.style.display = 'none'; return; }
   card.style.display = '';
-  if (!coalKnown()) { $('#coalchart').innerHTML = '<div class="empty">Wykres pojawi się po dwóch dosypaniach do pełna</div>'; return; }
+  if (!coalKnown()) { $('#coalchart').innerHTML = '<div class="empty">Wykres pojawi się, gdy będę wiedzieć, ile węgla pcha jeden posuw tłoka – po dwóch dosypaniach do pełna</div>'; return; }
   const list = lastDays(30).map(x => Object.assign(x, { kg: kgOf(x), out: outdoorMean(x.t) }));
   const full = list.filter(x => !x.today && x.kg !== null);
   if (!list.some(x => x.kg)) { $('#coalchart').innerHTML = '<div class="empty">Zużycie pojawi się po pierwszej dobie</div>'; return; }
   const total = list.reduce((a, x) => a + (x.kg || 0), 0), max = Math.max(5, ...list.map(x => x.kg || 0));
   const cost = coalCost(total);
-  let html = `<div class="stats three"><div><span>30 DNI</span><b class="num">${massText(total)}</b></div>`
+  // Counted from the first day the strokes say anything about (the days before v33's hours count nothing).
+  const firstKg = list.find(x => x.kg !== null), since = firstKg && firstKg.t > list[0].t
+    ? `OD ${new Date(firstKg.t * 1000).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' }).toUpperCase()}` : '30 DNI';
+  let html = `<div class="stats three"><div><span>${since}</span><b class="num">${massText(total)}</b></div>`
     + `<div><span>KOSZT</span><b class="num">${cost !== null ? zlText(cost) : '–'}</b></div>`
     + `<div><span>NA DZIEŃ</span><b class="num">${full.length ? kgText(full.reduce((a, x) => a + x.kg, 0) / full.length) : '–'}</b></div></div>`
     + `<div class="bars coalb">${list.map((x, k) => `<button data-k="${k}" class="${x.today ? 'today' : ''}" style="height:${x.kg ? Math.max(2, x.kg / max * 100) : 0}%"></button>`).join('')}</div>`
@@ -2376,11 +2398,11 @@ function renderCoalChart() {
   }
 
   // Heating season from 1 September, against the same stretch of the last season when the history has it.
-  const start = seasonStart(), m = midnight(tNow());
-  const season = days.filter(x => x.t >= start && x.t < m).reduce((a, x) => a + (kgOf(x) || 0), 0) + (coalOf(m, tNow(), heatSince(m, tNow())) || 0);
-  const lastYear = days.filter(x => x.t >= start - 365 * 86400 && x.t < tNow() - 365 * 86400);
-  const before = lastYear.length >= 7 ? lastYear.reduce((a, x) => a + (kgOf(x) || 0), 0) : null;
-  html += `<div class="rows" style="margin-top:12px">${row('Sezon od 1 września', coalText(season), before !== null ? `rok wcześniej w tym czasie ~${massText(before)}` : '')}</div>`;
+  const start = seasonStart(), m = midnight(tNow()), counted = days.filter(x => x.t >= start && x.t < m && kgOf(x) !== null);
+  const season = counted.reduce((a, x) => a + kgOf(x), 0) + (coalOf(m, tNow()) || 0), from = counted.length ? counted[0].t : m;
+  const lastYear = days.filter(x => x.t >= start - 365 * 86400 && x.t < tNow() - 365 * 86400 && kgOf(x) !== null);
+  const before = lastYear.length >= 7 && from <= start + 86400 ? lastYear.reduce((a, x) => a + kgOf(x), 0) : null;
+  html += `<div class="rows" style="margin-top:12px">${row(from > start + 86400 ? `Od ${day(from)}` : 'Sezon od 1 września', coalText(season), before !== null ? `rok wcześniej w tym czasie ~${massText(before)}` : '')}</div>`;
   $('#coalchart').innerHTML = html;
   $('#coalchart .bars').onclick = e => {
     const b = e.target.closest('button');
@@ -2429,20 +2451,24 @@ function setRefillKg(kg, keepCounts) {
   $('#rbucket').textContent = refillCount.bucket;
 }
 
-function refillAmountLabel() {
-  // The fill-level shortcut needs the hopper size and only makes sense when filling up.
-  $('#rlevelbox').style.display = $('#rfull').checked && now.settings.hopperKg > 0 ? '' : 'none';
-}
+// How full the hopper was before: 0 not said, 1 empty, 2-4 quarters (the firmware's RefillRecord::before).
+const refillBefore = () => { const b = $('#rlevel button.on'); return b ? +b.dataset.b : 0; };
 
-// Starts with what should fit to the top by the estimate, else with the last refill.
+// Starts empty: the kg are what went in, counted or weighed - an amount offered from the estimate would teach the
+// estimate back to itself. When the burns went cold (the hopper ran empty), "pusto" and a full hopper's worth.
+let refillSuggested = null;
 function openRefill() {
-  const c = now.coal, cap = now.settings.hopperKg;
-  const guess = c.level !== null && cap > 0 ? cap - c.level : c.lastRefill ? c.lastRefill[1] / 10 : 10;
-  setRefillKg(Math.round(guess));
+  const c = now.coal, cap = coalCapKg();
+  setRefillKg(0);
+  $('#ramt').value = '';
+  refillSuggested = null;
   $('#rfull').checked = true;
   $$('#rlevel button').forEach(b => b.classList.remove('on'));
+  if (c.starved) {
+    $('#rlevel button[data-b="1"]').classList.add('on');
+    if (cap > 0) { setRefillKg(Math.round(cap)); refillSuggested = refillAmount(); }
+  }
   setRefillAgo(0);
-  refillAmountLabel();
   $('#rmodal').classList.add('on');
 }
 
@@ -2454,7 +2480,9 @@ async function saveRefill() {
   if (btn.disabled) return;
   btn.disabled = true;
   try {
-    now = fromDevice(await (await api('/api/refill', { method: 'POST', body: new URLSearchParams(Object.assign({ kg }, { full: $('#rfull').checked ? 1 : 0, time: t })) })).json());
+    // tag: this entry's mark - a retry through the relay carries the same and is not added twice.
+    const tag = 1 + Math.floor(Math.random() * 31);
+    now = fromDevice(await (await api('/api/refill', { method: 'POST', body: new URLSearchParams({ kg, full: $('#rfull').checked ? 1 : 0, before: refillBefore(), tag, time: t }) })).json());
     $('#rmodal').classList.remove('on');
     refillsAt = 0;
     toast(`Zapisano: ${kgIn(kg)}, ${when(t)}`);
@@ -2754,7 +2782,7 @@ function dayList() {
 // Totals of some days: coal in kg (null without the coal count), burning minutes, days with an hour or more of
 // burning, the day with the most coal, the furnace at its hottest.
 function totals(list) {
-  const s = { n: list.length, heat: 0, burn: 0, burnDays: 0, top: null, topKg: 0, hot: null }, coal = coalOn() && coalKnown();
+  const s = { n: list.length, heat: 0, burn: 0, burnDays: 0, top: null, topKg: 0, hot: null, kgFrom: null, kgN: 0 }, coal = coalOn() && coalKnown();
   let kg = 0;
   for (const d of list) {
     s.heat += d.heat || 0;
@@ -2762,6 +2790,8 @@ function totals(list) {
     if (d.burn >= 60) s.burnDays++;
     const k = coal ? kgOf(d) : null;
     kg += k || 0;
+    if (k !== null && s.kgFrom === null) s.kgFrom = d.t;
+    if (k !== null) s.kgN++;
     if (k && k > s.topKg) { s.top = d; s.topKg = k; }
     const f = d.v && d.v[FURNACE];
     if (f && (!s.hot || f[2] > s.hot.v)) s.hot = { v: f[2], t: d.t };
@@ -2834,7 +2864,8 @@ function paintMonths() {
   const peak = months.reduce((a, x) => (val(x.s) > (a ? val(a.s) : 0) ? x : a), null), max = peak ? val(peak.s) : 0;
   const stat = (k, v) => `<div><span>${k}</span><b class="num">${v}</b></div>`;
   let html = `<div class="mnav"><button data-go="${monthSel - 12}" ${s0 <= seasonOf(first) ? 'disabled' : ''} aria-label="Poprzedni sezon">‹</button>`
-    + `<h2>Sezon ${y}/${String(y + 1).slice(2)}<small>${cur < s0 + 12 ? 'od 1 września do dziś' : `wrzesień ${y} – sierpień ${y + 1}`}</small></h2>`
+    + `<h2>Sezon ${y}/${String(y + 1).slice(2)}<small>${cur < s0 + 12 ? 'od 1 września do dziś' : `wrzesień ${y} – sierpień ${y + 1}`}`
+    + `${metric === 'coal' && st.kgFrom !== null && st.kgFrom > new Date(y, 8, 2) / 1000 ? ` · węgiel od ${day(st.kgFrom)}` : ''}</small></h2>`
     + `<button data-go="${monthSel + 12}" ${s0 + 12 > cur ? 'disabled' : ''} aria-label="Następny sezon">›</button></div>`
     + `<div class="stats three">${coal ? stat('WĘGIEL', massText(st.coal)) + stat('KOSZT', coalCost(st.coal) !== null ? zlText(coalCost(st.coal)) : '–')
       : stat('DNI PALENIA', st.burnDays)}${stat('PALENIE', `${Math.round(st.burn / 60)} h`)}${coal ? '' : stat('DNI Z DANYMI', st.n)}</div>`
@@ -2848,9 +2879,10 @@ function paintMonths() {
     + `<div class="caption">${months.filter(x => val(x.s) > 0).length >= 2 ? `Najwięcej: ${MONTH_NAMES[peak.m % 12].toLowerCase()} – ${valText(max)}` : 'Stuknij miesiąc, aby zobaczyć szczegóły'}</div>`;
   const span = (cur < s0 + 12 ? tNow() : monthStart(s0 + 12)) - monthStart(s0);
   const before = list.filter(d => d.t >= monthStart(s0 - 12) && d.t < monthStart(s0 - 12) + span), bt = totals(before);
-  if (before.length >= Math.max(7, .8 * st.n))
+  const per = x => (metric === 'coal' ? x.kgN : x.n);       // coal: only the days the strokes count
+  if (before.length >= Math.max(7, .8 * st.n) && per(bt) >= Math.max(7, .8 * per(st)))
     html += `<div class="rows" style="margin-top:12px">${row(cur < s0 + 12 ? 'Rok wcześniej w tym czasie' : 'Sezon wcześniej', valText(val(bt)),
-      `ten sezon ${deltaChip(val(st) / st.n, val(bt) / bt.n, metric === 'coal')}`)}</div>`;
+      `ten sezon ${deltaChip(val(st) / per(st), val(bt) / per(bt), metric === 'coal')}`)}</div>`;
   $('#seasoncard').innerHTML = html;
 
   // The month: its days as bars (tap = that day), totals, what happened, against the same month a year before.
@@ -2879,15 +2911,21 @@ function paintMonths() {
   const yb = list.filter(d => d.m === monthSel - 12), ys = totals(yb), cmp = yb.length >= Math.max(7, .8 * own.length);
   const yearAgo = (a, b, judge) => (cmp ? deltaChip(a / ms.n, b / ys.n, judge) : '');
   const rows = [];
-  if (coal) {
-    rows.push(row('Węgiel', `~${massText(ms.coal)}${yearAgo(ms.coal, ys.coal, true)}`, `średnio ${kgText(ms.coal / ms.n)} dziennie`));
-    if (coalCost(ms.coal) !== null) rows.push(row('Koszt', zlText(coalCost(ms.coal)), `średnio ${zlText(coalCost(ms.coal) / ms.n)} dziennie`));
+  if (coal && ms.kgN) {
+    const kgCmp = ys.kgN >= Math.max(7, .8 * ms.kgN) ? deltaChip(ms.coal / ms.kgN, ys.coal / ys.kgN, true) : '';
+    const part = ms.kgN < ms.n ? ` · z ${ms.kgN} ${plural(ms.kgN, 'dnia', 'dni', 'dni')}` : '';
+    rows.push(row('Węgiel', `~${massText(ms.coal)}${kgCmp}`, `średnio ${kgText(ms.coal / ms.kgN)} dziennie${part}`));
+    if (coalCost(ms.coal) !== null) rows.push(row('Koszt', zlText(coalCost(ms.coal)), `średnio ${zlText(coalCost(ms.coal) / ms.kgN)} dziennie`));
     if (ms.top) {
       const o = outDay(ms.top.t);
       rows.push(row('Najwięcej w jeden dzień', `~${kgText(ms.topKg)}`, `${day(ms.top.t)}${o ? ` · na zewnątrz ${n1(o[1])}°` : ''}`));
     }
     const fills = refills.filter(r => r[0] >= t0 && r[0] < t1);
     if (fills.length) rows.push(row('Dosypano', `${fills.length} ${plural(fills.length, 'raz', 'razy', 'razy')}`, `razem ${massText(fills.reduce((a, r) => a + r[1] / 10, 0))}`));
+  }
+  if (coal) {
+    const fills = refills.filter(r => r[0] >= t0 && r[0] < t1);
+    if (fills.length && !ms.kgN) rows.push(row('Dosypano', `${fills.length} ${plural(fills.length, 'raz', 'razy', 'razy')}`, `razem ${massText(fills.reduce((a, r) => a + r[1] / 10, 0))}`));
   }
   rows.push(row('Piec pracował', `${Math.round(ms.burn / 60)} godz.${coal ? '' : yearAgo(ms.burn, ys.burn, false)}`, `palił ${ms.burnDays} z ${ms.n} ${plural(ms.n, 'dnia', 'dni', 'dni')}`));
   const mw = workSum(t0, t1);
@@ -2917,7 +2955,7 @@ function showMonthDay(k) {
   $$('#monthcard .mdays button').forEach(q => q.classList.toggle('sel', +q.dataset.k === k));
   const o = d.none ? null : outDay(d.t), coal = coalOn() && coalKnown();
   $('#mdaycap').textContent = d.none ? `${day(d.t)}: brak danych`
-    : `${day(d.t)}: ${coal ? `${coalText(kgOf(d))} · ` : ''}palenie ${dur((d.burn || 0) * 60)}${o ? ` · na zewnątrz ${n1(o[1])}°` : ''}${d.today ? ' (do teraz)' : ''}`;
+    : `${day(d.t)}: ${coal && kgOf(d) !== null ? `${coalText(kgOf(d))} · ` : ''}palenie ${dur((d.burn || 0) * 60)}${o ? ` · na zewnątrz ${n1(o[1])}°` : ''}${d.today ? ' (do teraz)' : ''}`;
 }
 
 // ---------------------------------------------------------------- journal
@@ -2939,7 +2977,7 @@ function eventView(e) {
     case 5: return ['c-green', I_OK, `${name}: wróciło do normy`, temp.slice(3)];
     case 6: return ['c-red', I_PROBE, `${name}: czujnik nie odpowiada`, ''];
     case 7: return ['c-green', I_OK, `${name}: czujnik znów działa`, temp.slice(3)];
-    case 8: return ['c-orange', (WARNINGS[i] || WARNINGS[0]).icon, (WARNINGS[i] || WARNINGS[0]).name, i === 3 ? (v !== null ? `zostało ~${kgText(v)}` : '') : i === 5 ? (v !== null ? `spalono ~${kgText(v)}` : '') : temp.slice(3)];
+    case 8: return ['c-orange', (WARNINGS[i] || WARNINGS[0]).icon, (WARNINGS[i] || WARNINGS[0]).name, i === 3 ? (v !== null && v < 0 ? 'palenia nie rozgrzewają spalin – zasobnik pusty albo węgiel zawisł' : v !== null ? `zostało ~${kgText(v)}` : '') : i === 5 ? (v !== null ? `spalono ~${kgText(v)}` : '') : temp.slice(3)];
     case 9: return ['c-green', I_OK, `${(WARNINGS[i] || WARNINGS[0]).name} – koniec`, i === 3 || i === 5 ? '' : temp.slice(3)];
     case EV_SEASON: return raw ? ['c-orange', I_FLAME, 'Sezon grzewczy włączony', i ? 'sam – piec pali od 2 godzin' : '']
       : ['c-blue', I_SUN, 'Tryb lato', 'alarmy „za zimno” pieca i powrotu wyciszone'];
@@ -2961,7 +2999,7 @@ function renderJournal() {
   Promise.all([loadJournal(), loadRefills()]).then(() => {
     // Refills go in by their time; the one entered last can be taken back.
     const items = journal.map(e => ({ t: e[0], view: eventView(e) }))
-      .concat(refills.map((r, k) => ({ t: r[0], undo: k === refills.length - 1 && coalOn(), view: ['c-gray', I_COAL, 'Dosypano węgiel', `${kgIn(r[1] / 10)}${r[2] ? ' · do pełna' : ''}`] })))
+      .concat(refills.map((r, k) => ({ t: r[0], undo: k === refills.length - 1 && coalOn(), view: ['c-gray', I_COAL, 'Dosypano węgiel', `${kgIn(r[1] / 10)}${r[2] ? ' · do pełna' : ''}${r[3] ? ` · było ${['', 'pusto', '¼', '½', '¾'][r[3]]}` : ''}`] })))
       .sort((a, b) => b.t - a.t);
     if (!items.length) { $('#events').innerHTML = '<div class="empty">Nic się jeszcze nie wydarzyło</div>'; return; }
     let html = '', lastDay = '';
@@ -3742,9 +3780,9 @@ function renderSettings() {
       + `<input class="sw" type="checkbox" data-k="coalOn" data-msg="Liczenie węgla" ${st.coalOn ? 'checked' : ''}></div>`
       + `<div class="warn-desc">Przycisk „Dosypałem” na ekranie głównym, zużycie i koszty, stan zasobnika i ostrzeżenie „Mało węgla”. Wyłączone – wszystko to znika.</div>`
       + fieldRows([['Cena węgla', 'coalPrice', st.coalPrice || null, 'zł/t', true]])
-      + `<div class="warn-desc">Dosypania wpisuje się w kilogramach – albo licząc łopaty (ok. ${n1(SHOVEL_KG)} kg) i wiadra (ok. ${n1(BUCKET_KG)} kg). Pojemność zasobnika jest w Danych kotła.</div>`
-      + `<div class="warn-desc">${c.k !== null ? `Zużycie wyliczone z ${c.samples + 1} dosypań do pełna – z każdym kolejnym dokładniej.`
-        : 'Zużycie liczę z dosypań do pełna – potrzebne są dwa, potem z każdym kolejnym dokładniej.'}</div></div>`;
+      + `<div class="warn-desc">Dosypania wpisuje się w kilogramach – albo licząc łopaty (ok. ${n1(SHOVEL_KG)} kg) i wiadra (ok. ${n1(BUCKET_KG)} kg). Pojemność zasobnika jest w Danych kotła${now.coal.cap != null && Math.abs(now.coal.cap - st.hopperKg) >= 1 ? ` – z dosypań do pustego zasobnika wychodzi ~${kgText(now.coal.cap)} i tak liczę` : '; dosypanie do pełna pustego zasobnika ją poprawia'}.</div>`
+      + `<div class="warn-desc">${strokeKg() !== null ? `Węgiel liczę z posuwów tłoka podajnika: jeden posuw to ok. ${strokeKg().toLocaleString(LOCALE, { maximumFractionDigits: 2 })} kg – z dosypań do pełna, z każdym kolejnym dokładniej.`
+        : 'Węgiel liczę z posuwów tłoka podajnika. Ile pcha jeden posuw, wyliczę z dwóch dosypań do pełna – potem z każdym kolejnym dokładniej.'}</div></div>`;
   }
 
   $('#place').innerHTML = st.lat !== null
@@ -4274,29 +4312,31 @@ function setup() {
   $('#rwhen').onclick = e => { const b = e.target.closest('button'); if (b) setRefillAgo(+b.dataset.m); };
   $('#rtime').addEventListener('input', () => { $$('#rwhen button').forEach(b => b.classList.remove('on')); refillWhenLabel(); });
   $('#ramt').addEventListener('input', () => {
-    $$('#rlevel button').forEach(b => b.classList.remove('on'));
     refillCount.shovel = refillCount.bucket = 0;
     $('#rshovel').textContent = $('#rbucket').textContent = 0;
   });
-  $('#rfull').addEventListener('change', refillAmountLabel);
   $('#rmodal .stepper').onclick = e => {
     const b = e.target.closest('button');
     if (!b) return;
     setRefillKg(Math.round((refillAmount() || 0) + +b.dataset.d));
-    $$('#rlevel button').forEach(x => x.classList.remove('on'));
   };
   $('#rcounts').onclick = e => {
     const b = e.target.closest('button');
     if (!b) return;
     refillCount[b.dataset.c] = Math.max(0, refillCount[b.dataset.c] + +b.dataset.n);
     setRefillKg(refillCount.shovel * SHOVEL_KG + refillCount.bucket * BUCKET_KG, true);
-    $$('#rlevel button').forEach(x => x.classList.remove('on'));
   };
+  // How full it was: a second tap takes it back. Filling to the top, it also says how much went in - unless counted.
   $('#rlevel').onclick = e => {
     const b = e.target.closest('button');
     if (!b) return;
-    setRefillKg(Math.round(now.settings.hopperKg * (1 - +b.dataset.f)));
-    $$('#rlevel button').forEach(x => x.classList.toggle('on', x === b));
+    const on = !b.classList.contains('on');
+    $$('#rlevel button').forEach(x => x.classList.toggle('on', on && x === b));
+    const typed = $('#ramt').value.trim() !== '' && refillAmount() !== refillSuggested;
+    if (on && $('#rfull').checked && coalCapKg() > 0 && !typed && !refillCount.shovel && !refillCount.bucket) {
+      setRefillKg(Math.round(coalCapKg() * (1 - +b.dataset.f)));
+      refillSuggested = refillAmount();
+    }
   };
   $('#events').onclick = async e => {
     if (e.target.id !== 'undorefill' || e.target.disabled) return;

@@ -142,11 +142,19 @@ What it hears:
 - Warning 6 "Sterownik nie w automacie" (`WARN_STANDBY`, setting `standbyOn`): mode standby for 2 minutes while the
   bus is heard, cleared after 1 minute in automat; pushed like every warning. While the bus is heard it replaces the
   temperature guess of "Piec stoi po zaniku pradu".
-- Coal from the feeder (v30): coal leaves the hopper only through the feeder, so while the bus is heard coal = kg per
-  feeder second (`coal.kf`) x the feeder's seconds, the heat model only for the time it is not. `kf` is learnt like
-  the heat factor, from intervals between refills to the top in which the controller was heard at least 70 % of the
-  time (and the feeder ran 10 minutes or more); until two such refills it is scaled from the heat model over the
-  last two weeks the bus was heard (`coal.kfN` = 0). Measured 2026-11-04: a full piston cycle is ~31 s of the motor.
+- Coal in piston strokes (v33; v30-v32 counted feeder seconds, scaled from the water's heat until refills taught them -
+  which under-counted by 38 % and showed ~35 kg in an empty hopper on 2026-11-11). Coal leaves the hopper only through
+  the feeder and every piston cycle pushes the same coal, so coal = `coal.strokeKg` x strokes (WorkHour.strokes). It is
+  learnt from intervals between refills to the top in which the controller was heard at least 70 % of the time (20
+  strokes or more): kg put in / strokes. A refill says how full the hopper was before; into an empty one its strokes
+  after the hopper ran empty do not count (the last run of two or more starved half hours before it, below), and
+  filling it to the top sets the hopper's size. Time the controller is not heard counts nothing (it was off). The
+  pace is strokes per hour heard, the busier of the last 24 h and 72 h. Measured 2026-11-11: ~0.25 kg a stroke, a full
+  hopper (~122 kg) ~485 strokes, 71-94 strokes a day; a stroke is ~30.2 s of the motor.
+- Starved burns (v33): coal fed heats the flue to its usual peak within minutes. Two half hours in a row with feeding
+  whose flue peak stays below 70 % of the median fed half hour of the day before raise "Malo wegla" (the hopper is
+  empty or the coal hangs, whatever the count says) and `coal.starved` = when it began; a half hour that heats again or
+  a refill ends it. On 2026-11-11 it would have fired at 19:00 (peaks 121 and 82 C against 213), no false one in 2 days.
 - The app: an animated boiler on the home screen (with the hopper's coal level). `/api/now` alone cannot drive it, a
   refresh every 15 s catches one feeder portion in five, so since v32 it plays `/api/geco`: the last 6 hours, topped up at
   each refresh (a few dozen bytes, ~260 ms), shown 18 s behind the device. The piston follows the motor's seconds since it
