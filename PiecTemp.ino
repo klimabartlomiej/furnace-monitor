@@ -75,7 +75,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 35;                  // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 36;                  // bump for every release (release/publish.ps1)
 // Each board has its own release channel - a firmware for the other chip must never be offered.
 #if CONFIG_IDF_TARGET_ESP32S3
 const char* UPDATE_MANIFEST_URL =
@@ -178,8 +178,10 @@ constexpr uint8_t  GECO_FAULT_AFTER   = 5;               // ... the controller's
 // knows takes a free slot by itself.
 // Roles do not care what kind of probe it is: the address says that - a 1-Wire ROM code (DS18B20, family 0x28) or
 // one of ours below for a probe off the 1-Wire bus.
-enum Role : uint8_t { ROLE_OTHER, ROLE_FURNACE, ROLE_RETURN, ROLE_HOPPER, ROLE_BOILER, ROLE_FLUE, ROLE_COUNT };
-const char* ROLE_KEYS[ROLE_COUNT] = { "other", "furnace", "return", "hopper", "boiler", "flue" };
+// SUPPLY (v36): the water going out to the radiators, on the supply pipe - dad's old furnace probe since 12.11, as the
+// furnace itself is read from the controller. Roles are stored by number: a new one goes last.
+enum Role : uint8_t { ROLE_OTHER, ROLE_FURNACE, ROLE_RETURN, ROLE_HOPPER, ROLE_BOILER, ROLE_FLUE, ROLE_SUPPLY, ROLE_COUNT };
+const char* ROLE_KEYS[ROLE_COUNT] = { "other", "furnace", "return", "hopper", "boiler", "flue", "supply" };
 constexpr uint8_t KIND_MAX6675 = 0xF6;   // address {0xF6, CS pin, 0...}: a K thermocouple on a MAX6675 board
 constexpr uint8_t KIND_GECO    = 0xF7;   // address {0xF7, 1..3, 0...}: a temperature the Geco controller reports
 
@@ -207,12 +209,12 @@ const SlotConfig DEFAULT_SLOTS[] = {
 };
 // Alarm limits a slot has until the web app sets its own - by role, so a replacement probe or a new home gets them
 // too (NAN = off): the furnace 40..90, embers creeping into the hopper above 50, a boiler below 35.
-const float ROLE_LOW[ROLE_COUNT]  = {NAN, 40, NAN, NAN, 35, NAN};
-const float ROLE_HIGH[ROLE_COUNT] = {NAN, 90, NAN, 50, NAN, NAN};
+const float ROLE_LOW[ROLE_COUNT]  = {NAN, 40, NAN, NAN, 35, NAN, NAN};
+const float ROLE_HIGH[ROLE_COUNT] = {NAN, 90, NAN, 50, NAN, NAN, NAN};
 constexpr size_t DEFAULT_COUNT = sizeof(DEFAULT_SLOTS) / sizeof(DEFAULT_SLOTS[0]);
 SlotConfig slots[SENSOR_COUNT];
 // The slots by role, -1 = no probe in that role (mapRoles). FLUE is shown and charted; no warning uses it yet.
-int8_t FURNACE = -1, RETURN_WATER = -1, COAL_HOPPER = -1, BOILER = -1, FLUE = -1;
+int8_t FURNACE = -1, RETURN_WATER = -1, COAL_HOPPER = -1, BOILER = -1, FLUE = -1, SUPPLY = -1;
 
 // Warnings - each one is a contact sensor in Apple Home and a banner in the web app; tuned in the web app.
 enum WarningId : uint8_t { WARN_GOING_OUT, WARN_FREEZE, WARN_BURNBACK, WARN_LOW_COAL, WARN_STALLED, WARN_ASH, WARN_STANDBY,
@@ -589,13 +591,16 @@ int slotOf(const DeviceAddress a) {
 
 bool slotUsed(size_t i) { return slots[i].on && !isUnset(slots[i].address); }
 
-// The freeze warning watches the water: the furnace, the return and the boiler.
-bool isWater(size_t i) { return slots[i].role == ROLE_FURNACE || slots[i].role == ROLE_RETURN || slots[i].role == ROLE_BOILER; }
+// The freeze warning watches the water: the furnace, the supply, the return and the boiler.
+bool isWater(size_t i) {
+  uint8_t r = slots[i].role;
+  return r == ROLE_FURNACE || r == ROLE_RETURN || r == ROLE_BOILER || r == ROLE_SUPPLY;
+}
 
 // FURNACE, RETURN_WATER, ... from the roles: the first slot in use with that role.
 void mapRoles() {
-  int8_t* byRole[ROLE_COUNT] = {nullptr, &FURNACE, &RETURN_WATER, &COAL_HOPPER, &BOILER, &FLUE};
-  FURNACE = RETURN_WATER = COAL_HOPPER = BOILER = FLUE = -1;
+  int8_t* byRole[ROLE_COUNT] = {nullptr, &FURNACE, &RETURN_WATER, &COAL_HOPPER, &BOILER, &FLUE, &SUPPLY};
+  FURNACE = RETURN_WATER = COAL_HOPPER = BOILER = FLUE = SUPPLY = -1;
   for (size_t i = 0; i < SENSOR_COUNT; i++) {
     uint8_t r = slots[i].role;
     if (slotUsed(i) && r < ROLE_COUNT && byRole[r] && *byRole[r] < 0) *byRole[r] = i;

@@ -656,10 +656,11 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 // Probe slots (firmware 26+): every slot has a role, and the furnace logic finds its probes by role, never by
 // number - a role no probe has is -1 and whatever needs it stays off (mapRoles, on every new `now`). Older firmware
 // sends no roles: its four probes come in this order.
-let FURNACE = 0, RETURN = 1, COAL = 2, BOILER = 3, FLUE = -1;
+let FURNACE = 0, RETURN = 1, COAL = 2, BOILER = 3, FLUE = -1, SUPPLY = -1;
 const OUT = 'out', OUT_COLOR = '#9a9fab';                     // outdoor temperature series
 const I_FLAME = '<path d="M12 3c.9 3.2 4.9 5.6 4.9 10.1a4.9 4.9 0 0 1-9.8 0c0-2.2 1-3.7 2-4.6.1 1.7 1 2.8 2 3C10.6 8.9 11.6 5.8 12 3z"/>';
 const I_RETURN = '<path d="M9 14 4.5 9.5 9 5"/><path d="M4.5 9.5H15a4.5 4.5 0 0 1 0 9h-2.5"/>';
+const I_SUPPLY = '<path d="M15 14l4.5-4.5L15 5"/><path d="M19.5 9.5H9a4.5 4.5 0 0 0 0 9h2.5"/>';
 const I_HOPPER = '<path d="M4 9h16l-2.2 10.5H6.2z"/><path d="M8 9l1.6-4.5h4.8L16 9"/>';
 const I_WATER = '<path d="M12 3.5c3 4 6 7 6 10.5a6 6 0 0 1-12 0c0-3.5 3-6.5 6-10.5z"/>';
 const I_FLUE = '<path d="M5 21V11h6v10"/><path d="M3 21h18"/><path d="M15 9c-1.3-1.3 1.3-2.7 0-4M19 10c-1.3-1.3 1.3-2.7 0-4"/>';
@@ -689,13 +690,14 @@ const I_SHOWER = '<path d="M5 21V9a5 5 0 0 1 9.5-2.2"/><path d="M11 9.5a5 5 0 0 
 const I_BOILER = '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M5 9h14"/><rect x="9" y="13" width="6" height="5" rx="1"/>';
 const ROLES = {
   furnace: { label: 'Piec', color: '#ff6b3d', icon: I_FLAME },
+  supply: { label: 'Zasilanie CO', color: '#ff5c8a', icon: I_SUPPLY, fw: 36 },   // water out to the radiators
   return: { label: 'Powrót', color: '#4aa8ff', icon: I_RETURN },
   hopper: { label: 'Zasobnik węgla', color: '#ffb340', icon: I_HOPPER },
   boiler: { label: 'Bojler', color: '#34d1bf', icon: I_WATER },
   flue: { label: 'Spaliny', color: '#c58cff', icon: I_FLUE },
   other: { label: 'Inny', color: null, icon: I_THERMO },
 };
-const ROLE_ORDER = ['furnace', 'return', 'hopper', 'boiler', 'flue', 'other'];
+const ROLE_ORDER = ['furnace', 'supply', 'return', 'hopper', 'boiler', 'flue', 'other'];
 const OLD_ROLES = ['furnace', 'return', 'hopper', 'boiler'];
 const OTHER_COLORS = ['#ff7eb6', '#9be15d', '#ffd84d', '#7d8cff', '#5ce1e6', '#d9a066', '#b0b7c3', '#ff9a8b'];
 let COLORS = ['#ff6b3d', '#4aa8ff', '#ffb340', '#34d1bf'], ICONS = [I_FLAME, I_RETURN, I_HOPPER, I_WATER];
@@ -708,12 +710,14 @@ function mapRoles(n) {
   const s = n && n.sensors;
   if (!s) return;
   const find = r => s.findIndex((x, i) => roleOf(x, i) === r && x.on !== false);
-  [FURNACE, RETURN, COAL, BOILER, FLUE] = ['furnace', 'return', 'hopper', 'boiler', 'flue'].map(find);
+  [FURNACE, RETURN, COAL, BOILER, FLUE, SUPPLY] = ['furnace', 'return', 'hopper', 'boiler', 'flue', 'supply'].map(find);
   COLORS = s.map((x, i) => roleColor(roleOf(x, i), i));
   ICONS = s.map((x, i) => (ROLES[roleOf(x, i)] || ROLES.other).icon);
 }
-// The slots with a probe that is switched on - what the app shows.
-const inUse = () => (now ? now.sensors.map((x, i) => i).filter(i => now.sensors[i].on !== false) : []);
+// The slots with a probe that is switched on - what the app shows - in the order of their roles (the furnace first,
+// whatever slot it sits in; probes of no role last, by slot).
+const roleRank = i => { const k = ROLE_ORDER.indexOf(roleOf(now.sensors[i], i)); return k < 0 ? ROLE_ORDER.length : k; };
+const inUse = () => (now ? now.sensors.map((x, i) => i).filter(i => now.sensors[i].on !== false).sort((a, b) => roleRank(a) - roleRank(b) || a - b) : []);
 // The controller's own probes (address F7 0n, firmware 28+) measure the same water as ours, so each is drawn as a
 // dashed second line on the chart of its probe (ui.ctl switches them), not as a chart of its own: 1 boiler -> the
 // furnace probe, 2 feeder -> the hopper, 3 hot water -> the boiler. One whose probe is not in use stays on its own -
@@ -753,6 +757,7 @@ const WARNINGS = [
 // Release notes: offered with a new version (release/publish.ps1 copies them into the manifest) and shown once
 // after the device updated itself. Every FW_VERSION needs its entry - the app's version is the highest key.
 const CHANGES = {
+  36: 'Nowa rola czujnika: Zasilanie CO – woda płynąca do grzejników. Jej temperatura jest na rurze „Do domu” na rysunku kotła, a „ciepło oddawane do domu” liczy się z niej. Komin na rysunku bliżej środka, temperatura spalin po jego prawej stronie.',
   35: 'Czujniki ze sterownika pokazują pełne stopnie, bez dopisanego „,0”, a ich linia na wykresie przechodzi dokładnie przez odczyty – gładko tylko pomiędzy nimi. Piec i podajnik mogą być liczone ze sterownika: jego odczyt liczy się dopiero po 2 minutach równej łączności (przy dosypywaniu podał raz 30° zamiast 64°), a „czujnik nie odpowiada” przychodzi po 5 minutach jego ciszy. Czujnik, który przejmuje rolę wyłączonego, pokazuje jego historię sprzed zmiany.',
   34: 'Pełny zasobnik to pojemność z Danych kotła – dosypania jej już nie zmieniają. W okienku „Dosypałem” przy dosypaniu do pełna jest tylko pytanie, czy zasobnik był pusty; ćwiartki tylko przy dosypywaniu nie do pełna. Popielnik usunięty – bez przypomnień i bez „Wyczyściłem”.',
   33: 'Węgiel liczony z posuwów tłoka podajnika – bez temperatur wody, które zaniżały zużycie (zasobnik bywał pusty, a aplikacja pokazywała zapas). Ile pcha jeden posuw, piec uczy się z dosypań do pełna. Przy dosypaniu zaznacz, ile było w zasobniku – „pusto” ustawia też pojemność zasobnika. Gdy palenia przestają rozgrzewać spaliny, przychodzi „Mało węgla”: zasobnik pusty albo węgiel zawisł. Karta Węgiel: na ile starczy, do kiedy i pasek dni.',
@@ -1670,8 +1675,9 @@ function renderHome() {
   $('#notices').innerHTML = notices;
 
   const t = tNow();
-  $('#cards').innerHTML = now.sensors.map((s, i) => {
-    if (s.on === false || !ownLine(i)) return '';
+  $('#cards').innerHTML = inUse().map(i => {
+    const s = now.sensors[i];
+    if (!ownLine(i)) return '';
     const c = COLORS[i % COLORS.length], pts = wholePts(i, points(live, i, false).filter(p => p[0] >= t - 6 * 3600));
     const k = s.trend, state = s.fault ? 'fault' : s.alarm ? 'alarm' : '', ci = ctlOf(i), ct = ci >= 0 && gecoLive() ? now.sensors[ci].temp : null;
     const stand = s.temp === null && ct !== null;             // our probe silent: the controller's reading stands in
@@ -1726,8 +1732,10 @@ function ctlMismatch() {
 function renderToday() {
   const s = now.sensors, m = midnight(tNow()), rows = [];
   if (outdoorNow() !== null) rows.push(['Na zewnątrz', esc(now.settings.place), `${n1(outdoorNow())}°`, '']);
-  if (s[FURNACE] && s[RETURN] && s[FURNACE].temp !== null && s[RETURN].temp !== null)
-    rows.push(['Piec → powrót', 'ciepło oddawane do domu', `${n1(s[FURNACE].temp - s[RETURN].temp)}°`, '']);
+  // What the house takes: the supply minus the return - the furnace's own temperature while no probe is on the supply.
+  const out = s[SUPPLY] && s[SUPPLY].temp !== null ? s[SUPPLY] : s[FURNACE];
+  if (out && s[RETURN] && out.temp !== null && s[RETURN].temp !== null)
+    rows.push([out === s[SUPPLY] ? 'Zasilanie → powrót' : 'Piec → powrót', 'ciepło oddawane do domu', `${n1(out.temp - s[RETURN].temp)}°`, '']);
   if (FURNACE >= 0) rows.push(['Piec pracuje', `dziś powyżej ${n1(burnThreshold())}°`, dur(burnSeconds(m, tNow())), '']);
   const w = gecoKnown() ? workSum(m, tNow() + 1) : null;      // the controller's own day
   if (w) {
@@ -1862,9 +1870,9 @@ function boilerSvg() {
     <path stroke="#000" stroke-width="2.4" d="M11.0 13.3h.01M21.2 11.3h.01M5.2 12.3h.01M14.8 18.3h.01M3.2 7.8h.01M3.2 18.7h.01M16.2 2.1h.01M22.4 22.0h.01M15.3 14.5h.01M4.6 1.5h.01M12.6 2.5h.01M1.8 11.2h.01M10.7 19.4h.01M11.1 7.2h.01"/>
     <path stroke="#000" stroke-width="1.2" d="M19.8 16.7h.01M7.8 5.8h.01M7.2 2.2h.01M18.1 9.7h.01M19.9 9.4h.01M22.4 19.9h.01M0.6 5.4h.01M23.0 9.7h.01M2.3 15.0h.01M18.4 6.8h.01M22.6 17.9h.01M18.8 4.7h.01M13.4 10.8h.01M4.9 17.3h.01M5.5 6.8h.01M7.5 20.8h.01M5.4 9.6h.01M20.1 15.2h.01M2.9 23.2h.01M6.1 14.3h.01M9.1 10.9h.01M13.7 20.4h.01M4.8 4.1h.01M6.3 4.9h.01M17.5 22.0h.01M5.1 22.3h.01M10.2 3.0h.01M1.5 22.5h.01M6.5 19.4h.01M14.2 7.3h.01M2.2 5.8h.01M21.5 5.3h.01M23.0 15.6h.01M11.6 17.3h.01"/>
     <path stroke="#9aa0ab" stroke-width=".8" d="M7.8 23.6h.01M2.1 13.1h.01M17.5 16.7h.01M18.8 21.6h.01M8.6 16.3h.01M20.4 13.7h.01M14.9 9.3h.01M17.5 13.9h.01M1.1 14.3h.01M16.6 11.9h.01"/></pattern></defs>
-  <g class="smoke" id="gsmoke"><circle cx="109" cy="14" r="5"/><circle cx="109" cy="14" r="5"/><circle cx="109" cy="14" r="5"/></g>
-  <rect class="metal" x="98" y="16" width="22" height="26" rx="2"/>
-  <text class="lbl" x="92" y="28" text-anchor="end">SPALINY</text><text id="gflue" x="92" y="42" text-anchor="end"></text>
+  <g class="smoke" id="gsmoke"><circle cx="128" cy="14" r="5"/><circle cx="128" cy="14" r="5"/><circle cx="128" cy="14" r="5"/></g>
+  <rect class="metal" x="117" y="16" width="22" height="26" rx="2"/>
+  <text class="lbl" x="145" y="13">SPALINY</text><text id="gflue" x="145" y="29"></text>
   <path class="metal" d="${hopper}"/>
   <clipPath id="ghop"><path d="${hopper}"/></clipPath>
   <g id="gcoalg" clip-path="url(#ghop)"><rect class="coal" id="gcoal" x="196" y="150" width="84" height="0"/><rect id="gcoald" fill="url(#ggrain)" x="196" y="150" width="84" height="0"/></g>
@@ -1916,7 +1924,7 @@ function renderBoiler() {
     boilerLook = '';
   }
   const g = now.geco, live = boilerConn() === true && gecoLive();
-  const sens = role => { const i = { furnace: FURNACE, return: RETURN, hopper: COAL, boiler: BOILER, flue: FLUE }[role]; return i >= 0 ? now.sensors[i] : null; };
+  const sens = role => { const i = { furnace: FURNACE, return: RETURN, hopper: COAL, boiler: BOILER, flue: FLUE, supply: SUPPLY }[role]; return i >= 0 ? now.sensors[i] : null; };
   const deg = v => (v === null || v === undefined ? '' : `${n1(v)}°`);
   // A role held by the controller's own probe (v35) is already on the boiler and the feeder: not shown twice.
   const ours = role => { const s = sens(role); return s && !/^F70/.test(s.addr || '') ? s : null; };
@@ -1925,7 +1933,8 @@ function renderBoiler() {
   $('#gfeedt').textContent = tc[1] !== null ? `${Math.round(tc[1])}°` : '';
   $('#ghopt').textContent = ours('hopper') ? deg(ours('hopper').temp) : '';
   $('#gcwu').textContent = tc[2] !== null ? `${Math.round(tc[2])}°` : sens('boiler') ? deg(sens('boiler').temp) : '';
-  $('#gsup').textContent = ours('furnace') ? deg(ours('furnace').temp) : '';
+  const sup = sens('supply') || ours('furnace');               // the supply pipe's own probe, else a furnace probe of ours
+  $('#gsup').textContent = sup ? deg(sup.temp) : '';
   $('#gret').textContent = sens('return') ? deg(sens('return').temp) : '';
   $('#gflue').textContent = sens('flue') ? deg(sens('flue').temp) : '–';
   // The coal as the Węgiel card counts it, coloured the same way; unknown -> half a hopper, faint, no number.
@@ -3872,7 +3881,7 @@ function renderProbes(force) {
       + `<input class="sw" type="checkbox" data-on="${i}" ${d.on ? 'checked' : ''} aria-label="Włączony"></div>`
       + `<div class="pmeta"><span>${esc(d.kind || 'czujnik')} · miejsce ${i + 1}</span>${handedNote(i, d.addr)}`
       + (missing ? `<span class="pbad">${SVG('<path d="M6 6l12 12M18 6 6 18"/>')}nie odpowiada</span>` : '') + '</div>'
-      + `<div class="proles">${ROLE_ORDER.map(r => {
+      + `<div class="proles">${ROLE_ORDER.filter(r => !ROLES[r].fw || now.fw >= ROLES[r].fw).map(r => {
         // A role another probe holds is greyed out: to move it, give that probe another role first.
         const rc = ROLES[r].color || '#a3a8b3', taken = r !== 'other' && slotDraft.some((x, k) => k !== i && x.addr && x.role === r);
         return `<button class="rchip${d.role === r ? ' on' : ''}" data-i="${i}" data-role="${r}" style="--c:${rc};--cb:${rgba(rc, .16)}"${taken ? ` disabled title="Ma go już inny czujnik"` : ''}>${SVG(ROLES[r].icon)}${ROLES[r].label}</button>`;
