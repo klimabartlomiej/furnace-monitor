@@ -753,7 +753,7 @@ const WARNINGS = [
 // Release notes: offered with a new version (release/publish.ps1 copies them into the manifest) and shown once
 // after the device updated itself. Every FW_VERSION needs its entry - the app's version is the highest key.
 const CHANGES = {
-  35: 'Piec i podajnik mogą być liczone ze sterownika: jego odczyt liczy się dopiero po 2 minutach równej łączności (przy dosypywaniu podał raz 30° zamiast 64°), a „czujnik nie odpowiada” przychodzi po 5 minutach jego ciszy. Czujnik, który przejmuje rolę wyłączonego, pokazuje jego historię sprzed zmiany.',
+  35: 'Czujniki ze sterownika pokazują pełne stopnie, bez dopisanego „,0”, a ich linia na wykresie przechodzi dokładnie przez odczyty – gładko tylko pomiędzy nimi. Piec i podajnik mogą być liczone ze sterownika: jego odczyt liczy się dopiero po 2 minutach równej łączności (przy dosypywaniu podał raz 30° zamiast 64°), a „czujnik nie odpowiada” przychodzi po 5 minutach jego ciszy. Czujnik, który przejmuje rolę wyłączonego, pokazuje jego historię sprzed zmiany.',
   34: 'Pełny zasobnik to pojemność z Danych kotła – dosypania jej już nie zmieniają. W okienku „Dosypałem” przy dosypaniu do pełna jest tylko pytanie, czy zasobnik był pusty; ćwiartki tylko przy dosypywaniu nie do pełna. Popielnik usunięty – bez przypomnień i bez „Wyczyściłem”.',
   33: 'Węgiel liczony z posuwów tłoka podajnika – bez temperatur wody, które zaniżały zużycie (zasobnik bywał pusty, a aplikacja pokazywała zapas). Ile pcha jeden posuw, piec uczy się z dosypań do pełna. Przy dosypaniu zaznacz, ile było w zasobniku – „pusto” ustawia też pojemność zasobnika. Gdy palenia przestają rozgrzewać spaliny, przychodzi „Mało węgla”: zasobnik pusty albo węgiel zawisł. Karta Węgiel: na ile starczy, do kiedy i pasek dni.',
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
@@ -843,6 +843,12 @@ const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${
 const tNow = () => Math.floor(Date.now() / 1000);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const n1 = v => v.toFixed(1).replace('.', ',');                    // 21,7 - Polish decimal comma
+// The controller's own probes (address F7 0n) report whole degrees: shown whole, no ",0" made up; their chart lines run
+// through the readings themselves (no moving average), smooth only between them.
+const ctlProbe = s => !!s && /^F70/.test(s.addr || '');
+const tOf = (s, v) => (ctlProbe(s) ? String(Math.round(v)) : n1(v));
+const wholeAt = i => typeof i === 'number' && i >= 0 && !!now && ctlProbe(now.sensors[i]);
+const wholePts = (i, pts) => (wholeAt(i) ? pts.map(p => p.map((v, k) => (k ? Math.round(v) : v))) : pts);
 const nAxis = v => String(+v.toFixed(2)).replace('.', ',');
 const hhmm = t => new Date(t * 1000).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
 const day = t => new Date(t * 1000).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -1344,7 +1350,7 @@ function chart(el, o) {
     // reads the drawn line (s.view).
     s.view = [];
     for (const raw of segments(s.pts, s.step || o.step)) {
-      const seg = s.agg || s.peak ? raw : smoothSeg(raw, o.smooth || 0, 1);
+      const seg = s.agg || s.peak || s.whole ? raw : smoothSeg(raw, o.smooth || 0, 1);
       s.view.push(...seg);
       const line = curvePath(seg.map(p => [X(p[0]), Y(lineOf(s, p))]));
       if (s.agg && o.band && !s.dash) {
@@ -1385,8 +1391,9 @@ function scrub(el, clientX) {
     const v = lineOf(s, p), px = g.X(p[0]);
     if (x === null) { x = px; when = p[0]; whenStep = st; }
     dots += `<circle cx="${px.toFixed(1)}" cy="${g.Y(v).toFixed(1)}" r="4.5" fill="${s.color}" stroke="#15181e" stroke-width="2"/>`;
-    html += `<div><i style="background:${s.color}"></i>${g.o.series.length > 1 ? esc(s.name) + ' ' : ''}<b class="num">${n1(v)}°</b>`
-      + `${s.agg && p[1] !== p[3] ? ` <span class="mm num">${n1(p[1])}–${n1(p[3])}</span>` : ''}</div>`;
+    const fv = x => (s.whole ? String(Math.round(x)) : n1(x));
+    html += `<div><i style="background:${s.color}"></i>${g.o.series.length > 1 ? esc(s.name) + ' ' : ''}<b class="num">${fv(v)}°</b>`
+      + `${s.agg && p[1] !== p[3] ? ` <span class="mm num">${fv(p[1])}–${fv(p[3])}</span>` : ''}</div>`;
   }
   if (x === null) return unscrub(el);
   // What happened here: a power cut's band under the finger, journal marks within ~10 px.
@@ -1504,19 +1511,19 @@ function sparkline(pts, color, peak) {
 function describe(s) {
   if (s.fault) return 'czujnik nie odpowiada';
   if (s.temp === null) return s.alarm > 0 ? 'za gorąco' : 'za zimno';      // restored after a restart, no reading yet
-  if (s.alarm > 0) return `za gorąco: ${n1(s.temp)}° (próg ${n1(s.high)}°)`;
-  return `za zimno: ${n1(s.temp)}° (próg ${n1(s.low)}°)`;
+  if (s.alarm > 0) return `za gorąco: ${tOf(s, s.temp)}° (próg ${n1(s.high)}°)`;
+  return `za zimno: ${tOf(s, s.temp)}° (próg ${n1(s.low)}°)`;
 }
 
 function warningText(w) {
   const s = now.sensors;
   if (w === 0) {
-    const f = s[FURNACE] || { temp: null, low: null }, near = f.temp !== null && f.low !== null ? `${n1(f.temp - f.low)}° nad progiem min. i spada` : 'zbliża się do progu min.';
+    const f = s[FURNACE] || { temp: null, low: null }, near = f.temp !== null && f.low !== null ? `${tOf(f, f.temp - f.low)}° nad progiem min. i spada` : 'zbliża się do progu min.';
     return now.forecast !== null ? `${near} – za ok. ${now.forecast} min poniżej ${n1(f.low)}°` : near;
   }
   if (w === 1) {
     const cold = s.filter(x => x.water && x.temp !== null).sort((a, b) => a.temp - b.temp)[0];
-    return cold ? `${esc(cold.name)}: ${n1(cold.temp)}°` : 'woda bliska zamarznięcia';
+    return cold ? `${esc(cold.name)}: ${tOf(cold, cold.temp)}°` : 'woda bliska zamarznięcia';
   }
   if (w === 4) return `po zaniku prądu piec dalej stygnie${s[FURNACE] && s[FURNACE].trend !== null ? ` (${n1(s[FURNACE].trend)}° na godzinę)` : ''} – sprawdź sterownik`;
   if (w === 6) return 'sterownik czeka w czuwaniu – naciśnij A na sterowniku, inaczej piec wygaśnie';
@@ -1598,7 +1605,7 @@ function when(t) {
 function extreme(i, t0, t1, low) {
   const p = points(live, i, false).filter(q => q[0] >= t0 && q[0] <= t1).map(q => q[1]);
   if (!p.length) return '';
-  return low ? ` · najniżej ${n1(Math.min(...p))}°` : ` · najwyżej ${n1(Math.max(...p))}°`;
+  return low ? ` · najniżej ${tOf(now.sensors[i], Math.min(...p))}°` : ` · najwyżej ${tOf(now.sensors[i], Math.max(...p))}°`;
 }
 
 function missedNotice() {
@@ -1665,16 +1672,16 @@ function renderHome() {
   const t = tNow();
   $('#cards').innerHTML = now.sensors.map((s, i) => {
     if (s.on === false || !ownLine(i)) return '';
-    const c = COLORS[i % COLORS.length], pts = points(live, i, false).filter(p => p[0] >= t - 6 * 3600);
+    const c = COLORS[i % COLORS.length], pts = wholePts(i, points(live, i, false).filter(p => p[0] >= t - 6 * 3600));
     const k = s.trend, state = s.fault ? 'fault' : s.alarm ? 'alarm' : '', ci = ctlOf(i), ct = ci >= 0 && gecoLive() ? now.sensors[ci].temp : null;
     const stand = s.temp === null && ct !== null;             // our probe silent: the controller's reading stands in
     const pill = s.fault ? 'BRAK SYGNAŁU' : s.alarm > 0 ? 'ZA GORĄCO' : s.alarm < 0 ? 'ZA ZIMNO' : '';
     const tr = k === null ? '' : Math.abs(k) < .5 ? '→ stabilnie' : `${k > 0 ? '↑' : '↓'} ${n1(Math.abs(k))}°/h`;
     return `<div class="sensor ${state}" data-i="${i}" style="--c:${c};--cb:${rgba(c, .16)}">`
       + `<div class="hd"><span class="ico">${SVG(ICONS[i] || ICONS[0])}</span><span class="n">${esc(s.name)}</span></div>`
-      + `<div class="val num">${stand ? n1(ct) : s.temp === null ? '–' : n1(s.temp)}<small>°C</small></div>`
+      + `<div class="val num">${stand ? Math.round(ct) : s.temp === null ? '–' : tOf(s, s.temp)}<small>°C</small></div>`
       + `<div class="trend num ${k > .5 ? 'up' : k < -.5 ? 'down' : ''}">${pill ? `<span class="pill">${pill}</span>` : ''}${tr}`
-      + `${ct !== null ? `<span class="ctlv" title="Odczyt sterownika kotła"><i></i>${stand ? 'sterownik' : `${n1(ct)}°`}</span>` : ''}</div>${sparkline(pts, c, peaky(i))}</div>`;
+      + `${ct !== null ? `<span class="ctlv" title="Odczyt sterownika kotła"><i></i>${stand ? 'sterownik' : `${Math.round(ct)}°`}</span>` : ''}</div>${sparkline(pts, c, peaky(i) || ctlProbe(s))}</div>`;
   }).join('');
 
   $$('#ovRange button').forEach(b => b.classList.toggle('on', +b.dataset.h === ui.overview));
@@ -1693,8 +1700,8 @@ function renderHome() {
     const span = ui.overview * 3600, t0 = t - span, step = ui.overview > 6 ? 300 : 60;
     const buckets = step === 60 ? live : rebucket(live, step);
     chart(ov, {
-      series: lines.map(i => ({ color: COLORS[i], name: now.sensors[i].name, pts: windowed(points(buckets, i, false), t0, t) }))
-        .concat(ctls.map(i => ({ color: COLORS[i], name: `${now.sensors[i].name} · sterownik`, dash: true, pts: windowed(points(buckets, ctlOf(i), false), t0, t) }))),
+      series: lines.map(i => ({ color: COLORS[i], name: now.sensors[i].name, whole: wholeAt(i), pts: wholePts(i, windowed(points(buckets, i, false), t0, t)) }))
+        .concat(ctls.map(i => ({ color: COLORS[i], name: `${now.sensors[i].name} · sterownik`, dash: true, whole: true, pts: wholePts(ctlOf(i), windowed(points(buckets, ctlOf(i), false), t0, t)) }))),
       t0, t1: t, step, bands: outages(), smooth: step === 60 ? 3 : 0, empty: 'Historia zapełni się w ciągu kilku minut',
     });
   }
@@ -2560,11 +2567,11 @@ function paintDetail() {
   if (!shown.length) shown = defaultShown();
   const probes = shown.filter(i => i !== OUT);
   const single = probes.length === 1 && shown.length === 1, s0 = now.sensors[probes[0]];
-  const lines = shown.map(i => { const d = detailData(i); return { color: colorOf(i), name: nameOf(i), agg: d.agg, step: d.step, dash: i === OUT, peak: i !== OUT && peaky(i), pts: windowed(d.pts, view.t0, view.t1) }; });
+  const lines = shown.map(i => { const d = detailData(i); return { color: colorOf(i), name: nameOf(i), agg: d.agg, step: d.step, dash: i === OUT, peak: i !== OUT && peaky(i), whole: wholeAt(i), pts: wholePts(i, windowed(d.pts, view.t0, view.t1)) }; });
   const step = lines.length ? lines[0].step : 60;
   for (const i of probes.filter(ctlShown)) {        // the controller's reading of the same water, dashed in its colour
     const c = ctlOf(i), d = c >= 0 ? detailData(c) : null;
-    if (d) lines.push({ color: colorOf(i), name: `${nameOf(i)} · sterownik`, agg: d.agg, step: d.step, dash: true, pts: windowed(d.pts, view.t0, view.t1) });
+    if (d) lines.push({ color: colorOf(i), name: `${nameOf(i)} · sterownik`, agg: d.agg, step: d.step, dash: true, whole: true, pts: wholePts(c, windowed(d.pts, view.t0, view.t1)) });
   }
   const limits = single && s0 ? [s0.high !== null && { v: s0.high, label: `maks. ${n1(s0.high)}°` }, s0.low !== null && { v: s0.low, label: `min. ${n1(s0.low)}°` }].filter(Boolean) : [];
   const MARK = { 3: '#ff453a', 4: '#ff453a', 6: '#ff453a', 8: '#ff9f0a', 5: '#30d158', 7: '#30d158', 9: '#30d158', [EV_BATH]: '#0a84ff', [EV_SETTING]: '#bf5af2' };
@@ -2574,7 +2581,7 @@ function paintDetail() {
   chart($('#detail'), { series: lines, t0: view.t0, t1: view.t1, step, limits, marks, bands: outages(), fill: single, band: single,
     smooth: step === 60 ? 2 : step <= 300 ? 1 : 0 });
 
-  $('#dnow').textContent = single && s0 ? (s0.temp === null ? '–' : n1(s0.temp) + '°') : '';
+  $('#dnow').textContent = single && s0 ? (s0.temp === null ? '–' : tOf(s0, s0.temp) + '°') : '';
   $('#dname').textContent = single && s0 ? s0.name + ' teraz' : `${shown.length} ${plural(shown.length, 'seria', 'serie', 'serii')}`;
   const zoomed = Math.abs((view.t1 - view.t0) - RANGES[ui.range]) > 60 || view.t1 < tNow() - 600;
   $('#zoomreset').style.display = zoomed ? 'block' : 'none';
@@ -2967,7 +2974,11 @@ function showMonthDay(k) {
 function eventView(e) {
   const [t, type, i, raw] = e, v = raw === -32768 ? null : raw / 100;
   const name = now.sensors[i] ? now.sensors[i].name : '';
-  const temp = v === null ? '' : ` · ${n1(v)}°`;
+  // The probe a temperature in the entry comes from: the event's own, or the one a warning watches (0 going out, 4
+  // stalled, 6 standby: the furnace; 2 burnback: the hopper) - a controller probe's whole degrees stay whole.
+  const from = (type >= 3 && type <= 7) || type === 14 ? now.sensors[i]
+    : type === 8 || type === 9 ? now.sensors[{ 0: FURNACE, 2: COAL, 4: FURNACE, 6: FURNACE }[i]] : null;
+  const temp = v === null ? '' : ` · ${tOf(from, v)}°`;
   switch (type) {
     case 1: return ['c-gray', I_POWER, 'Uruchomienie urządzenia', [BOOT_REASON[i], `wersja ${raw}`].filter(Boolean).join(' · ')];
     case EV_POWER_CUT: {
@@ -3753,7 +3764,7 @@ function renderSettings() {
       if (s.on === false || !ownLine(i)) return '';
       const raw = s.temp === null ? null : s.temp - (s.offset || 0), c = ctlOf(i), ct = c >= 0 ? now.sensors[c].temp : null;
       return `<div class="offr" style="--c:${COLORS[i]}"><div><label><span class="cd"></span>${esc(s.name)}</label>`
-        + `<div class="s">${s.temp === null ? 'brak odczytu' : `pokazuje ${n1(s.temp)}° · sam czujnik ${n1(raw)}°`}${ct !== null ? ` · sterownik ${n1(ct)}°` : ''}</div></div>`
+        + `<div class="s">${s.temp === null ? 'brak odczytu' : `pokazuje ${tOf(s, s.temp)}° · sam czujnik ${n1(raw)}°`}${ct !== null ? ` · sterownik ${Math.round(ct)}°` : ''}</div></div>`
         + `<div class="stp"><button data-i="${i}" data-d="-0.1" aria-label="Mniej">−</button>`
         + `<input type="text" inputmode="text" data-i="${i}" value="${signed(s.offset || 0)}" autocomplete="off">`
         + `<button data-i="${i}" data-d="0.1" aria-label="Więcej">+</button></div></div>`;
@@ -3819,7 +3830,7 @@ function renderSettings() {
 let slotDraft = null, probesFound = null, probeTimer = 0;
 const slotsFromNow = () => now.sensors.map(x => ({ addr: x.addr || '', name: x.name || '', role: x.role || 'other', on: x.on !== false, kind: x.kind || '' }));
 const draftChanged = () => slotDraft && JSON.stringify(slotDraft) !== JSON.stringify(slotsFromNow());
-const tempText = t => (t === null || t === undefined ? '–' : `${n1(t)}°`);
+const tempText = (t, whole) => (t === null || t === undefined ? '–' : `${whole ? Math.round(t) : n1(t)}°`);
 
 async function pollProbes() {
   clearTimeout(probeTimer);
@@ -3857,7 +3868,7 @@ function renderProbes(force) {
     return `<div class="ptile${d.on ? '' : ' off'}" style="--c:${c};--cb:${rgba(c, .16)}">`
       + `<div class="ptop"><span class="badge">${SVG(role.icon)}</span>`
       + `<input class="pname" type="text" data-i="${i}" value="${esc(d.name)}" autocomplete="off" aria-label="Nazwa">`
-      + `<span class="ptemp num">${tempText(q ? q.t : now.sensors[i] && now.sensors[i].addr === d.addr ? now.sensors[i].temp : null)}</span>`
+      + `<span class="ptemp num">${tempText(q ? q.t : now.sensors[i] && now.sensors[i].addr === d.addr ? now.sensors[i].temp : null, ctlProbe(d))}</span>`
       + `<input class="sw" type="checkbox" data-on="${i}" ${d.on ? 'checked' : ''} aria-label="Włączony"></div>`
       + `<div class="pmeta"><span>${esc(d.kind || 'czujnik')} · miejsce ${i + 1}</span>${handedNote(i, d.addr)}`
       + (missing ? `<span class="pbad">${SVG('<path d="M6 6l12 12M18 6 6 18"/>')}nie odpowiada</span>` : '') + '</div>'
