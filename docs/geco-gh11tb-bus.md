@@ -139,6 +139,16 @@ What it hears:
   chart (off by default, the "Sterownik" chip; drawn anyway while our probe is silent), a banner when the two differ
   by more than 5 degrees for 15 minutes, and a one-tap auto-correction of our offsets (Ustawienia -> Korekta wskazan:
   the middle 60 % of two hours of minute differences, shown before it is saved).
+- The controller as the probe itself (v35; dad's furnace and feeder from 12.11, the two DS18B20 switched off to be
+  moved): a controller probe given the furnace or hopper role is that role's own line and drives its warnings. Its
+  temperatures count only after 2 minutes of frames without a silence (`SETTLE_MS`: at the 11.11 refill the bus came
+  and went for 20 minutes and the boiler read 30 C for three of them at 64), and it is reported silent after 5 readings
+  (`GECO_FAULT_AFTER`: a short silence plus the settling after it is not a dead controller; nothing switches it off for
+  a refill - the 11.11 silence was a one-off). While it is silent the furnace temperature is unknown, so "Piec stoi po
+  zaniku pradu" cannot judge - "czujnik nie odpowiada" comes instead.
+- History handed on (v35, `h<i>` in `/api/slots`): the slot that takes a role over from a probe switched off shows
+  that probe's history before the change wherever it has none of its own or is more than 10 degrees off, and the old
+  slot shows nothing from before it - /api/series, /api/csv and /api/daily only, the logs keep what was measured.
 - Warning 6 "Sterownik nie w automacie" (`WARN_STANDBY`, setting `standbyOn`): mode standby for 2 minutes while the
   bus is heard, cleared after 1 minute in automat; pushed like every warning. While the bus is heard it replaces the
   temperature guess of "Piec stoi po zaniku pradu".

@@ -716,11 +716,13 @@ function mapRoles(n) {
 const inUse = () => (now ? now.sensors.map((x, i) => i).filter(i => now.sensors[i].on !== false) : []);
 // The controller's own probes (address F7 0n, firmware 28+) measure the same water as ours, so each is drawn as a
 // dashed second line on the chart of its probe (ui.ctl switches them), not as a chart of its own: 1 boiler -> the
-// furnace probe, 2 feeder -> the hopper, 3 hot water -> the boiler. One whose probe is not in use stays on its own.
+// furnace probe, 2 feeder -> the hopper, 3 hot water -> the boiler. One whose probe is not in use stays on its own -
+// and one that holds the role itself (v35: dad's furnace and feeder read from the controller alone) is that role's line.
 const CTL_ROLE = { 1: 'furnace', 2: 'hopper', 3: 'boiler' };
 function ctlPartner(j) {
   const s = now && now.sensors[j], role = s && /^F70[123]/.test(s.addr || '') ? CTL_ROLE[+s.addr[3]] : null;
-  return role ? { furnace: FURNACE, hopper: COAL, boiler: BOILER }[role] : -1;
+  const partner = role ? { furnace: FURNACE, hopper: COAL, boiler: BOILER }[role] : -1;
+  return partner === j ? -1 : partner;
 }
 const ctlOf = i => (now ? now.sensors.findIndex((s, j) => s.on !== false && ctlPartner(j) === i) : -1);
 const ownLine = i => !(ctlPartner(i) >= 0);
@@ -751,6 +753,7 @@ const WARNINGS = [
 // Release notes: offered with a new version (release/publish.ps1 copies them into the manifest) and shown once
 // after the device updated itself. Every FW_VERSION needs its entry - the app's version is the highest key.
 const CHANGES = {
+  35: 'Piec i podajnik mogą być liczone ze sterownika: jego odczyt liczy się dopiero po 2 minutach równej łączności (przy dosypywaniu podał raz 30° zamiast 64°), a „czujnik nie odpowiada” przychodzi po 5 minutach jego ciszy. Czujnik, który przejmuje rolę wyłączonego, pokazuje jego historię sprzed zmiany.',
   34: 'Pełny zasobnik to pojemność z Danych kotła – dosypania jej już nie zmieniają. W okienku „Dosypałem” przy dosypaniu do pełna jest tylko pytanie, czy zasobnik był pusty; ćwiartki tylko przy dosypywaniu nie do pełna. Popielnik usunięty – bez przypomnień i bez „Wyczyściłem”.',
   33: 'Węgiel liczony z posuwów tłoka podajnika – bez temperatur wody, które zaniżały zużycie (zasobnik bywał pusty, a aplikacja pokazywała zapas). Ile pcha jeden posuw, piec uczy się z dosypań do pełna. Przy dosypaniu zaznacz, ile było w zasobniku – „pusto” ustawia też pojemność zasobnika. Gdy palenia przestają rozgrzewać spaliny, przychodzi „Mało węgla”: zasobnik pusty albo węgiel zawisł. Karta Węgiel: na ile starczy, do kiedy i pasek dni.',
   5: 'Dane co minutę z 31 dni, zakres 6 godzin, ostrzeżenia z regulacją (piec wygasa, ryzyko zamarznięcia, cofanie żaru), dziennik zdarzeń, godziny pracy pieca, temperatura na zewnątrz, eksport do CSV.',
@@ -1908,12 +1911,14 @@ function renderBoiler() {
   const g = now.geco, live = boilerConn() === true && gecoLive();
   const sens = role => { const i = { furnace: FURNACE, return: RETURN, hopper: COAL, boiler: BOILER, flue: FLUE }[role]; return i >= 0 ? now.sensors[i] : null; };
   const deg = v => (v === null || v === undefined ? '' : `${n1(v)}°`);
+  // A role held by the controller's own probe (v35) is already on the boiler and the feeder: not shown twice.
+  const ours = role => { const s = sens(role); return s && !/^F70/.test(s.addr || '') ? s : null; };
   const tc = live ? g.t : [null, null, null];
   $('#gboil').textContent = tc[0] !== null ? `${Math.round(tc[0])}°` : '–';
   $('#gfeedt').textContent = tc[1] !== null ? `${Math.round(tc[1])}°` : '';
-  $('#ghopt').textContent = sens('hopper') ? deg(sens('hopper').temp) : '';
+  $('#ghopt').textContent = ours('hopper') ? deg(ours('hopper').temp) : '';
   $('#gcwu').textContent = tc[2] !== null ? `${Math.round(tc[2])}°` : sens('boiler') ? deg(sens('boiler').temp) : '';
-  $('#gsup').textContent = sens('furnace') ? deg(sens('furnace').temp) : '';
+  $('#gsup').textContent = ours('furnace') ? deg(ours('furnace').temp) : '';
   $('#gret').textContent = sens('return') ? deg(sens('return').temp) : '';
   $('#gflue').textContent = sens('flue') ? deg(sens('flue').temp) : '–';
   // The coal as the Węgiel card counts it, coloured the same way; unknown -> half a hopper, faint, no number.
@@ -3825,6 +3830,16 @@ async function pollProbes() {
   probeTimer = setTimeout(pollProbes, 4000);
 }
 
+// The history a slot shows from before a change (firmware 35, `took`: [slot, time]) or gave away to another slot.
+function handedNote(i, addr) {
+  const s = now.sensors, date = t => new Date(t * 1000).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' });
+  if (!s[i] || s[i].addr !== addr) return '';
+  const took = s[i].took, gave = s.findIndex(x => x.took && x.took[0] === i);
+  if (took && s[took[0]]) return `<span>historia do ${date(took[1])} z: ${esc(s[took[0]].name)}</span>`;
+  if (gave >= 0) return `<span>historia do ${date(s[gave].took[1])} przeszła do: ${esc(s[gave].name)}</span>`;
+  return '';
+}
+
 function renderProbes(force) {
   const page = $('.spage[data-page="probes"]'), box = $('#probeset'), fresh = $('#probenew');
   if (!now || (!force && editing(page))) return;
@@ -3844,7 +3859,7 @@ function renderProbes(force) {
       + `<input class="pname" type="text" data-i="${i}" value="${esc(d.name)}" autocomplete="off" aria-label="Nazwa">`
       + `<span class="ptemp num">${tempText(q ? q.t : now.sensors[i] && now.sensors[i].addr === d.addr ? now.sensors[i].temp : null)}</span>`
       + `<input class="sw" type="checkbox" data-on="${i}" ${d.on ? 'checked' : ''} aria-label="Włączony"></div>`
-      + `<div class="pmeta"><span>${esc(d.kind || 'czujnik')} · miejsce ${i + 1}</span>`
+      + `<div class="pmeta"><span>${esc(d.kind || 'czujnik')} · miejsce ${i + 1}</span>${handedNote(i, d.addr)}`
       + (missing ? `<span class="pbad">${SVG('<path d="M6 6l12 12M18 6 6 18"/>')}nie odpowiada</span>` : '') + '</div>'
       + `<div class="proles">${ROLE_ORDER.map(r => {
         // A role another probe holds is greyed out: to move it, give that probe another role first.

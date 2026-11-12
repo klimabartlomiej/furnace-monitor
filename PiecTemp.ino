@@ -75,7 +75,7 @@
 
 // ------------------------------------------------------------------ configuration
 
-constexpr uint32_t FW_VERSION = 34;                  // bump for every release (release/publish.ps1)
+constexpr uint32_t FW_VERSION = 35;                  // bump for every release (release/publish.ps1)
 // Each board has its own release channel - a firmware for the other chip must never be offered.
 #if CONFIG_IDF_TARGET_ESP32S3
 const char* UPDATE_MANIFEST_URL =
@@ -167,6 +167,8 @@ constexpr float    MAX_JUMP_FLUE      = 150.0;           // ... on a thermocoupl
                                                          // when the fan starts
 constexpr float    CONFIRM_TOLERANCE  = 2.0;             // the next reading must be this close to confirm a jump
 constexpr uint8_t  FAULT_AFTER        = 3;               // bad readings in a row before a probe is reported dead
+constexpr uint8_t  GECO_FAULT_AFTER   = 5;               // ... the controller's: a short silence plus the 2 minutes
+                                                         // its temperatures settle after it (GecoBus SETTLE_MS)
 
 // Probe slots. A slot is one place in the history - the minute log, the daily summaries, Eve, the limits and the
 // offset are kept per slot, so a probe swapped into a slot carries its history on. Each slot has a role that tells
@@ -315,6 +317,15 @@ struct __attribute__((packed)) RefillRecord {
   bool isFull() const { return full != 0; }
   uint8_t before() const { return reserved & 7; }
 };
+
+// A slot showing another one's history before a change (handOn, v35).
+struct __attribute__((packed)) Takeover {
+  uint8_t  to, from;      // slots; to == from = an unused entry
+  uint32_t at;            // Unix time of the change
+};
+constexpr size_t  TAKEOVER_MAX      = 4;
+constexpr int16_t TAKEOVER_DISAGREE = 1000;   // degrees x 100
+Takeover takeovers[TAKEOVER_MAX] = {};
 
 // An hour of the boiler controller's work, worked out from its log (countWork) and kept for years: the charts
 // beyond the log's reach, the day summaries and the coal counted from the feeder.
@@ -979,7 +990,7 @@ void registerBadReading(size_t i) {
   techLog.printf("%s: no valid reading\n", slots[i].name);
   if (s.badReadings < 255) s.badReadings++;
   if (s.errors < 65535) s.errors++;
-  if (s.badReadings >= FAULT_AFTER && !s.faulty) {
+  if (s.badReadings >= (isGeco(slots[i].address) ? GECO_FAULT_AFTER : FAULT_AFTER) && !s.faulty) {
     s.faulty = true;
     logEvent(EV_FAULT, i, NO_VALUE);
     saveAlerts();
@@ -2310,6 +2321,8 @@ void handleNow() {
     j += ",\"fault\":";   j += s.faulty ? "true" : "false";
     j += ",\"water\":";   j += isWater(i) ? "true" : "false";
     j += ",\"offset\":";  j += jsonNumber(settings.offset[i], 1);
+    for (const Takeover& h : takeovers)          // [slot, time]: the history before that time shown from that slot
+      if (takeoverUsed(h) && h.to == i) { j += ",\"took\":["; j += h.from; j += ','; j += h.at; j += ']'; }
     j += '}';
   }
   j += ']';
@@ -2417,8 +2430,30 @@ struct ChunkWriter {
   }
 };
 
+// History handed on (v35): a slot given a furnace role in place of a probe switched off (the controller's boiler for
+// the "Piec" probe, 12.11) shows that probe's history as its own before the change - where it has nothing of its own,
+// or where its own is more than TAKEOVER_DISAGREE off (the controller's 30 C while its bus came and went at a refill,
+// 11.11 19:27) - and the old slot shows nothing from before it, so a probe put into it later starts clean. Only how
+// /api/series, /api/csv and /api/daily show the history: the logs keep what was measured. Set by h<i> in /api/slots,
+// dropped when the slot that took over gets another probe or the history is cleared (Takeover, up with the records).
+bool takeoverUsed(const Takeover& h) { return h.to != h.from && h.to < SENSOR_COUNT && h.from < SENSOR_COUNT; }
+
+void loadTakeovers() {
+  if (prefs.getBytes("takeover", takeovers, sizeof(takeovers)) != sizeof(takeovers)) memset(takeovers, 0, sizeof(takeovers));
+}
+
+// One moment's values (a minute's readings, or a day's min, avg or max) as the history shows them.
+void handOn(uint32_t t, int16_t* v) {
+  for (const Takeover& h : takeovers) {
+    if (!takeoverUsed(h) || t >= h.at) continue;
+    int16_t own = v[h.to], old = v[h.from];
+    if (old != NO_VALUE && (own == NO_VALUE || abs(own - old) > TAKEOVER_DISAGREE)) v[h.to] = old;
+    v[h.from] = NO_VALUE;
+  }
+}
+
 // Walks the minute log in buckets of `step` seconds and calls f(bucketStart, count, min, sum, max) per bucket
-// that has any reading; values are degrees x 100.
+// that has any reading; values are degrees x 100, the history handed on (handOn).
 template <typename F> void forEachBucket(uint32_t from, uint32_t to, uint32_t step, F f) {
   uint32_t bucket = UINT32_MAX;
   int32_t sum[SENSOR_COUNT];
@@ -2439,8 +2474,11 @@ template <typename F> void forEachBucket(uint32_t from, uint32_t to, uint32_t st
       reset();
       bucket = b;
     }
+    int16_t shown[SENSOR_COUNT];
+    for (size_t i = 0; i < SENSOR_COUNT; i++) shown[i] = r.v[i];
+    handOn(m * 60, shown);
     for (size_t i = 0; i < SENSOR_COUNT; i++) {
-      int16_t v = r.v[i];
+      int16_t v = shown[i];
       if (v == NO_VALUE) continue;
       sum[i] += v;
       mn[i] = min(mn[i], v);
@@ -2558,11 +2596,21 @@ void handleDiag() {
   server.send(200, "text/plain; charset=utf-8", r);
 }
 
-// GET since. Binary DayRecords, oldest first.
+// GET since. Binary DayRecords, oldest first, the history handed on (handOn).
 void handleDaily() {
   ChunkWriter w;
   w.begin("application/octet-stream");
-  daily.forEach(argOr("since", 0), [&](const DayRecord& d) { w.put(&d, sizeof(d)); });
+  daily.forEach(argOr("since", 0), [&](const DayRecord& d) {
+    DayRecord x = d;
+    for (size_t k = 0; k < 3; k++) {             // min, avg, max lie one after another; copied, as x is packed
+      int16_t v[SENSOR_COUNT];
+      uint8_t* field = (uint8_t*)&x + offsetof(DayRecord, min) + k * sizeof(v);
+      memcpy(v, field, sizeof(v));
+      handOn(x.time, v);
+      memcpy(field, v, sizeof(v));
+    }
+    w.put(&x, sizeof(x));
+  });
   w.end();
 }
 
@@ -2875,10 +2923,32 @@ void handleSlots() {
       if (next[i].role != ROLE_OTHER && next[i].role == next[k].role && next[i].on && next[k].on)
         return server.send(400, "text/plain", String("role twice: ") + ROLE_KEYS[next[i].role]);
     }
+  // h<i> = the slot whose history slot i takes over (handOn): one switched off or emptied in this save. A slot that
+  // gets another probe drops what it took over; the others keep theirs (the web app sends no h).
+  Takeover nextTk[TAKEOVER_MAX];
+  memcpy(nextTk, takeovers, sizeof(nextTk));
+  for (auto& h : nextTk)
+    if (takeoverUsed(h) && memcmp(next[h.to].address, slots[h.to].address, 8) != 0) h = {};
+  for (size_t i = 0; i < SENSOR_COUNT; i++) {
+    String a = server.arg("h" + String(i));
+    if (a.isEmpty()) continue;
+    long from = a.toInt();
+    time_t at = time(nullptr);
+    if (from < 0 || from >= (long)SENSOR_COUNT || from == (long)i || !next[i].on || isUnset(next[i].address) ||
+        next[from].on || !clockSet(at))
+      return server.send(400, "text/plain", "bad history takeover in slot " + String(i + 1));
+    Takeover* h = nullptr;
+    for (auto& x : nextTk) if (!h && takeoverUsed(x) && x.to == i && x.from == from) h = &x;
+    for (auto& x : nextTk) if (!h && !takeoverUsed(x)) h = &x;
+    if (!h) return server.send(400, "text/plain", "no room for another history takeover");
+    *h = {(uint8_t)i, (uint8_t)from, (uint32_t)at};
+  }
   // The running slots stay as they are until the restart - the loop reads with them meanwhile.
   for (size_t i = 0; i < SENSOR_COUNT; i++)
     if (memcmp(next[i].address, slots[i].address, 8) != 0) forgetSlot(i, isUnset(next[i].address));
   prefs.putBytes("slots", next, sizeof(next));
+  prefs.putBytes("takeover", nextTk, sizeof(nextTk));
+  memcpy(takeovers, nextTk, sizeof(takeovers));
   techLog.println("Probe slots changed - restarting");
   server.send(200, "application/json", "{\"restart\":true}");
   restartAtMs = millis() + 1500;
@@ -3023,6 +3093,7 @@ void handleUpdate() {
 void handleClearHistory() {
   server.send(200, "text/plain", "history cleared, restarting");
   prefs.putBool("cleared", true);
+  prefs.remove("takeover");
   techLog.println("History cleared from the web app - restarting");
   delay(300);
   minutes.clear();
@@ -3256,11 +3327,12 @@ void setup() {
   // use and ash count (limits and settings stay).
   bool wipe = prefs.getBool("wipe", false);
   if (wipe) {
-    for (const char* key : {"alerts", "coalK", "coalN", "feedK", "feedN", "strkKg", "strkN", "gU1", "gU2", "gAft", "gScan", "gwCuts", "ashAt", "relayKey", "supKey", "supUntil"}) prefs.remove(key);   // old phones out
+    for (const char* key : {"alerts", "coalK", "coalN", "feedK", "feedN", "strkKg", "strkN", "gU1", "gU2", "gAft", "gScan", "gwCuts", "ashAt", "relayKey", "supKey", "supUntil", "takeover"}) prefs.remove(key);   // old phones out
     prefs.putBool("cleared", true);
   }
   loadLimits();
   loadSettings();
+  loadTakeovers();
   restoreAlerts();
   setupHistory(wipe);
   closeOldCuts();

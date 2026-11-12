@@ -27,6 +27,9 @@ public:
   enum Output : uint8_t { FAN = 0x40, FEEDER = 0x20, CO_PUMP = 0x02, DHW_PUMP = 0x08 };
   static constexpr uint8_t PISTON_AWAY = 0x40;               // in flags
   static constexpr uint32_t QUIET_MS  = 5000;                 // no valid frame this long = the controller is gone
+  // Its temperatures count only after this long of frames without a silence: while the bus came and went at a refill
+  // (11.11 19:21-19:40) the boiler read 30 C for three minutes at 64.
+  static constexpr uint32_t SETTLE_MS = 2 * 60 * 1000;
 
   struct __attribute__((packed)) Event {
     uint32_t time;       // Unix time
@@ -46,9 +49,10 @@ public:
     xTaskCreatePinnedToCore(task, "geco", 4096, this, 1, nullptr, 0);
   }
 
-  // A controller temperature (1 boiler, 2 feeder, 3 hot water), NAN without a recent frame or without the sensor.
+  // A controller temperature (1 boiler, 2 feeder, 3 hot water), NAN without a recent frame, without the sensor or
+  // before the bus has been steady for SETTLE_MS.
   float temp(uint8_t channel) const {
-    if (channel < 1 || channel > 3 || !fresh()) return NAN;
+    if (channel < 1 || channel > 3 || !fresh() || millis() - steadySinceMs < SETTLE_MS) return NAN;
     portENTER_CRITICAL(&mux);
     uint8_t v = temps[channel - 1];
     portEXIT_CRITICAL(&mux);
@@ -103,6 +107,7 @@ private:
   Event    current = {};
   uint8_t  temps[3] = {0xFA, 0xFA, 0xFA};
   volatile uint32_t lastFrameMs = 0;
+  volatile uint32_t steadySinceMs = 0;   // the first frame after a silence (or the first of all)
   volatile uint32_t good = 0, bad = 0, bytes = 0;
   uint8_t  piece[24];
   uint8_t  have = 0;
@@ -219,7 +224,9 @@ private:
       return;
     }
     good++;
-    lastFrameMs = millis();
+    uint32_t t = millis();
+    if (!lastFrameMs || t - lastFrameMs >= QUIET_MS) steadySinceMs = t;
+    lastFrameMs = t;
     if (f[0] == 0x40) {
       portENTER_CRITICAL(&mux);
       memcpy(temps, f + 1, 3);
